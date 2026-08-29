@@ -1,0 +1,298 @@
+import { Clock, RefreshCw, Ticket, Users } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+
+import FileUpload from '../components/FileUpload';
+import AppHeader from '../components/ui/AppHeader';
+import Button from '../components/ui/Button';
+import Card from '../components/ui/Card';
+import InfoBanner from '../components/ui/InfoBanner';
+import StatTile from '../components/ui/StatTile';
+import StatusPill from '../components/ui/StatusPill';
+import VisitDetails from '../components/VisitDetails';
+import { computeNowServing } from '../lib/queue';
+import { supabase } from '../lib/supabaseClient';
+import { estimateSlotMinutes } from '../lib/time';
+import type { AppointmentStatus, DoctorAvailability, Prescription, QueueStatusRow, Visit } from '../lib/types';
+
+interface BookingDetail {
+  id: string;
+  member_id: string;
+  date: string;
+  slot_time: string;
+  status: AppointmentStatus;
+  token_no: number | null;
+  doctor_id: string;
+  doctors: { name: string; specialty: string | null } | null;
+  clinics: { name: string } | null;
+  family_members: { name: string } | null;
+}
+
+const STATUS_LABEL: Record<AppointmentStatus, string> = {
+  pending: 'Pending clinic approval',
+  accepted: 'You are in queue',
+  rejected: 'Rejected by clinic',
+  cancelled: 'Cancelled',
+  in_progress: 'You are being seen now',
+  done: 'Visit complete',
+  no_show: 'Marked as no-show',
+};
+
+const STATUS_TONE: Record<AppointmentStatus, 'live' | 'warning' | 'info' | 'neutral'> = {
+  pending: 'warning',
+  accepted: 'live',
+  in_progress: 'live',
+  rejected: 'neutral',
+  cancelled: 'neutral',
+  done: 'info',
+  no_show: 'neutral',
+};
+
+const CANCEL_WINDOW_HOURS = 2;
+
+export default function BookingStatus() {
+  const { appointmentId } = useParams<{ appointmentId: string }>();
+  const navigate = useNavigate();
+  const [booking, setBooking] = useState<BookingDetail | null>(null);
+  const [nowServing, setNowServing] = useState<number | null>(null);
+  const [slotMinutes, setSlotMinutes] = useState(15);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [visit, setVisit] = useState<(Visit & { prescriptions: Prescription[] }) | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const alerted = useRef({ thirty: false, next: false });
+
+  const loadBooking = async () => {
+    const { data } = await supabase
+      .from('appointments')
+      .select('*, doctors(name, specialty), clinics(name), family_members(name)')
+      .eq('id', appointmentId)
+      .single();
+    setBooking(data as BookingDetail | null);
+    setLoading(false);
+  };
+
+  const loadVisit = async () => {
+    const { data } = await supabase
+      .from('visits')
+      .select('*, prescriptions(*)')
+      .eq('appointment_id', appointmentId)
+      .maybeSingle();
+    setVisit(data as (Visit & { prescriptions: Prescription[] }) | null);
+  };
+
+  const loadQueue = async (doctorId: string, date: string) => {
+    const { data } = await supabase.rpc('get_queue_status', { p_doctor_id: doctorId, p_date: date });
+    setNowServing(computeNowServing((data ?? []) as QueueStatusRow[]));
+  };
+
+  useEffect(() => {
+    if (!appointmentId) return;
+    loadBooking();
+    loadVisit();
+  }, [appointmentId]);
+
+  // Estimate minutes-per-token from the doctor's working hours, so the
+  // "~30 minutes away" alert and the wait estimate have something to base
+  // themselves on.
+  useEffect(() => {
+    if (!booking) return;
+    const weekday = new Date(booking.date + 'T00:00:00').getDay();
+    supabase
+      .from('doctor_availability')
+      .select('*')
+      .eq('doctor_id', booking.doctor_id)
+      .eq('weekday', weekday)
+      .then(({ data }) => setSlotMinutes(estimateSlotMinutes((data ?? []) as DoctorAvailability[])));
+  }, [booking?.doctor_id, booking?.date]);
+
+  useEffect(() => {
+    if (!booking || !['accepted', 'in_progress', 'done'].includes(booking.status)) return;
+
+    let cancelled = false;
+    loadQueue(booking.doctor_id, booking.date);
+
+    supabase.realtime.setAuth();
+    const channel = supabase
+      .channel(`queue:${booking.doctor_id}:${booking.date}`)
+      .on('broadcast', { event: 'UPDATE' }, () => {
+        if (!cancelled) {
+          loadQueue(booking.doctor_id, booking.date);
+          loadVisit();
+        }
+      })
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking?.status, booking?.doctor_id, booking?.date]);
+
+  // Fire the two in-app reminders once each, when their condition is first met.
+  useEffect(() => {
+    if (!booking || booking.token_no == null || nowServing == null) return;
+    const tokensAway = booking.token_no - nowServing;
+    if (tokensAway < 0) return;
+
+    const raiseAlert = async (message: string) => {
+      setAlertMessage(message);
+      await supabase.from('notifications').insert({
+        user_id: (await supabase.auth.getUser()).data.user?.id,
+        type: 'queue_reminder',
+        message,
+        appointment_id: booking.id,
+      });
+    };
+
+    if (tokensAway === 1 && !alerted.current.next) {
+      alerted.current.next = true;
+      raiseAlert("You're next! Please head to the clinic now.");
+    } else if (tokensAway * slotMinutes <= 30 && !alerted.current.thirty) {
+      alerted.current.thirty = true;
+      raiseAlert('Your turn is about 30 minutes away.');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nowServing, booking?.token_no, slotMinutes]);
+
+  if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
+  if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
+
+  const confirmed = ['accepted', 'in_progress', 'done'].includes(booking.status);
+  const tokensAway = confirmed && booking.token_no != null && nowServing != null ? booking.token_no - nowServing : null;
+  const estimatedWaitMinutes = tokensAway != null && tokensAway > 0 ? Math.round(tokensAway * slotMinutes) : 0;
+  const queueStatusLabel = tokensAway == null ? 'Waiting' : tokensAway <= 0 ? 'Your turn' : 'Moving';
+
+  const bookingMoment = new Date(`${booking.date}T${booking.slot_time}`);
+  const canModify =
+    ['pending', 'accepted'].includes(booking.status) &&
+    bookingMoment.getTime() - Date.now() > CANCEL_WINDOW_HOURS * 60 * 60 * 1000;
+
+  const cancelBooking = async () => {
+    setActionError(null);
+    const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', booking.id);
+    if (error) {
+      setActionError(error.message);
+      return;
+    }
+    loadBooking();
+  };
+
+  const rescheduleBooking = async () => {
+    setActionError(null);
+    const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', booking.id);
+    if (error) {
+      setActionError(error.message);
+      return;
+    }
+    navigate(`/doctors/${booking.doctor_id}`);
+  };
+
+  return (
+    <div>
+      <AppHeader
+        title="SanjeevniOS"
+        subtitle={booking.clinics?.name}
+        pill={confirmed ? <StatusPill label="Live Queue" tone="live" /> : undefined}
+        bellDot={!!alertMessage}
+      />
+
+      <div className="mx-auto max-w-md px-4 py-6">
+        <p className="text-xs uppercase tracking-wide text-slate-400">Booking ID</p>
+        <p className="font-mono text-sm text-slate-600">{booking.id}</p>
+
+        {alertMessage && (
+          <div className="mt-3 rounded-xl bg-amber-100 p-3 text-sm font-medium text-amber-800">{alertMessage}</div>
+        )}
+
+        {confirmed ? (
+          <Card className="relative mt-4 overflow-hidden !rounded-3xl bg-gradient-to-b from-blue-50 to-white text-center">
+            <span className="absolute right-4 top-4 h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            <span className="inline-block rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-amber-300">
+              Your Token Number
+            </span>
+            <p className="mt-3 text-6xl font-extrabold text-blue-700">{booking.token_no}</p>
+            <p className="mt-1 text-sm text-slate-600">{STATUS_LABEL[booking.status]}</p>
+            <span className="mt-3 inline-block rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700">
+              {booking.doctors?.name}
+            </span>
+          </Card>
+        ) : (
+          <Card className="mt-4 text-center">
+            <StatusPill label={STATUS_LABEL[booking.status]} tone={STATUS_TONE[booking.status]} />
+            <p className="mt-3 text-sm text-slate-500">
+              {booking.doctors?.name} · {booking.clinics?.name}
+            </p>
+          </Card>
+        )}
+
+        <Card className="mt-3">
+          <p className="text-sm text-slate-500">For: {booking.family_members?.name}</p>
+          <p className="text-sm text-slate-500">
+            {booking.date} at {booking.slot_time?.slice(0, 5)}
+          </p>
+          {booking.status === 'rejected' && (
+            <p className="mt-2 text-sm text-amber-600">
+              If you paid online, your payment hold has been released automatically.
+            </p>
+          )}
+        </Card>
+
+        {confirmed && (
+          <>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <StatTile icon={Ticket} label="Current token" value={nowServing ?? '—'} tone="blue" />
+              <StatTile icon={Users} label="Patients before you" value={tokensAway != null ? Math.max(tokensAway, 0) : '—'} tone="amber" />
+              <StatTile icon={Clock} label="Estimated wait" value={`~${estimatedWaitMinutes}m`} tone="slate" />
+              <StatTile icon={RefreshCw} label="Queue status" value={queueStatusLabel} tone="emerald" />
+            </div>
+
+            <div className="mt-3 flex items-center justify-between px-2">
+              <div className="text-center">
+                <div className="mx-auto h-3 w-3 rounded-full bg-blue-600" />
+                <p className="mt-1 text-xs font-semibold text-blue-700">{nowServing ?? '—'}</p>
+                <p className="text-[11px] text-slate-400">Now serving</p>
+              </div>
+              <div className="h-px flex-1 bg-slate-200" />
+              <div className="text-center">
+                <div className="mx-auto h-3 w-3 rounded-full border-2 border-blue-300 bg-white" />
+                <p className="mt-1 text-xs font-semibold text-slate-500">Up next</p>
+              </div>
+              <div className="h-px flex-1 bg-slate-200" />
+              <div className="text-center">
+                <div className="mx-auto h-3 w-3 rounded-full border-2 border-emerald-500 bg-white" />
+                <p className="mt-1 text-xs font-semibold text-emerald-700">{booking.token_no}</p>
+                <p className="text-[11px] text-slate-400">Your turn</p>
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <InfoBanner>We'll alert you here when your turn is near.</InfoBanner>
+            </div>
+          </>
+        )}
+
+        {canModify && (
+          <div className="mt-4">
+            {actionError && <p className="mb-2 text-sm text-red-600">{actionError}</p>}
+            <div className="flex gap-2">
+              <Button onClick={rescheduleBooking}>Reschedule</Button>
+              <Button variant="danger" onClick={cancelBooking}>
+                Cancel booking
+              </Button>
+            </div>
+          </div>
+        )}
+        {['pending', 'accepted'].includes(booking.status) && !canModify && (
+          <p className="mt-3 text-xs text-slate-400">
+            Too close to the appointment time to cancel or reschedule (within {CANCEL_WINDOW_HOURS} hours).
+          </p>
+        )}
+
+        <VisitDetails visit={visit} prescription={visit?.prescriptions[0] ?? null} />
+        <FileUpload appointmentId={booking.id} memberId={booking.member_id} />
+      </div>
+    </div>
+  );
+}
