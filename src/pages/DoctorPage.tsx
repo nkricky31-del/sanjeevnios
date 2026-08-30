@@ -6,7 +6,7 @@ import BookingForm from '../components/BookingForm';
 import Card from '../components/ui/Card';
 import { todayISO } from '../lib/date';
 import { supabase } from '../lib/supabaseClient';
-import { formatTimeLabel, minutesToTime, timeToMinutes } from '../lib/time';
+import { computeSlots, formatTimeLabel } from '../lib/time';
 import type { DoctorAvailability } from '../lib/types';
 
 interface DoctorWithClinic {
@@ -16,21 +16,6 @@ interface DoctorWithClinic {
   consultation_fee: number;
   clinic_id: string;
   clinics: { name: string; address: string | null } | null;
-}
-
-function computeSlots(windows: DoctorAvailability[]): string[] {
-  const slots: string[] = [];
-  for (const w of windows) {
-    const start = timeToMinutes(w.start_time);
-    const end = timeToMinutes(w.end_time);
-    const count = w.max_patients_per_day;
-    if (count <= 0 || end <= start) continue;
-    const step = (end - start) / count;
-    for (let i = 0; i < count; i++) {
-      slots.push(minutesToTime(Math.round(start + i * step)));
-    }
-  }
-  return slots.sort();
 }
 
 export default function DoctorPage() {

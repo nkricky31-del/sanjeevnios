@@ -21,6 +21,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const loadProfile = async (userId: string) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     setProfile(data ?? null);
+
+    // Best-effort, fire-and-forget: pulls any walk-in visit history filed
+    // under this same (now-verified) phone number onto this account. Cheap
+    // no-op on every login after the first successful claim.
+    if (data?.role === 'patient') {
+      supabase.rpc('claim_walk_in_records').then(
+        () => {},
+        () => {}
+      );
+    }
   };
 
   useEffect(() => {

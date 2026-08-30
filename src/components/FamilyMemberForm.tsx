@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 
+import { isMinorDob } from '../lib/date';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyRelation } from '../lib/types';
 
@@ -7,17 +8,6 @@ interface Props {
   accountId: string;
   onAdded: () => void;
   onCancel: () => void;
-}
-
-function isMinor(dob: string): boolean {
-  const birth = new Date(dob);
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-    age--;
-  }
-  return age < 18;
 }
 
 export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props) {
@@ -28,7 +18,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const minor = dob ? isMinor(dob) : false;
+  const minor = dob ? isMinorDob(dob) : false;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();

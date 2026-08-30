@@ -100,10 +100,10 @@ export default function Profile() {
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-slate-900">{m.name}</p>
                 <span className="text-xs font-medium text-slate-500">
-                  {RELATION_LABEL[m.relation] ?? m.relation}
+                  {(m.relation && RELATION_LABEL[m.relation]) ?? m.relation ?? '—'}
                 </span>
               </div>
-              <p className="text-sm text-slate-500">DOB: {m.dob}</p>
+              <p className="text-sm text-slate-500">DOB: {m.dob ?? '—'}</p>
             </Card>
           ))}
         </div>

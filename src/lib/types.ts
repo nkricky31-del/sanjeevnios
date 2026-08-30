@@ -5,23 +5,51 @@ export interface Profile {
   role: Role;
   name: string | null;
   phone: string | null;
+  suspended: boolean;
   created_at: string;
 }
 
 export type FamilyRelation = 'self' | 'spouse' | 'child' | 'parent';
+export type Gender = 'male' | 'female' | 'other';
 
 export interface FamilyMember {
   id: string;
   account_id: string;
   name: string;
-  relation: FamilyRelation;
-  dob: string; // ISO date, e.g. "1990-05-12"
+  relation: FamilyRelation | null;
+  dob: string | null; // ISO date, e.g. "1990-05-12"
+  phone: string | null;
+  gender: Gender | null;
   guardian_consent: boolean;
   created_at: string;
 }
 
 export type ClinicStatus = 'pending' | 'approved' | 'rejected';
 export type DoctorStatus = 'pending' | 'approved' | 'rejected';
+export type SubscriptionTier = 'free' | 'pro' | 'premium';
+
+export interface Subscription {
+  id: string;
+  clinic_id: string;
+  tier: SubscriptionTier;
+  bookings_used: number;
+  period_start: string | null;
+  period_end: string | null;
+}
+
+export interface Clinic {
+  id: string;
+  owner_id: string;
+  name: string;
+  reg_no: string | null;
+  address: string | null;
+  status: ClinicStatus;
+  reject_reason: string | null;
+  registration_doc_path: string | null;
+  subscription_tier: string;
+  is_active: boolean;
+  created_at: string;
+}
 
 export type AppointmentStatus =
   | 'pending'
@@ -34,6 +62,25 @@ export type AppointmentStatus =
 
 export type PaymentMethod = 'online' | 'cod';
 export type PaymentRowStatus = 'pending' | 'hold' | 'captured' | 'refunded';
+export type PayoutStatus = 'pending' | 'paid';
+
+export interface Payment {
+  id: string;
+  appointment_id: string;
+  amount: number;
+  method: PaymentMethod;
+  status: PaymentRowStatus;
+  payout_status: PayoutStatus;
+  created_at: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  actor: string | null;
+  action: string;
+  target: string | null;
+  at: string;
+}
 
 // Result row from the search_doctors() RPC - a flattened doctor+clinic pair.
 export interface DoctorSearchResult {
@@ -52,6 +99,8 @@ export interface Doctor {
   reg_no: string | null;
   specialty: string | null;
   status: DoctorStatus;
+  reject_reason: string | null;
+  registration_doc_path: string | null;
   consultation_fee: number;
   created_at: string;
 }
@@ -98,6 +147,7 @@ export interface Visit {
   notes: string | null;
   diagnosis: string | null;
   follow_up_date: string | null;
+  no_prescription: boolean;
   created_at: string;
 }
 

@@ -797,3 +797,361 @@ create policy "appointment_files_insert" on storage.objects for insert
         and (public.is_own_member(a.member_id) or public.is_own_clinic(a.clinic_id) or public.is_admin())
     )
   );
+
+-- ============================================================================
+-- 7. CLINIC SELF-SIGNUP
+--    A logged-in patient can turn their own account into a clinic account by
+--    registering a clinic. The clinic row starts 'pending' and every doctor
+--    added under it starts 'pending' (see the doctors table default above) -
+--    the existing doctors_select/availability_select policies from section 5
+--    already keep both invisible to patient search until an admin approves
+--    them, so nothing there needs to change.
+-- ============================================================================
+
+-- Previously ANY role change required an existing admin. That's still true
+-- for anything involving 'admin', but a patient registering a clinic (see
+-- register_clinic() below) needs to flip their own role from 'patient' to
+-- 'clinic'. That specific transition is safe to self-serve: it doesn't grant
+-- any extra visibility by itself - the new clinic is still 'pending' and
+-- hidden from patient search/booking until an admin approves it.
+create or replace function public.prevent_role_escalation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.role <> old.role
+     and public.current_role() <> 'admin'
+     and not (old.role = 'patient' and new.role = 'clinic')
+  then
+    raise exception 'Only an admin can change a role.';
+  end if;
+  return new;
+end;
+$$;
+
+-- Registers a clinic for the calling user and flips their profile to the
+-- 'clinic' role in one atomic call, so the UI never has to juggle a
+-- half-finished signup (role flipped but no clinic row, or vice versa).
+-- Deliberately NOT security definer: it runs as the calling user, so the
+-- normal clinics_insert / profiles_update RLS policies (and the relaxed
+-- prevent_role_escalation trigger above) apply exactly as if the client had
+-- made both calls itself - this function only makes them one transaction.
+create or replace function public.register_clinic(p_name text, p_reg_no text, p_address text)
+returns clinics
+language plpgsql
+as $$
+declare
+  new_clinic clinics;
+begin
+  if auth.uid() is null then
+    raise exception 'You must be signed in to register a clinic.';
+  end if;
+
+  if trim(coalesce(p_name, '')) = '' then
+    raise exception 'Clinic name is required.';
+  end if;
+
+  if exists (select 1 from clinics where owner_id = auth.uid()) then
+    raise exception 'This account already has a registered clinic.';
+  end if;
+
+  update profiles set role = 'clinic' where id = auth.uid() and role = 'patient';
+
+  insert into clinics (owner_id, name, reg_no, address, status, is_active)
+  values (
+    auth.uid(),
+    trim(p_name),
+    nullif(trim(coalesce(p_reg_no, '')), ''),
+    nullif(trim(coalesce(p_address, '')), ''),
+    'pending',
+    true
+  )
+  returning * into new_clinic;
+
+  return new_clinic;
+end;
+$$;
+
+-- ============================================================================
+-- 8. CLINIC DAILY CONSOLE: inbox, live queue, reminders, walk-ins
+-- ============================================================================
+
+-- Rejecting an appointment now records why (shown to the patient), and each
+-- appointment tracks how many "your turn is coming up" reminders the clinic
+-- has sent it. The check constraint caps it at 5 at the DB level, so the
+-- limit holds even if a client bug tries to send more.
+alter table appointments add column if not exists reject_reason text;
+alter table appointments add column if not exists reminder_count int not null default 0;
+alter table appointments drop constraint if exists appointments_reminder_count_check;
+alter table appointments add constraint appointments_reminder_count_check
+  check (reminder_count between 0 and 5);
+
+-- The live-queue broadcast (section 5) only fired on a status or token_no
+-- change. Sending a reminder touches neither, so a patient sitting on their
+-- booking status page wouldn't see it arrive live - widen the trigger to
+-- also fire when reminder_count changes.
+drop trigger if exists on_appointment_queue_broadcast on appointments;
+create trigger on_appointment_queue_broadcast
+  after update on appointments
+  for each row
+  when (
+    old.status is distinct from new.status
+    or old.token_no is distinct from new.token_no
+    or old.reminder_count is distinct from new.reminder_count
+  )
+  execute function public.broadcast_appointment_queue_change();
+
+-- A clinic needs to notify the PATIENT (not itself) on accept, on reject,
+-- and when sending a reminder - previously notifications_insert only let you
+-- write your own row. Widened to also allow a clinic to insert a
+-- notification tied to an appointment at its own clinic - same
+-- appointment-ownership chain visits/prescriptions/payments already use.
+drop policy if exists "notifications_insert" on notifications;
+create policy "notifications_insert" on notifications for insert
+  with check (
+    public.is_admin()
+    or user_id = auth.uid()
+    or (
+      appointment_id is not null
+      and exists (
+        select 1 from appointments a
+        where a.id = notifications.appointment_id and public.is_own_clinic(a.clinic_id)
+      )
+    )
+  );
+
+-- ============================================================================
+-- 9. WALK-IN REGISTRATION: contact + demographics, and claiming that
+--    history later once the same phone number does a real signup
+-- ============================================================================
+
+-- Walk-ins are registered as a family_members row owned by the CLINIC's own
+-- account (see WalkInForm.tsx) - these extra fields let that registration
+-- capture the same basics a real patient signup would.
+alter table family_members add column if not exists phone text;
+alter table family_members add column if not exists gender text;
+alter table family_members drop constraint if exists family_members_gender_check;
+alter table family_members add constraint family_members_gender_check
+  check (gender is null or gender in ('male', 'female', 'other'));
+
+-- When a walk-in's phone number later signs up for real (the normal OTP
+-- login), this re-parents any family_members rows a CLINIC created under
+-- that same phone number onto the new patient's own account - which is
+-- enough to bring their whole visit history into view, since appointments
+-- are keyed off family_members.id, not account_id, so nothing else needs to
+-- move. Called automatically after every login (see AuthContext.tsx).
+--
+-- security definer, and reads the phone from auth.users itself rather than
+-- any caller-supplied value - so this can only ever claim records filed
+-- under a phone number the caller has actually verified via OTP, never one
+-- they merely type in.
+create or replace function public.claim_walk_in_records()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  my_phone text;
+begin
+  select phone into my_phone from auth.users where id = auth.uid();
+  if my_phone is null then
+    return;
+  end if;
+
+  update family_members
+  set account_id = auth.uid()
+  where phone = my_phone
+    and account_id <> auth.uid()
+    and account_id in (select owner_id from clinics);
+end;
+$$;
+
+-- ============================================================================
+-- 10. CONSULTATION: e-prescription completeness, full-day cancellation
+-- ============================================================================
+
+-- A visit isn't "done" until it either has an attached e-prescription or the
+-- doctor has explicitly said none is needed - this flag is that explicit
+-- opt-out (see VisitScreen.tsx / ClinicQueue.tsx's move-to-done gate).
+alter table visits add column if not exists no_prescription boolean not null default false;
+
+-- ============================================================================
+-- 11. ADMIN VERIFICATION CONSOLE
+-- ============================================================================
+
+-- Reason shown to the clinic/doctor when rejected - same idea as
+-- appointments.reject_reason above.
+alter table clinics add column if not exists reject_reason text;
+alter table doctors add column if not exists reject_reason text;
+
+-- Optional registration document (certificate, license, etc.) uploaded at
+-- signup, for the admin to review before approving. Nullable - not a hard
+-- requirement in v0, a clinic/doctor can still be approved without one.
+alter table clinics add column if not exists registration_doc_path text;
+alter table doctors add column if not exists registration_doc_path text;
+
+-- Private bucket for those documents.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'verification-docs', 'verification-docs', false, 10485760,
+  array['image/jpeg', 'image/png', 'application/pdf']
+)
+on conflict (id) do update set
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- True if the given doctor belongs to a clinic the logged-in clinic user
+-- owns. security definer, same reasoning as is_own_clinic/is_own_member
+-- above: this is used INSIDE the storage policies below, and evaluating a
+-- plain (non-security-definer) subquery against doctors from inside another
+-- table's RLS policy is exactly the kind of thing that pattern exists to
+-- avoid - so this gets the same treatment rather than an inline EXISTS.
+create or replace function public.owns_doctor(target_doctor_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from doctors d
+    join clinics c on c.id = d.clinic_id
+    where d.id = target_doctor_id and c.owner_id = auth.uid()
+  );
+$$;
+
+-- Uploaded as "clinics/{clinic_id}/{filename}" or "doctors/{doctor_id}/{filename}".
+-- The owning clinic can upload/read its own; admin can read everyone's (to
+-- actually review them before approving).
+drop policy if exists "verification_docs_select" on storage.objects;
+create policy "verification_docs_select" on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'verification-docs'
+    and (
+      public.is_admin()
+      or (
+        (storage.foldername(name))[1] = 'clinics'
+        and public.is_own_clinic(((storage.foldername(name))[2])::uuid)
+      )
+      or (
+        (storage.foldername(name))[1] = 'doctors'
+        and public.owns_doctor(((storage.foldername(name))[2])::uuid)
+      )
+    )
+  );
+
+drop policy if exists "verification_docs_insert" on storage.objects;
+create policy "verification_docs_insert" on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'verification-docs'
+    and (
+      (
+        (storage.foldername(name))[1] = 'clinics'
+        and public.is_own_clinic(((storage.foldername(name))[2])::uuid)
+      )
+      or (
+        (storage.foldername(name))[1] = 'doctors'
+        and public.owns_doctor(((storage.foldername(name))[2])::uuid)
+      )
+    )
+  );
+
+-- ============================================================================
+-- 12. ADMIN: SUBSCRIPTIONS, USAGE LIMITS, ACCESS CONTROL
+-- ============================================================================
+
+-- One subscription row per clinic - guarantees the "get or create" logic in
+-- the trigger below (and the admin console's upsert-by-tier) always targets
+-- exactly one row, never creates a duplicate.
+alter table subscriptions drop constraint if exists subscriptions_clinic_id_unique;
+alter table subscriptions add constraint subscriptions_clinic_id_unique unique (clinic_id);
+
+alter table subscriptions drop constraint if exists subscriptions_tier_check;
+alter table subscriptions add constraint subscriptions_tier_check
+  check (tier in ('free', 'pro', 'premium'));
+
+-- Blocks a new appointment outright if the clinic is inactive, or if it's on
+-- the free tier and already at/over its booking limit for the current
+-- period - applies uniformly to patient bookings AND clinic-entered
+-- walk-ins, since both go through this same appointments table. Lazily
+-- creates a clinic's subscription row (defaulting to free) the first time
+-- it's needed, and lazily rolls the period over once it's expired, so no
+-- scheduled job is required anywhere.
+--
+-- security definer: a plain patient booking an appointment has no RLS
+-- access to read/write `subscriptions` (subscriptions_select/write are
+-- admin+own-clinic only) - this needs to touch it regardless of who's
+-- making the booking, so it runs with the function owner's privileges,
+-- bypassing that RLS entirely (same reasoning as is_own_clinic() etc above).
+--
+-- The free-tier limit (50) is display-mirrored in src/lib/subscription.ts
+-- for the admin/clinic UI - THIS is what's actually enforced.
+create or replace function public.enforce_clinic_booking_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  clinic_is_active boolean;
+  sub subscriptions;
+  limit_val int;
+begin
+  select is_active into clinic_is_active from clinics where id = new.clinic_id;
+  if clinic_is_active is false then
+    raise exception 'This clinic isn''t currently accepting bookings.';
+  end if;
+
+  select * into sub from subscriptions where clinic_id = new.clinic_id;
+
+  if sub.id is null then
+    insert into subscriptions (clinic_id, tier, bookings_used, period_start, period_end)
+    values (new.clinic_id, 'free', 0, current_date, (current_date + interval '1 month')::date)
+    returning * into sub;
+  elsif sub.period_end is null or sub.period_end < current_date then
+    update subscriptions
+    set bookings_used = 0, period_start = current_date, period_end = (current_date + interval '1 month')::date
+    where id = sub.id
+    returning * into sub;
+  end if;
+
+  limit_val := case sub.tier when 'free' then 50 else null end;
+
+  if limit_val is not null and sub.bookings_used >= limit_val then
+    raise exception 'This clinic has reached its booking limit for this period. Please try again later or contact the clinic.';
+  end if;
+
+  update subscriptions set bookings_used = bookings_used + 1 where id = sub.id;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_appointment_enforce_subscription on appointments;
+create trigger on_appointment_enforce_subscription
+  before insert on appointments
+  for each row
+  execute function public.enforce_clinic_booking_limit();
+
+-- ============================================================================
+-- 13. ADMIN: MONITORING, PAYMENTS OVERSIGHT, ABUSE CONTROL
+-- ============================================================================
+
+-- Suspending a USER (patient or clinic owner) is a narrower, account-level
+-- lock than clinics.is_active (which suspends a CLINIC's ability to take
+-- bookings regardless of who's acting). A suspended account can't create
+-- new appointments - whether they're a patient booking for themselves or a
+-- clinic owner entering a walk-in - since both go through this same insert.
+alter table profiles add column if not exists suspended boolean not null default false;
+
+drop policy if exists "appointments_insert" on appointments;
+create policy "appointments_insert" on appointments for insert
+  with check (
+    not exists (select 1 from profiles where id = auth.uid() and suspended)
+    and (public.is_own_member(member_id) or public.is_own_clinic(clinic_id) or public.is_admin())
+  );

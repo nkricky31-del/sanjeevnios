@@ -3,16 +3,34 @@ import { useState, type FormEvent } from 'react';
 
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
+import { CLINIC_SIGNUP_INTENT_KEY } from '../lib/clinicSignupIntent';
 import { supabase } from '../lib/supabaseClient';
 
 export default function Login() {
   const [stage, setStage] = useState<'phone' | 'otp'>('phone');
+  const [intent, setIntent] = useState<'patient' | 'clinic'>('patient');
   const [digits, setDigits] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const phone = `+91${digits}`;
+
+  // Read by App.tsx right after login: if this account turns out to be a
+  // fresh patient (not already 'clinic'/'admin'), it sends them to the
+  // clinic registration form instead of the normal patient home screen.
+  // Same phone+OTP login either way - this only decides where they land.
+  const chooseClinicSignup = () => {
+    setIntent('clinic');
+    sessionStorage.setItem(CLINIC_SIGNUP_INTENT_KEY, '1');
+    setError(null);
+  };
+
+  const choosePatientLogin = () => {
+    setIntent('patient');
+    sessionStorage.removeItem(CLINIC_SIGNUP_INTENT_KEY);
+    setError(null);
+  };
 
   const sendOtp = async (e: FormEvent) => {
     e.preventDefault();
@@ -55,8 +73,12 @@ export default function Login() {
             <Stethoscope size={20} />
           </div>
           <div>
-            <p className="text-lg font-bold text-slate-900">SanjeevniOS</p>
-            <p className="text-xs text-slate-500">Sign in with your phone number</p>
+            <p className="text-lg font-bold text-slate-900">
+              {intent === 'clinic' ? 'Register your clinic' : 'SanjeevniOS'}
+            </p>
+            <p className="text-xs text-slate-500">
+              {intent === 'clinic' ? 'Sign in with your phone number to get started' : 'Sign in with your phone number'}
+            </p>
           </div>
         </div>
 
@@ -81,6 +103,13 @@ export default function Login() {
             <Button type="submit" disabled={loading} full>
               {loading ? 'Sending...' : 'Send code'}
             </Button>
+            <button
+              type="button"
+              onClick={intent === 'patient' ? chooseClinicSignup : choosePatientLogin}
+              className="block w-full text-center text-sm font-medium text-blue-600"
+            >
+              {intent === 'patient' ? 'Are you a clinic? Register here' : '← Back to patient login'}
+            </button>
           </form>
         ) : (
           <form onSubmit={verifyOtp} className="mt-6 space-y-4">

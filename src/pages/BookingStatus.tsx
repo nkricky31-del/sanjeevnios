@@ -22,11 +22,16 @@ interface BookingDetail {
   slot_time: string;
   status: AppointmentStatus;
   token_no: number | null;
+  reject_reason: string | null;
   doctor_id: string;
   doctors: { name: string; specialty: string | null } | null;
   clinics: { name: string } | null;
   family_members: { name: string } | null;
 }
+
+// Statuses where something can still change - a rejected/cancelled/no_show
+// booking is done, no point keeping a live channel open for it.
+const LIVE_STATUSES: AppointmentStatus[] = ['pending', 'accepted', 'in_progress', 'done'];
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
   pending: 'Pending clinic approval',
@@ -73,12 +78,17 @@ export default function BookingStatus() {
   };
 
   const loadVisit = async () => {
+    // .limit(1) instead of .maybeSingle(): defensive against any duplicate
+    // visit rows left over from before VisitScreen.tsx started reusing the
+    // existing visit instead of inserting a new one each save - maybeSingle
+    // errors outright if more than one row matches.
     const { data } = await supabase
       .from('visits')
       .select('*, prescriptions(*)')
       .eq('appointment_id', appointmentId)
-      .maybeSingle();
-    setVisit(data as (Visit & { prescriptions: Prescription[] }) | null);
+      .order('created_at', { ascending: false })
+      .limit(1);
+    setVisit((data ?? [])[0] as (Visit & { prescriptions: Prescription[] }) | undefined ?? null);
   };
 
   const loadQueue = async (doctorId: string, date: string) => {
@@ -86,10 +96,39 @@ export default function BookingStatus() {
     setNowServing(computeNowServing((data ?? []) as QueueStatusRow[]));
   };
 
+  // Accept/reject/reminder notices all land here with richer text than the
+  // plain status label (token number, reject reason + suggested next slot,
+  // "up soon", "moved to the end of the queue"). Read the newest one for
+  // this booking and surface it - deduped by id so the same notice doesn't
+  // reappear every time an unrelated broadcast on the shared queue channel
+  // fires (that channel carries every patient's updates for this doctor/date,
+  // not just this booking's).
+  const shownNotificationId = useRef<string | null>(null);
+  const checkLatestNotification = async () => {
+    if (!appointmentId) return;
+    const { data: userData } = await supabase.auth.getUser();
+    const uid = userData.user?.id;
+    if (!uid) return;
+    const { data } = await supabase
+      .from('notifications')
+      .select('id, message')
+      .eq('appointment_id', appointmentId)
+      .eq('user_id', uid)
+      .order('at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data && data.id !== shownNotificationId.current) {
+      shownNotificationId.current = data.id;
+      setAlertMessage(data.message);
+    }
+  };
+
   useEffect(() => {
     if (!appointmentId) return;
     loadBooking();
     loadVisit();
+    checkLatestNotification();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appointmentId]);
 
   // Estimate minutes-per-token from the doctor's working hours, so the
@@ -107,7 +146,7 @@ export default function BookingStatus() {
   }, [booking?.doctor_id, booking?.date]);
 
   useEffect(() => {
-    if (!booking || !['accepted', 'in_progress', 'done'].includes(booking.status)) return;
+    if (!booking || !LIVE_STATUSES.includes(booking.status)) return;
 
     let cancelled = false;
     loadQueue(booking.doctor_id, booking.date);
@@ -119,6 +158,8 @@ export default function BookingStatus() {
         if (!cancelled) {
           loadQueue(booking.doctor_id, booking.date);
           loadVisit();
+          loadBooking();
+          checkLatestNotification();
         }
       })
       .subscribe();
@@ -233,9 +274,14 @@ export default function BookingStatus() {
             {booking.date} at {booking.slot_time?.slice(0, 5)}
           </p>
           {booking.status === 'rejected' && (
-            <p className="mt-2 text-sm text-amber-600">
-              If you paid online, your payment hold has been released automatically.
-            </p>
+            <>
+              {booking.reject_reason && (
+                <p className="mt-2 text-sm text-slate-600">Reason: {booking.reject_reason}</p>
+              )}
+              <p className="mt-2 text-sm text-amber-600">
+                If you paid online, your payment hold has been released automatically.
+              </p>
+            </>
           )}
         </Card>
 
