@@ -164,7 +164,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Walk-in patient's name"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -173,7 +173,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         <select
           value={doctorId}
           onChange={(e) => setDoctorId(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         >
           {doctors.map((d) => (
             <option key={d.id} value={d.id}>
@@ -185,7 +185,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
 
       <div>
         <label className="text-sm font-medium text-slate-700">Mobile number (optional)</label>
-        <div className="mt-1 flex items-center rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-blue-500">
+        <div className="mt-1 flex items-center rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-brand-500">
           <span className="pl-3 text-sm text-slate-500">+91</span>
           <input
             type="tel"
@@ -212,7 +212,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
             max={130}
             value={age}
             onChange={(e) => setAge(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
         <div className="flex-1">
@@ -220,7 +220,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
           <select
             value={gender}
             onChange={(e) => setGender(e.target.value as Gender | '')}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="">—</option>
             <option value="male">Male</option>
@@ -248,7 +248,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         <button
           type="submit"
           disabled={saving}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
           {saving ? 'Adding...' : 'Add to queue'}
         </button>

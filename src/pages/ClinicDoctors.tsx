@@ -52,7 +52,7 @@ export default function ClinicDoctors({ clinicId }: Props) {
     <div>
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-slate-900">Doctors</h2>
-        <button onClick={() => setShowAddForm((s) => !s)} className="text-sm font-semibold text-blue-600">
+        <button onClick={() => setShowAddForm((s) => !s)} className="text-sm font-semibold text-brand-600">
           {showAddForm ? 'Cancel' : '+ Add doctor'}
         </button>
       </div>
@@ -78,7 +78,7 @@ export default function ClinicDoctors({ clinicId }: Props) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-semibold text-slate-900">{d.name}</p>
-                {d.specialty && <p className="text-sm text-blue-600">{d.specialty}</p>}
+                {d.specialty && <p className="text-sm text-brand-600">{d.specialty}</p>}
                 <p className="text-xs text-slate-400">
                   Reg. {d.reg_no ?? '—'} · ₹{d.consultation_fee} / visit
                 </p>
@@ -91,7 +91,7 @@ export default function ClinicDoctors({ clinicId }: Props) {
 
             <button
               onClick={() => setExpandedDoctorId((prev) => (prev === d.id ? null : d.id))}
-              className="mt-2 text-sm font-medium text-blue-600"
+              className="mt-2 text-sm font-medium text-brand-600"
             >
               {expandedDoctorId === d.id ? 'Hide availability' : 'Manage availability'}
             </button>

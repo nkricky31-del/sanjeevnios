@@ -248,14 +248,18 @@ export default function BookingStatus() {
         )}
 
         {confirmed ? (
-          <Card className="relative mt-4 overflow-hidden !rounded-3xl bg-gradient-to-b from-blue-50 to-white text-center">
-            <span className="absolute right-4 top-4 h-2.5 w-2.5 rounded-full bg-emerald-500" />
-            <span className="inline-block rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-amber-300">
+          <Card className="relative mt-4 overflow-hidden !rounded-3xl bg-gradient-to-b from-brand-50 via-white to-white text-center">
+            <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Live
+            </span>
+            <span className="inline-block rounded-full bg-coral-100 px-3 py-1 text-xs font-bold text-coral-700">
               Your Token Number
             </span>
-            <p className="mt-3 text-6xl font-extrabold text-blue-700">{booking.token_no}</p>
-            <p className="mt-1 text-sm text-slate-600">{STATUS_LABEL[booking.status]}</p>
-            <span className="mt-3 inline-block rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700">
+            <div className="mx-auto mt-4 flex h-36 w-36 items-center justify-center rounded-full border-[6px] border-brand-500 bg-white shadow-lg shadow-brand-200/60">
+              <p className="text-5xl font-extrabold text-brand-700">{booking.token_no}</p>
+            </div>
+            <p className="mt-3 text-sm font-semibold text-slate-600">{STATUS_LABEL[booking.status]}</p>
+            <span className="mt-2 inline-block rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
               {booking.doctors?.name}
             </span>
           </Card>
@@ -288,7 +292,7 @@ export default function BookingStatus() {
         {confirmed && (
           <>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <StatTile icon={Ticket} label="Current token" value={nowServing ?? '—'} tone="blue" />
+              <StatTile icon={Ticket} label="Current token" value={nowServing ?? '—'} tone="brand" />
               <StatTile icon={Users} label="Patients before you" value={tokensAway != null ? Math.max(tokensAway, 0) : '—'} tone="amber" />
               <StatTile icon={Clock} label="Estimated wait" value={`~${estimatedWaitMinutes}m`} tone="slate" />
               <StatTile icon={RefreshCw} label="Queue status" value={queueStatusLabel} tone="emerald" />
@@ -296,13 +300,13 @@ export default function BookingStatus() {
 
             <div className="mt-3 flex items-center justify-between px-2">
               <div className="text-center">
-                <div className="mx-auto h-3 w-3 rounded-full bg-blue-600" />
-                <p className="mt-1 text-xs font-semibold text-blue-700">{nowServing ?? '—'}</p>
+                <div className="mx-auto h-3 w-3 rounded-full bg-brand-600" />
+                <p className="mt-1 text-xs font-semibold text-brand-700">{nowServing ?? '—'}</p>
                 <p className="text-[11px] text-slate-400">Now serving</p>
               </div>
               <div className="h-px flex-1 bg-slate-200" />
               <div className="text-center">
-                <div className="mx-auto h-3 w-3 rounded-full border-2 border-blue-300 bg-white" />
+                <div className="mx-auto h-3 w-3 rounded-full border-2 border-brand-300 bg-white" />
                 <p className="mt-1 text-xs font-semibold text-slate-500">Up next</p>
               </div>
               <div className="h-px flex-1 bg-slate-200" />

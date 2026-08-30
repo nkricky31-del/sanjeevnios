@@ -210,7 +210,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                     type="text"
                     value={diagnosis}
                     onChange={(e) => setDiagnosis(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
                 <div>
@@ -219,7 +219,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     rows={3}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
                 <div>
@@ -228,7 +228,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                     type="date"
                     value={followUpDate}
                     onChange={(e) => setFollowUpDate(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
                 {!attachedRx && (

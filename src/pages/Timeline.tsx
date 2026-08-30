@@ -100,7 +100,7 @@ export default function Timeline() {
 
               {visit && (visit.diagnosis || visit.notes) && (
                 <div className="mt-2 border-t border-slate-100 pt-2">
-                  {visit.diagnosis && <p className="text-sm text-blue-700">Diagnosis: {visit.diagnosis}</p>}
+                  {visit.diagnosis && <p className="text-sm text-brand-700">Diagnosis: {visit.diagnosis}</p>}
                   {visit.notes && <p className="text-sm text-slate-600">{visit.notes}</p>}
                 </div>
               )}
@@ -123,7 +123,7 @@ export default function Timeline() {
                     <button
                       key={f.id}
                       onClick={() => openAppointmentFile(f.storage_path)}
-                      className="mr-2 mt-1 text-sm font-medium text-blue-600"
+                      className="mr-2 mt-1 text-sm font-medium text-brand-600"
                     >
                       {f.type ? FILE_LABEL[f.type] : 'File'}
                     </button>

@@ -6,14 +6,14 @@ interface Props {
 const TONE_STYLES: Record<string, string> = {
   live: 'bg-emerald-50 text-emerald-700',
   warning: 'bg-amber-50 text-amber-700',
-  info: 'bg-blue-50 text-blue-700',
+  info: 'bg-brand-50 text-brand-700',
   neutral: 'bg-slate-100 text-slate-600',
 };
 
 const DOT_STYLES: Record<string, string> = {
   live: 'bg-emerald-500',
   warning: 'bg-amber-500',
-  info: 'bg-blue-500',
+  info: 'bg-brand-500',
   neutral: 'bg-slate-400',
 };
 

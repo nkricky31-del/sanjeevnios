@@ -1,3 +1,4 @@
+import { CalendarDays } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -49,21 +50,28 @@ export default function MyBookings() {
     <div>
       <AppHeader title="My bookings" />
       <div className="mx-auto max-w-md px-4 py-6">
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {loading && <p className="text-sm text-slate-400">Loading...</p>}
           {!loading && rows.length === 0 && <p className="text-sm text-slate-400">No upcoming bookings.</p>}
           {rows.map((r) => (
             <Link key={r.id} to={`/bookings/${r.id}`} className="block">
               <Card className="hover:shadow-md">
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold text-slate-900">{r.doctors?.name}</p>
+                  <p className="font-bold text-slate-900">{r.doctors?.name}</p>
                   <StatusPill label={r.status} tone={STATUS_TONE[r.status]} />
                 </div>
-                <p className="text-sm text-slate-500">{r.clinics?.name}</p>
-                <p className="text-sm text-slate-500">
-                  For {r.family_members?.name} · {r.date} at {r.slot_time?.slice(0, 5)}
-                  {r.token_no ? ` · Token #${r.token_no}` : ''}
-                </p>
+                <p className="text-sm font-medium text-coral-600">{r.clinics?.name}</p>
+                <div className="mt-2 flex items-center justify-between">
+                  <p className="flex items-center gap-1.5 text-sm text-slate-500">
+                    <CalendarDays size={14} className="text-slate-400" />
+                    For {r.family_members?.name} · {r.date} at {r.slot_time?.slice(0, 5)}
+                  </p>
+                  {r.token_no && (
+                    <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-700">
+                      #{r.token_no}
+                    </span>
+                  )}
+                </div>
               </Card>
             </Link>
           ))}

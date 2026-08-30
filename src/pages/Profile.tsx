@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import FamilyMemberForm from '../components/FamilyMemberForm';
@@ -14,6 +15,10 @@ const RELATION_LABEL: Record<string, string> = {
   child: 'Child',
   parent: 'Parent',
 };
+
+// Cycled across family member avatars purely for visual variety - not tied
+// to identity or status.
+const AVATAR_COLORS = ['bg-brand-500', 'bg-coral-500', 'bg-emerald-500', 'bg-amber-500'];
 
 export default function Profile() {
   const { session, profile, refreshProfile } = useAuth();
@@ -54,27 +59,27 @@ export default function Profile() {
       <AppHeader title="My profile" />
       <div className="mx-auto max-w-md px-4 py-6">
         <Card>
-          <label className="text-sm font-medium text-slate-700">Name</label>
-          <div className="mt-1 flex gap-2">
+          <label className="text-sm font-semibold text-slate-700">Name</label>
+          <div className="mt-1.5 flex gap-2">
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Add your name"
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
             />
             <Button onClick={saveName} disabled={savingName || name === (profile.name ?? '')}>
               Save
             </Button>
           </div>
 
-          <p className="mt-4 text-sm font-medium text-slate-700">Phone</p>
+          <p className="mt-4 text-sm font-semibold text-slate-700">Phone</p>
           <p className="text-slate-900">{profile.phone}</p>
         </Card>
 
         <div className="mt-6 flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-900">My family</h2>
-          <button onClick={() => setShowForm((s) => !s)} className="text-sm font-semibold text-blue-600">
+          <button onClick={() => setShowForm((s) => !s)} className="text-sm font-bold text-coral-600">
             {showForm ? 'Cancel' : '+ Add family member'}
           </button>
         </div>
@@ -90,22 +95,34 @@ export default function Profile() {
           />
         )}
 
-        <div className="mt-4 space-y-2">
-          {loadingMembers && <p className="text-sm text-slate-400">Loading...</p>}
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          {loadingMembers && <p className="col-span-2 text-sm text-slate-400">Loading...</p>}
           {!loadingMembers && members.length === 0 && (
-            <p className="text-sm text-slate-400">No family members added yet.</p>
+            <p className="col-span-2 text-sm text-slate-400">No family members added yet.</p>
           )}
-          {members.map((m) => (
-            <Card key={m.id}>
-              <div className="flex items-center justify-between">
-                <p className="font-semibold text-slate-900">{m.name}</p>
-                <span className="text-xs font-medium text-slate-500">
-                  {(m.relation && RELATION_LABEL[m.relation]) ?? m.relation ?? '—'}
-                </span>
+          {members.map((m, i) => (
+            <div key={m.id} className="flex flex-col items-center text-center">
+              <div
+                className={`flex h-20 w-20 items-center justify-center rounded-3xl text-2xl font-bold text-white ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}
+              >
+                {m.name.charAt(0).toUpperCase()}
               </div>
-              <p className="text-sm text-slate-500">DOB: {m.dob ?? '—'}</p>
-            </Card>
+              <p className="mt-2 max-w-full truncate text-sm font-bold text-slate-900">{m.name}</p>
+              <p className="text-xs text-slate-500">
+                {(m.relation && RELATION_LABEL[m.relation]) ?? m.relation ?? '—'}
+              </p>
+              {m.dob && <p className="text-[11px] text-slate-400">DOB: {m.dob}</p>}
+            </div>
           ))}
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex flex-col items-center text-center text-coral-600"
+          >
+            <div className="flex h-20 w-20 items-center justify-center rounded-3xl border-2 border-dashed border-coral-300 bg-coral-50">
+              <Plus size={26} />
+            </div>
+            <p className="mt-2 text-sm font-bold">Add profile</p>
+          </button>
         </div>
 
         <Button variant="ghost" onClick={signOut} className="mt-6">

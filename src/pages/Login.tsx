@@ -66,28 +66,26 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-brand-50 via-slate-50 to-coral-50 px-4">
       <Card className="w-full max-w-sm !rounded-3xl !p-8">
-        <div className="flex items-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
-            <Stethoscope size={20} />
+        <div className="flex flex-col items-center text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-lg shadow-brand-600/30">
+            <Stethoscope size={26} />
           </div>
-          <div>
-            <p className="text-lg font-bold text-slate-900">
-              {intent === 'clinic' ? 'Register your clinic' : 'SanjeevniOS'}
-            </p>
-            <p className="text-xs text-slate-500">
-              {intent === 'clinic' ? 'Sign in with your phone number to get started' : 'Sign in with your phone number'}
-            </p>
-          </div>
+          <p className="mt-3 text-xl font-extrabold text-slate-900">
+            {intent === 'clinic' ? 'Register your clinic' : 'SanjeevniOS'}
+          </p>
+          <p className="mt-1 text-sm text-slate-500">
+            {intent === 'clinic' ? 'Sign in with your phone number to get started' : 'Sign in with your phone number'}
+          </p>
         </div>
 
         {stage === 'phone' ? (
           <form onSubmit={sendOtp} className="mt-6 space-y-4">
             <div>
-              <label className="text-sm font-medium text-slate-700">Phone number</label>
-              <div className="mt-1 flex items-center rounded-xl border border-slate-300 focus-within:ring-2 focus-within:ring-blue-500">
-                <span className="pl-3 text-slate-500">+91</span>
+              <label className="text-sm font-semibold text-slate-700">Phone number</label>
+              <div className="mt-1.5 flex items-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 focus-within:ring-2 focus-within:ring-brand-500">
+                <span className="border-r border-slate-200 px-3.5 py-3 text-sm font-semibold text-slate-500">+91</span>
                 <input
                   type="tel"
                   inputMode="numeric"
@@ -95,7 +93,7 @@ export default function Login() {
                   value={digits}
                   onChange={(e) => setDigits(e.target.value.replace(/\D/g, ''))}
                   placeholder="9876543210"
-                  className="w-full rounded-xl px-2 py-2.5 outline-none"
+                  className="w-full bg-transparent px-3 py-3 text-sm font-medium outline-none"
                 />
               </div>
             </div>
@@ -106,7 +104,7 @@ export default function Login() {
             <button
               type="button"
               onClick={intent === 'patient' ? chooseClinicSignup : choosePatientLogin}
-              className="block w-full text-center text-sm font-medium text-blue-600"
+              className="block w-full text-center text-sm font-bold text-coral-600"
             >
               {intent === 'patient' ? 'Are you a clinic? Register here' : '← Back to patient login'}
             </button>
@@ -114,9 +112,7 @@ export default function Login() {
         ) : (
           <form onSubmit={verifyOtp} className="mt-6 space-y-4">
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                6-digit code sent to +91{digits}
-              </label>
+              <label className="text-sm font-semibold text-slate-700">6-digit code sent to +91{digits}</label>
               <input
                 type="text"
                 inputMode="numeric"
@@ -124,7 +120,7 @@ export default function Login() {
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
                 placeholder="123456"
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+                className="mt-1.5 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-center text-lg font-bold tracking-[0.5em] outline-none focus:ring-2 focus:ring-brand-500"
               />
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}

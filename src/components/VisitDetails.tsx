@@ -11,7 +11,7 @@ export default function VisitDetails({ visit, prescription }: Props) {
   return (
     <div className="mt-4 rounded-xl border border-slate-200 p-4">
       <p className="text-sm font-semibold text-slate-900">Doctor's notes</p>
-      {visit.diagnosis && <p className="mt-1 text-sm text-blue-700">Diagnosis: {visit.diagnosis}</p>}
+      {visit.diagnosis && <p className="mt-1 text-sm text-brand-700">Diagnosis: {visit.diagnosis}</p>}
       {visit.notes && <p className="mt-1 text-sm text-slate-600">{visit.notes}</p>}
       {visit.follow_up_date && (
         <p className="mt-1 text-sm text-slate-500">Follow-up: {visit.follow_up_date}</p>

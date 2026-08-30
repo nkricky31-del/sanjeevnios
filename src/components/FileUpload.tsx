@@ -102,7 +102,7 @@ export default function FileUpload({ appointmentId, memberId }: Props) {
             <span className="text-sm text-slate-700">
               {f.type ? CATEGORY_LABEL[f.type] : 'File'} · {new Date(f.created_at).toLocaleDateString()}
             </span>
-            <button onClick={() => view(f.storage_path)} className="text-sm font-medium text-blue-600">
+            <button onClick={() => view(f.storage_path)} className="text-sm font-medium text-brand-600">
               View
             </button>
           </div>

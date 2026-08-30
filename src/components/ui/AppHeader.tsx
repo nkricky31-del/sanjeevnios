@@ -25,7 +25,7 @@ export default function AppHeader({ title, subtitle, pill, onBellClick, bellDot 
             aria-label="Notifications"
           >
             <Bell size={18} />
-            {bellDot && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-blue-500" />}
+            {bellDot && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-coral-500" />}
           </button>
         </div>
       </div>

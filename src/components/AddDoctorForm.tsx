@@ -102,7 +102,7 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
         <p className="mt-1">You can continue - the admin can ask for the document separately during review.</p>
         <button
           onClick={onAdded}
-          className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+          className="mt-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white"
         >
           Continue
         </button>
@@ -119,7 +119,7 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Dr. Asha Rao"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -130,7 +130,7 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
           value={regNo}
           onChange={(e) => setRegNo(e.target.value)}
           placeholder="e.g. MCI-12345"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -141,7 +141,7 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
           value={specialty}
           onChange={(e) => setSpecialty(e.target.value)}
           placeholder="e.g. General Physician"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -154,7 +154,7 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
           value={fee}
           onChange={(e) => setFee(e.target.value)}
           placeholder="e.g. 300"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -170,7 +170,7 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
         <button
           type="submit"
           disabled={loading}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
           {loading ? 'Saving...' : 'Add doctor'}
         </button>

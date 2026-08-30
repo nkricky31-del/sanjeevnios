@@ -161,13 +161,13 @@ export default function AdminConsole() {
     <div>
       <AppHeader title="Admin" subtitle="Admin console" />
       <div className="mx-auto max-w-md px-4 py-6">
-        <div className="flex gap-2 overflow-x-auto border-b border-slate-200">
+        <div className="flex flex-wrap gap-1.5 rounded-2xl bg-slate-100 p-1.5">
           {TABS.map((t) => (
             <button
               key={t.key}
               onClick={() => setView(t.key)}
-              className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold ${
-                view === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'
+              className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
+                view === t.key ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
               }`}
             >
               {t.label}
@@ -211,7 +211,7 @@ export default function AdminConsole() {
 
             <div className="mt-4 flex items-center justify-between">
               <h2 className="text-lg font-bold text-slate-900">Pending clinics</h2>
-              <button onClick={loadPending} className="text-sm font-medium text-blue-600">
+              <button onClick={loadPending} className="text-sm font-medium text-brand-600">
                 Refresh
               </button>
             </div>
@@ -229,7 +229,7 @@ export default function AdminConsole() {
                   {c.registration_doc_path && (
                     <button
                       onClick={() => viewDoc(c.registration_doc_path!)}
-                      className="mt-1 text-xs font-medium text-blue-600"
+                      className="mt-1 text-xs font-medium text-brand-600"
                     >
                       View document
                     </button>
@@ -263,7 +263,7 @@ export default function AdminConsole() {
                     <p className="font-semibold text-slate-900">{d.name}</p>
                     <StatusPill label="Pending" tone="warning" />
                   </div>
-                  {d.specialty && <p className="text-sm text-blue-600">{d.specialty}</p>}
+                  {d.specialty && <p className="text-sm text-brand-600">{d.specialty}</p>}
                   <p className="text-sm text-slate-500">Reg. {d.reg_no ?? '—'}</p>
                   <p className="text-xs text-slate-400">
                     {d.clinics?.name}
@@ -272,7 +272,7 @@ export default function AdminConsole() {
                   {d.registration_doc_path && (
                     <button
                       onClick={() => viewDoc(d.registration_doc_path!)}
-                      className="mt-1 text-xs font-medium text-blue-600"
+                      className="mt-1 text-xs font-medium text-brand-600"
                     >
                       View document
                     </button>

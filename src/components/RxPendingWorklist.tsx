@@ -71,7 +71,7 @@ export default function RxPendingWorklist({ doctorId, onOpen }: Props) {
     <div>
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-slate-900">Rx pending</h2>
-        <button onClick={load} className="text-sm font-medium text-blue-600">
+        <button onClick={load} className="text-sm font-medium text-brand-600">
           Refresh
         </button>
       </div>

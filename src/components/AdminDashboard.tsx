@@ -70,7 +70,7 @@ export default function AdminDashboard() {
     <div>
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-slate-900">Platform overview</h2>
-        <button onClick={load} className="text-sm font-medium text-blue-600">
+        <button onClick={load} className="text-sm font-medium text-brand-600">
           Refresh
         </button>
       </div>
@@ -88,9 +88,9 @@ export default function AdminDashboard() {
 
           <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Platform</p>
           <div className="mt-1 grid grid-cols-2 gap-2">
-            <StatTile icon={Stethoscope} label="Doctors" value={stats.doctorCount} tone="blue" />
-            <StatTile icon={Users} label="Patients" value={stats.patientCount} tone="blue" />
-            <StatTile icon={CalendarCheck} label="Appointments today" value={stats.appointmentsToday} tone="blue" />
+            <StatTile icon={Stethoscope} label="Doctors" value={stats.doctorCount} tone="brand" />
+            <StatTile icon={Users} label="Patients" value={stats.patientCount} tone="brand" />
+            <StatTile icon={CalendarCheck} label="Appointments today" value={stats.appointmentsToday} tone="brand" />
             <StatTile
               icon={IndianRupee}
               label={`Revenue (${PLATFORM_FEE_PERCENT}% fee, all-time)`}

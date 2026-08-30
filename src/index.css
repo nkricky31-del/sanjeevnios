@@ -1,1 +1,35 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* Primary: indigo-purple, used for buttons, active states, links on dark. */
+  --color-brand-50: #f2f0fe;
+  --color-brand-100: #e5e1fd;
+  --color-brand-200: #cac1fb;
+  --color-brand-300: #ada0f8;
+  --color-brand-400: #8d7bf4;
+  --color-brand-500: #6c5ce7;
+  --color-brand-600: #5b4bd6;
+  --color-brand-700: #4a3db4;
+  --color-brand-800: #3b3190;
+  --color-brand-900: #2f2870;
+
+  /* Accent: warm coral, used for secondary links, badges, highlights. */
+  --color-coral-50: #fff1ec;
+  --color-coral-100: #ffe0d3;
+  --color-coral-200: #ffc1aa;
+  --color-coral-300: #ff9d7d;
+  --color-coral-400: #ff7f5c;
+  --color-coral-500: #ff6b4a;
+  --color-coral-600: #e8532f;
+  --color-coral-700: #c13f22;
+  --color-coral-800: #9b3119;
+  --color-coral-900: #7a2814;
+}
+
+body {
+  background-color: var(--color-slate-50);
+  color: var(--color-slate-900);
+  font-family: var(--font-sans);
+}

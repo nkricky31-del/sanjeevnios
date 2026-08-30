@@ -129,7 +129,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
               onClick={() => toggleDay(day)}
               className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
                 selectedDays.has(day)
-                  ? 'border-blue-600 bg-blue-600 text-white'
+                  ? 'border-brand-600 bg-brand-600 text-white'
                   : 'border-slate-300 bg-white text-slate-600'
               }`}
             >
@@ -182,7 +182,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
         <button
           onClick={submit}
           disabled={saving}
-          className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="mt-3 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save availability'}
         </button>

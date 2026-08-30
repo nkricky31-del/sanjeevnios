@@ -395,27 +395,27 @@ export default function ClinicQueue() {
           );
         })()}
 
-        <div className="flex gap-2 border-b border-slate-200">
+        <div className="flex flex-wrap gap-1.5 rounded-2xl bg-slate-100 p-1.5">
           <button
             onClick={() => setView('queue')}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold ${
-              view === 'queue' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'
+            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
+              view === 'queue' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
             }`}
           >
             Queue
           </button>
           <button
             onClick={() => setView('rx')}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold ${
-              view === 'rx' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'
+            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
+              view === 'rx' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
             }`}
           >
             Rx pending
           </button>
           <button
             onClick={() => setView('doctors')}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold ${
-              view === 'doctors' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'
+            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
+              view === 'doctors' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
             }`}
           >
             Doctors
@@ -465,7 +465,7 @@ export default function ClinicQueue() {
               <>
                 <div className="mt-6 flex items-center justify-between">
                   <h2 className="text-lg font-bold text-slate-900">Pending approval</h2>
-                  <button onClick={loadAppointments} className="text-sm font-medium text-blue-600">
+                  <button onClick={loadAppointments} className="text-sm font-medium text-brand-600">
                     Refresh
                   </button>
                 </div>
@@ -595,7 +595,7 @@ export default function ClinicQueue() {
                             <button
                               onClick={() => sendReminder(a)}
                               disabled={a.reminder_count >= REMINDER_LIMIT}
-                              className="text-xs font-semibold text-blue-600 disabled:text-slate-300"
+                              className="text-xs font-semibold text-brand-600 disabled:text-slate-300"
                             >
                               Send reminder
                             </button>

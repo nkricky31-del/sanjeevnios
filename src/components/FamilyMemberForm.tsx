@@ -66,7 +66,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -75,7 +75,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
         <select
           value={relation}
           onChange={(e) => setRelation(e.target.value as FamilyRelation)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         >
           <option value="self">Self</option>
           <option value="spouse">Spouse</option>
@@ -91,7 +91,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
           value={dob}
           onChange={(e) => setDob(e.target.value)}
           max={new Date().toISOString().slice(0, 10)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -113,7 +113,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
         <button
           type="submit"
           disabled={loading}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
           {loading ? 'Saving...' : 'Save member'}
         </button>

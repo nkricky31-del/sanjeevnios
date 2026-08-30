@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember, PaymentMethod } from '../lib/types';
+import Button from './ui/Button';
+import Card from './ui/Card';
 
 interface Props {
   doctorId: string;
@@ -85,18 +87,30 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
   if (!session) return null;
 
   return (
-    <div className="mt-4 space-y-4 rounded-xl border border-slate-200 p-4">
-      <div>
-        <p className="text-sm font-medium text-slate-700">Booking for</p>
+    <Card className="mt-4 !rounded-3xl">
+      <p className="text-base font-bold text-slate-900">Book appointment</p>
+
+      <div className="mt-4 space-y-2 border-b border-slate-100 pb-4">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-slate-500">Doctor's fee</span>
+          <span className="font-semibold text-slate-900">₹{consultationFee}</span>
+        </div>
+        <div className="flex items-center justify-between text-base font-bold">
+          <span className="text-slate-900">Total</span>
+          <span className="text-slate-900">₹{method === 'online' ? consultationFee : 0}</span>
+        </div>
+        {method === 'cod' && <p className="text-xs text-slate-400">Pay ₹{consultationFee} in cash at the clinic.</p>}
+      </div>
+
+      <div className="mt-4">
+        <p className="text-sm font-semibold text-slate-700">Patient</p>
         {members.length === 0 ? (
-          <p className="mt-1 text-sm text-red-600">
-            No family members yet — add one on your profile before booking.
-          </p>
+          <p className="mt-1 text-sm text-red-600">No family members yet — add one on your profile before booking.</p>
         ) : (
           <select
             value={memberId}
             onChange={(e) => setMemberId(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+            className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
           >
             {members.map((m) => (
               <option key={m.id} value={m.id}>
@@ -107,34 +121,39 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         )}
       </div>
 
-      <div>
-        <p className="text-sm font-medium text-slate-700">Payment</p>
-        <div className="mt-1 flex gap-4">
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="radio" checked={method === 'online'} onChange={() => setMethod('online')} />
-            Online (₹{consultationFee}) — demo hold only, no real charge
-          </label>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="radio" checked={method === 'cod'} onChange={() => setMethod('cod')} />
+      <div className="mt-4">
+        <p className="text-sm font-semibold text-slate-700">Payment method</p>
+        <div className="mt-1.5 flex gap-2">
+          <button
+            onClick={() => setMethod('online')}
+            className={`flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
+              method === 'online' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
+            }`}
+          >
+            Pay online
+          </button>
+          <button
+            onClick={() => setMethod('cod')}
+            className={`flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
+              method === 'cod' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
+            }`}
+          >
             Cash at clinic
-          </label>
+          </button>
         </div>
+        {method === 'online' && <p className="mt-1 text-xs text-slate-400">Demo hold only — no real charge.</p>}
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-      <div className="flex gap-2">
-        <button
-          onClick={submit}
-          disabled={loading || members.length === 0}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          {loading ? 'Booking...' : 'Confirm booking'}
-        </button>
-        <button onClick={onCancel} className="px-4 py-2 text-sm text-slate-500">
-          Cancel
-        </button>
+      <div className="mt-5 flex gap-2">
+        <Button onClick={submit} disabled={loading || members.length === 0} full>
+          {loading ? 'Booking...' : 'Confirm'}
+        </Button>
       </div>
-    </div>
+      <button onClick={onCancel} className="mt-2 w-full text-center text-sm font-medium text-slate-500">
+        Cancel
+      </button>
+    </Card>
   );
 }
