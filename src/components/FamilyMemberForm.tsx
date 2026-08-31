@@ -10,10 +10,17 @@ interface Props {
   onCancel: () => void;
 }
 
+const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
 export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props) {
   const [name, setName] = useState('');
   const [relation, setRelation] = useState<FamilyRelation>('self');
   const [dob, setDob] = useState('');
+  const [phoneDigits, setPhoneDigits] = useState('');
+  const [email, setEmail] = useState('');
+  const [bloodGroup, setBloodGroup] = useState('');
+  const [city, setCity] = useState('');
+  const [govtId, setGovtId] = useState('');
   const [guardianConsent, setGuardianConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +43,10 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
       setError('Date of birth cannot be in the future.');
       return;
     }
+    if (phoneDigits && phoneDigits.length !== 10) {
+      setError('Phone number must be 10 digits.');
+      return;
+    }
     if (minor && !guardianConsent) {
       setError('Guardian consent is required for family members under 18.');
       return;
@@ -47,6 +58,11 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
       name: name.trim(),
       relation,
       dob,
+      phone: phoneDigits ? `91${phoneDigits}` : null,
+      email: email.trim() || null,
+      blood_group: bloodGroup || null,
+      city: city.trim() || null,
+      govt_id: govtId.trim() || null,
       guardian_consent: guardianConsent,
     });
     setLoading(false);
@@ -93,6 +109,75 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
           max={new Date().toISOString().slice(0, 10)}
           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         />
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-slate-700">Phone (optional)</label>
+        <div className="mt-1 flex items-center rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-brand-500">
+          <span className="pl-3 text-sm text-slate-500">+91</span>
+          <input
+            type="tel"
+            inputMode="numeric"
+            maxLength={10}
+            value={phoneDigits}
+            onChange={(e) => setPhoneDigits(e.target.value.replace(/\D/g, ''))}
+            placeholder="9876543210"
+            className="w-full rounded-lg px-2 py-2 text-sm outline-none"
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-3">
+        <div className="flex-1">
+          <label className="text-sm font-medium text-slate-700">Email (optional)</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="name@example.com"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="text-sm font-medium text-slate-700">Blood group (optional)</label>
+          <select
+            value={bloodGroup}
+            onChange={(e) => setBloodGroup(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="">—</option>
+            {BLOOD_GROUPS.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-slate-700">City (optional)</label>
+        <input
+          type="text"
+          value={city}
+          onChange={(e) => setCity(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        />
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-slate-700">Government ID (optional)</label>
+        <input
+          type="text"
+          value={govtId}
+          onChange={(e) => setGovtId(e.target.value)}
+          placeholder="Aadhaar, passport, etc."
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+        />
+        <p className="mt-1 text-xs text-slate-400">
+          Helps us recognise this person if they've already been treated at another Sanjeevni clinic, so they keep one
+          medical record number.
+        </p>
       </div>
 
       {minor && (

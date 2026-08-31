@@ -1,7 +1,8 @@
-import { Plus } from 'lucide-react';
+import { ArrowLeft, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import FamilyMemberForm from '../components/FamilyMemberForm';
+import PatientProfile from '../components/PatientProfile';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
@@ -27,6 +28,7 @@ export default function Profile() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState(profile?.name ?? '');
   const [savingName, setSavingName] = useState(false);
+  const [viewingMrn, setViewingMrn] = useState<string | null>(null);
 
   const loadMembers = async () => {
     setLoadingMembers(true);
@@ -53,6 +55,24 @@ export default function Profile() {
   };
 
   const signOut = () => supabase.auth.signOut();
+
+  if (viewingMrn) {
+    return (
+      <div>
+        <div className="flex items-center border-b border-slate-100 bg-white px-4 py-4">
+          <button
+            onClick={() => setViewingMrn(null)}
+            className="inline-flex items-center gap-1 text-sm font-medium text-slate-500"
+          >
+            <ArrowLeft size={16} /> Back to profile
+          </button>
+        </div>
+        <div className="mx-auto max-w-md px-4 py-6">
+          <PatientProfile mrn={viewingMrn} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -112,6 +132,12 @@ export default function Profile() {
                 {(m.relation && RELATION_LABEL[m.relation]) ?? m.relation ?? '—'}
               </p>
               {m.dob && <p className="text-[11px] text-slate-400">DOB: {m.dob}</p>}
+              <button
+                onClick={() => setViewingMrn(m.mrn)}
+                className="mt-0.5 font-mono text-[10px] text-brand-600 underline"
+              >
+                {m.mrn}
+              </button>
             </div>
           ))}
           <button

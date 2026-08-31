@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import ClinicLocationPicker from '../components/ClinicLocationPicker';
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
 import FullDayCancelForm from '../components/FullDayCancelForm';
+import PatientLookup from '../components/PatientLookup';
 import RejectAppointmentForm from '../components/RejectAppointmentForm';
 import RxPendingWorklist from '../components/RxPendingWorklist';
 import VisitScreen from '../components/VisitScreen';
@@ -110,7 +111,7 @@ export default function ClinicQueue() {
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [fullDayCancelOpen, setFullDayCancelOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [view, setView] = useState<'queue' | 'doctors' | 'rx' | 'location'>('queue');
+  const [view, setView] = useState<'queue' | 'doctors' | 'rx' | 'location' | 'patients'>('queue');
 
   const loadClinicAndDoctors = async () => {
     if (!session) return;
@@ -430,7 +431,21 @@ export default function ClinicQueue() {
           >
             Location
           </button>
+          <button
+            onClick={() => setView('patients')}
+            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
+              view === 'patients' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
+            }`}
+          >
+            Patients
+          </button>
         </div>
+
+        {view === 'patients' && (
+          <div className="mt-4">
+            <PatientLookup />
+          </div>
+        )}
 
         {view === 'doctors' && (
           <div className="mt-4">

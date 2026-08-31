@@ -21,6 +21,26 @@ export interface FamilyMember {
   phone: string | null;
   gender: Gender | null;
   guardian_consent: boolean;
+  mrn: string; // "MRN-00012456" - permanent, server-generated, see schema.sql section 18
+  govt_id: string | null;
+  email: string | null;
+  blood_group: string | null;
+  city: string | null;
+  created_at: string;
+}
+
+export interface Encounter {
+  id: string;
+  encounter_no: string; // "E-00014578" - permanent, server-generated
+  mrn: string;
+  patient_id: string; // family_members.id
+  clinic_id: string;
+  doctor_id: string;
+  department: string | null;
+  visit_datetime: string;
+  visit_type: string;
+  reason: string | null;
+  status: string;
   created_at: string;
 }
 
@@ -179,6 +199,7 @@ export interface Appointment {
   status: AppointmentStatus;
   token_no: number | null;
   payment_status: string;
+  encounter_id: string | null;
   created_at: string;
 }
 

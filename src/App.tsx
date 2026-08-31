@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
 
 import PatientDeclarationGate from './components/PatientDeclarationGate';
+import EncounterDetail from './components/EncounterDetail';
 import BottomTabBar from './components/ui/BottomTabBar';
 import Button from './components/ui/Button';
 import PlatformFooterNote from './components/ui/PlatformFooterNote';
@@ -21,6 +22,7 @@ import Timeline from './pages/Timeline';
 
 export default function App() {
   const { session, profile, loading } = useAuth();
+  const location = useLocation();
   const [signupIntent, setSignupIntent] = useState(false);
 
   // Login.tsx sets this flag the moment someone picks "Register your clinic"
@@ -64,6 +66,23 @@ export default function App() {
             Sign out
           </Button>
         </div>
+      </div>
+    );
+  }
+
+  // A direct link to one encounter - reachable by any role, regardless of
+  // the role-specific screens below (typed/pasted URL, not a normal nav
+  // click). This has to work independently of role because access here is
+  // decided ENTIRELY by encounters RLS (see schema.sql section 20): the
+  // fetch inside EncounterDetail just asks for this id and either gets the
+  // row back or doesn't - a clinic pasting another clinic's encounter link
+  // gets "not found", not a client-side redirect, since Postgres itself
+  // never returns the row.
+  const encounterMatch = location.pathname.match(/^\/encounters\/([^/]+)$/);
+  if (encounterMatch) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <EncounterDetail encounterId={encounterMatch[1]} />
       </div>
     );
   }

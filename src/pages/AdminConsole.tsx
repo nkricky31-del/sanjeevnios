@@ -7,6 +7,7 @@ import AdminFraud from '../components/AdminFraud';
 import AdminPayments from '../components/AdminPayments';
 import AdminRejectForm from '../components/AdminRejectForm';
 import AdminSubscriptions from '../components/AdminSubscriptions';
+import PatientLookup from '../components/PatientLookup';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
@@ -60,9 +61,9 @@ function rejectedOwnerIds(documents: DocumentRow[]): Set<string> {
 
 export default function AdminConsole() {
   const { session } = useAuth();
-  const [view, setView] = useState<'dashboard' | 'verification' | 'subscriptions' | 'payments' | 'fraud' | 'audit'>(
-    'dashboard'
-  );
+  const [view, setView] = useState<
+    'dashboard' | 'verification' | 'subscriptions' | 'payments' | 'fraud' | 'audit' | 'patients'
+  >('dashboard');
   const [clinics, setClinics] = useState<PendingClinic[]>([]);
   const [doctors, setDoctors] = useState<PendingDoctor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -216,6 +217,7 @@ export default function AdminConsole() {
     { key: 'payments', label: 'Payments' },
     { key: 'fraud', label: 'Fraud' },
     { key: 'audit', label: 'Audit log' },
+    { key: 'patients', label: 'Patients' },
   ];
 
   return (
@@ -263,6 +265,12 @@ export default function AdminConsole() {
         {view === 'audit' && (
           <div className="mt-4">
             <AdminAuditLog />
+          </div>
+        )}
+
+        {view === 'patients' && (
+          <div className="mt-4">
+            <PatientLookup />
           </div>
         )}
 

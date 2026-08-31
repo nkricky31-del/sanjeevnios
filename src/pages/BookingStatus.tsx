@@ -30,6 +30,7 @@ interface BookingDetail {
   doctors: { name: string; specialty: string | null } | null;
   clinics: { name: string; lat: number | null; lng: number | null; formatted_address: string | null } | null;
   family_members: { name: string } | null;
+  encounters: { encounter_no: string } | null;
 }
 
 // Statuses where something can still change - a rejected/cancelled/no_show
@@ -75,7 +76,9 @@ export default function BookingStatus() {
   const loadBooking = async () => {
     const { data } = await supabase
       .from('appointments')
-      .select('*, doctors(name, specialty), clinics(name, lat, lng, formatted_address), family_members(name)')
+      .select(
+        '*, doctors(name, specialty), clinics(name, lat, lng, formatted_address), family_members(name), encounters(encounter_no)'
+      )
       .eq('id', appointmentId)
       .single();
     setBooking(data as BookingDetail | null);
@@ -259,6 +262,12 @@ export default function BookingStatus() {
       <div className="mx-auto max-w-md px-4 py-6">
         <p className="text-xs uppercase tracking-wide text-slate-400">Booking ID</p>
         <p className="font-mono text-sm text-slate-600">{booking.id}</p>
+        {booking.encounters?.encounter_no && (
+          <>
+            <p className="mt-1.5 text-xs uppercase tracking-wide text-slate-400">Encounter number</p>
+            <p className="font-mono text-sm text-slate-600">{booking.encounters.encounter_no}</p>
+          </>
+        )}
 
         {alertMessage && (
           <div className="mt-3 rounded-xl bg-amber-100 p-3 text-sm font-medium text-amber-800">{alertMessage}</div>

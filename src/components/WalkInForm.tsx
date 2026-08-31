@@ -24,12 +24,14 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
   const [doctorId, setDoctorId] = useState(defaultDoctorId);
   const [name, setName] = useState('');
   const [phoneDigits, setPhoneDigits] = useState('');
+  const [govtId, setGovtId] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState<Gender | ''>('');
   const [guardianConsent, setGuardianConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addedToken, setAddedToken] = useState<number | null>(null);
+  const [addedMrn, setAddedMrn] = useState<string | null>(null);
 
   const ageNum = age ? Number(age) : null;
   const dob = ageNum != null && ageNum >= 0 ? dobFromAge(ageNum) : null;
@@ -79,9 +81,10 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         phone: phoneDigits ? `91${phoneDigits}` : null,
         gender: gender || null,
         dob,
+        govt_id: govtId.trim() || null,
         guardian_consent: guardianConsent,
       })
-      .select('id')
+      .select('id, mrn')
       .single();
     if (memberError || !member) {
       setSaving(false);
@@ -134,6 +137,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
 
     setSaving(false);
     setAddedToken(accepted.token_no);
+    setAddedMrn((member as { mrn: string }).mrn);
     onAdded();
   };
 
@@ -143,6 +147,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
       <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
         <p className="font-semibold">Added to today's queue for {doctorName}.</p>
         <p className="mt-1">Token number: #{addedToken}</p>
+        {addedMrn && <p className="mt-1 font-mono text-xs text-emerald-700">Medical record number: {addedMrn}</p>}
         {phoneDigits && (
           <p className="mt-1 text-emerald-700">
             This patient can log in later with +91{phoneDigits} to see this visit and any history from other visits.
@@ -199,6 +204,21 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         </div>
         <p className="mt-1 text-xs text-slate-400">
           Lets this patient log in later and see this visit and any future ones together.
+        </p>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-slate-700">Government ID (optional)</label>
+        <input
+          type="text"
+          value={govtId}
+          onChange={(e) => setGovtId(e.target.value)}
+          placeholder="Aadhaar, passport, etc."
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        />
+        <p className="mt-1 text-xs text-slate-400">
+          Helps recognise this patient if they've already been treated at another Sanjeevni clinic, so they keep one
+          medical record number.
         </p>
       </div>
 
