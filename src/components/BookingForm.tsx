@@ -1,9 +1,12 @@
+import { ShieldAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../lib/AuthContext';
+import { EMERGENCY_NOTE, PATIENT_DECLARATION_TEXT, PLATFORM_DISCLAIMER_SHORT } from '../lib/platformDisclaimer';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember, PaymentMethod } from '../lib/types';
+import { usePatientDeclarationStatus } from '../lib/usePatientDeclaration';
 import Button from './ui/Button';
 import Card from './ui/Card';
 
@@ -24,6 +27,8 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
   const [method, setMethod] = useState<PaymentMethod>('online');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { status: declarationStatus, accept: acceptDeclaration } = usePatientDeclarationStatus();
+  const [declarationChecked, setDeclarationChecked] = useState(false);
 
   useEffect(() => {
     supabase
@@ -44,8 +49,21 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
       setError('Add a family member on your profile first.');
       return;
     }
+    if (declarationStatus === 'needed' && !declarationChecked) {
+      setError('Please accept the platform declaration above to continue.');
+      return;
+    }
 
     setLoading(true);
+
+    if (declarationStatus === 'needed') {
+      const declarationError = await acceptDeclaration();
+      if (declarationError) {
+        setLoading(false);
+        setError(declarationError);
+        return;
+      }
+    }
 
     const { data: appointment, error: apptError } = await supabase
       .from('appointments')
@@ -144,10 +162,40 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         {method === 'online' && <p className="mt-1 text-xs text-slate-400">Demo hold only — no real charge.</p>}
       </div>
 
+      <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+        {PLATFORM_DISCLAIMER_SHORT}
+        <p className="mt-1.5 flex items-start gap-1.5 font-medium text-amber-700">
+          <ShieldAlert size={14} className="mt-0.5 shrink-0" />
+          {EMERGENCY_NOTE}
+        </p>
+      </div>
+
+      {declarationStatus === 'needed' && (
+        <div className="mt-3 rounded-xl border border-slate-200 p-3">
+          <p className="text-xs font-bold text-slate-800">Platform declaration</p>
+          <div className="mt-1 max-h-32 overflow-y-auto whitespace-pre-line text-xs leading-relaxed text-slate-600">
+            {PATIENT_DECLARATION_TEXT}
+          </div>
+          <label className="mt-2 flex items-start gap-2 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              checked={declarationChecked}
+              onChange={(e) => setDeclarationChecked(e.target.checked)}
+              className="mt-0.5"
+            />
+            I have read and accept this declaration.
+          </label>
+        </div>
+      )}
+
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
       <div className="mt-5 flex gap-2">
-        <Button onClick={submit} disabled={loading || members.length === 0} full>
+        <Button
+          onClick={submit}
+          disabled={loading || members.length === 0 || (declarationStatus === 'needed' && !declarationChecked)}
+          full
+        >
           {loading ? 'Booking...' : 'Confirm'}
         </Button>
       </div>

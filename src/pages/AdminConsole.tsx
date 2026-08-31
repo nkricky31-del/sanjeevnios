@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import AdminAuditLog from '../components/AdminAuditLog';
 import AdminDashboard from '../components/AdminDashboard';
+import AdminDocumentReview from '../components/AdminDocumentReview';
 import AdminFraud from '../components/AdminFraud';
 import AdminPayments from '../components/AdminPayments';
 import AdminRejectForm from '../components/AdminRejectForm';
@@ -12,8 +13,10 @@ import Card from '../components/ui/Card';
 import StatusPill from '../components/ui/StatusPill';
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
+import { hasUnresolvedRejection } from '../lib/documents';
 import { openVerificationDoc } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
+import type { DocumentRow } from '../lib/types';
 
 interface PendingClinic {
   id: string;
@@ -23,6 +26,7 @@ interface PendingClinic {
   registration_doc_path: string | null;
   owner_id: string;
   created_at: string;
+  is_verified: boolean;
 }
 
 interface PendingDoctor {
@@ -33,7 +37,25 @@ interface PendingDoctor {
   registration_doc_path: string | null;
   clinic_id: string;
   created_at: string;
+  is_verified: boolean;
   clinics: { name: string; owner_id: string; status: string } | null;
+}
+
+// Groups a flat list of documents (spanning many owners) by owner_id and
+// returns the set of owner_ids where hasUnresolvedRejection is true for
+// their own documents.
+function rejectedOwnerIds(documents: DocumentRow[]): Set<string> {
+  const byOwner = new Map<string, DocumentRow[]>();
+  for (const d of documents) {
+    const list = byOwner.get(d.owner_id) ?? [];
+    list.push(d);
+    byOwner.set(d.owner_id, list);
+  }
+  const result = new Set<string>();
+  for (const [ownerId, docs] of byOwner) {
+    if (hasUnresolvedRejection(docs)) result.add(ownerId);
+  }
+  return result;
 }
 
 export default function AdminConsole() {
@@ -46,20 +68,59 @@ export default function AdminConsole() {
   const [loading, setLoading] = useState(true);
   const [rejectClinicId, setRejectClinicId] = useState<string | null>(null);
   const [rejectDoctorId, setRejectDoctorId] = useState<string | null>(null);
+  const [clinicDocsOpenFor, setClinicDocsOpenFor] = useState<string | null>(null);
+  const [doctorDocsOpenFor, setDoctorDocsOpenFor] = useState<string | null>(null);
+  const [clinicsWithRejection, setClinicsWithRejection] = useState<Set<string>>(new Set());
+  const [doctorsWithRejection, setDoctorsWithRejection] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string | null>(null);
+  const [approvedClinics, setApprovedClinics] = useState<PendingClinic[]>([]);
+  const [approvedDoctors, setApprovedDoctors] = useState<PendingDoctor[]>([]);
+  const [approvedClinicDocsOpenFor, setApprovedClinicDocsOpenFor] = useState<string | null>(null);
+  const [approvedDoctorDocsOpenFor, setApprovedDoctorDocsOpenFor] = useState<string | null>(null);
 
   const loadPending = async () => {
     setLoading(true);
-    const [{ data: clinicData }, { data: doctorData }] = await Promise.all([
-      supabase.from('clinics').select('*').eq('status', 'pending').order('created_at', { ascending: true }),
-      supabase
-        .from('doctors')
-        .select('*, clinics(name, owner_id, status)')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: true }),
-    ]);
+    // is_verified is orthogonal to status - a clinic/doctor that's already
+    // approved (and thus invisible to the "pending" queries below) still
+    // needs a way to reach its verification checklist, hence the separate
+    // approved-status queries further down.
+    const [{ data: clinicData }, { data: doctorData }, { data: approvedClinicData }, { data: approvedDoctorData }] =
+      await Promise.all([
+        supabase.from('clinics').select('*').eq('status', 'pending').order('created_at', { ascending: true }),
+        supabase
+          .from('doctors')
+          .select('*, clinics(name, owner_id, status)')
+          .eq('status', 'pending')
+          .order('created_at', { ascending: true }),
+        supabase.from('clinics').select('*').eq('status', 'approved').order('name', { ascending: true }),
+        supabase
+          .from('doctors')
+          .select('*, clinics(name, owner_id, status)')
+          .eq('status', 'approved')
+          .order('name', { ascending: true }),
+      ]);
     setClinics((clinicData ?? []) as PendingClinic[]);
     setDoctors((doctorData ?? []) as unknown as PendingDoctor[]);
+    setApprovedClinics((approvedClinicData ?? []) as PendingClinic[]);
+    setApprovedDoctors((approvedDoctorData ?? []) as unknown as PendingDoctor[]);
+
+    // Approve should be blocked while any document's LATEST upload is still
+    // rejected (a resolved-and-re-uploaded one doesn't count) - fetched
+    // up front so the button is correctly disabled even before the admin
+    // opens "Review documents" for that row.
+    const clinicIds = (clinicData ?? []).map((c) => c.id);
+    const doctorIds = (doctorData ?? []).map((d) => d.id);
+    const [{ data: clinicDocs }, { data: doctorDocs }] = await Promise.all([
+      clinicIds.length
+        ? supabase.from('documents').select('*').eq('owner_type', 'clinic').in('owner_id', clinicIds)
+        : Promise.resolve({ data: [] as DocumentRow[] }),
+      doctorIds.length
+        ? supabase.from('documents').select('*').eq('owner_type', 'doctor').in('owner_id', doctorIds)
+        : Promise.resolve({ data: [] as DocumentRow[] }),
+    ]);
+    setClinicsWithRejection(rejectedOwnerIds((clinicDocs ?? []) as DocumentRow[]));
+    setDoctorsWithRejection(rejectedOwnerIds((doctorDocs ?? []) as DocumentRow[]));
+
     setLoading(false);
   };
 
@@ -231,20 +292,42 @@ export default function AdminConsole() {
                       onClick={() => viewDoc(c.registration_doc_path!)}
                       className="mt-1 text-xs font-medium text-brand-600"
                     >
-                      View document
+                      View legacy document
                     </button>
                   )}
-                  <div className="mt-2 flex gap-2">
-                    <Button onClick={() => approveClinic(c)}>Approve</Button>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button onClick={() => approveClinic(c)} disabled={clinicsWithRejection.has(c.id)}>
+                      Approve
+                    </Button>
                     <Button variant="danger" onClick={() => setRejectClinicId((prev) => (prev === c.id ? null : c.id))}>
                       {rejectClinicId === c.id ? 'Cancel' : 'Reject'}
                     </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setClinicDocsOpenFor((prev) => (prev === c.id ? null : c.id))}
+                    >
+                      {clinicDocsOpenFor === c.id ? 'Hide documents' : 'Review documents'}
+                    </Button>
                   </div>
+                  {clinicsWithRejection.has(c.id) && (
+                    <p className="mt-1 text-xs font-medium text-red-600">
+                      Can't approve - this clinic has a rejected document. Review documents below.
+                    </p>
+                  )}
                   {rejectClinicId === c.id && (
                     <AdminRejectForm
                       label="Reason for rejecting this clinic"
                       onConfirm={(reason) => rejectClinic(c, reason)}
                       onCancel={() => setRejectClinicId(null)}
+                    />
+                  )}
+                  {clinicDocsOpenFor === c.id && (
+                    <AdminDocumentReview
+                      ownerType="clinic"
+                      ownerId={c.id}
+                      notifyUserId={c.owner_id}
+                      label="Clinic documents"
+                      onChanged={loadPending}
                     />
                   )}
                 </Card>
@@ -274,20 +357,116 @@ export default function AdminConsole() {
                       onClick={() => viewDoc(d.registration_doc_path!)}
                       className="mt-1 text-xs font-medium text-brand-600"
                     >
-                      View document
+                      View legacy document
                     </button>
                   )}
-                  <div className="mt-2 flex gap-2">
-                    <Button onClick={() => approveDoctor(d)}>Approve</Button>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button onClick={() => approveDoctor(d)} disabled={doctorsWithRejection.has(d.id)}>
+                      Approve
+                    </Button>
                     <Button variant="danger" onClick={() => setRejectDoctorId((prev) => (prev === d.id ? null : d.id))}>
                       {rejectDoctorId === d.id ? 'Cancel' : 'Reject'}
                     </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setDoctorDocsOpenFor((prev) => (prev === d.id ? null : d.id))}
+                    >
+                      {doctorDocsOpenFor === d.id ? 'Hide documents' : 'Review documents'}
+                    </Button>
                   </div>
+                  {doctorsWithRejection.has(d.id) && (
+                    <p className="mt-1 text-xs font-medium text-red-600">
+                      Can't approve - this doctor has a rejected document. Review documents below.
+                    </p>
+                  )}
                   {rejectDoctorId === d.id && (
                     <AdminRejectForm
                       label="Reason for rejecting this doctor"
                       onConfirm={(reason) => rejectDoctor(d, reason)}
                       onCancel={() => setRejectDoctorId(null)}
+                    />
+                  )}
+                  {doctorDocsOpenFor === d.id && d.clinics && (
+                    <AdminDocumentReview
+                      ownerType="doctor"
+                      ownerId={d.id}
+                      notifyUserId={d.clinics.owner_id}
+                      label="Doctor documents & consent"
+                      onChanged={loadPending}
+                    />
+                  )}
+                </Card>
+              ))}
+            </div>
+
+            <div className="mt-6 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-900">Approved clinics — verification</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              Already approved and visible to patients. Verify every item below to earn the VERIFIED badge.
+            </p>
+            <div className="mt-2 space-y-2">
+              {!loading && approvedClinics.length === 0 && (
+                <p className="text-sm text-slate-400">No approved clinics yet.</p>
+              )}
+              {approvedClinics.map((c) => (
+                <Card key={c.id}>
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-slate-900">{c.name}</p>
+                    <StatusPill label={c.is_verified ? 'Verified' : 'Not verified'} tone={c.is_verified ? 'live' : 'neutral'} />
+                  </div>
+                  <p className="text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
+                  <div className="mt-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setApprovedClinicDocsOpenFor((prev) => (prev === c.id ? null : c.id))}
+                    >
+                      {approvedClinicDocsOpenFor === c.id ? 'Hide checklist' : 'Review verification checklist'}
+                    </Button>
+                  </div>
+                  {approvedClinicDocsOpenFor === c.id && (
+                    <AdminDocumentReview
+                      ownerType="clinic"
+                      ownerId={c.id}
+                      notifyUserId={c.owner_id}
+                      label="Clinic verification checklist"
+                      onChanged={loadPending}
+                    />
+                  )}
+                </Card>
+              ))}
+            </div>
+
+            <div className="mt-6 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-900">Approved doctors — verification</h2>
+            </div>
+            <div className="mt-2 space-y-2">
+              {!loading && approvedDoctors.length === 0 && (
+                <p className="text-sm text-slate-400">No approved doctors yet.</p>
+              )}
+              {approvedDoctors.map((d) => (
+                <Card key={d.id}>
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-slate-900">{d.name}</p>
+                    <StatusPill label={d.is_verified ? 'Verified' : 'Not verified'} tone={d.is_verified ? 'live' : 'neutral'} />
+                  </div>
+                  {d.specialty && <p className="text-sm text-brand-600">{d.specialty}</p>}
+                  <p className="text-xs text-slate-400">{d.clinics?.name}</p>
+                  <div className="mt-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setApprovedDoctorDocsOpenFor((prev) => (prev === d.id ? null : d.id))}
+                    >
+                      {approvedDoctorDocsOpenFor === d.id ? 'Hide checklist' : 'Review verification checklist'}
+                    </Button>
+                  </div>
+                  {approvedDoctorDocsOpenFor === d.id && d.clinics && (
+                    <AdminDocumentReview
+                      ownerType="doctor"
+                      ownerId={d.id}
+                      notifyUserId={d.clinics.owner_id}
+                      label="Doctor verification checklist"
+                      onChanged={loadPending}
                     />
                   )}
                 </Card>

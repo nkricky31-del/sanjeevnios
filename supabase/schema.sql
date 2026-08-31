@@ -1155,3 +1155,624 @@ create policy "appointments_insert" on appointments for insert
     not exists (select 1 from profiles where id = auth.uid() and suspended)
     and (public.is_own_member(member_id) or public.is_own_clinic(clinic_id) or public.is_admin())
   );
+
+-- ============================================================================
+-- 14. CLINIC/DOCTOR ONBOARDING: written consent and documents
+-- ============================================================================
+
+-- Every document a clinic or a doctor uploads for verification - one row per
+-- upload. A re-upload after a rejection is a NEW row rather than an update
+-- to the old one (same "latest row wins" pattern already used for
+-- visits/prescriptions), so the review history isn't destroyed - the
+-- checklist UI always reads the most recent row per (owner_type, owner_id,
+-- doc_type).
+create table if not exists documents (
+  id uuid primary key default gen_random_uuid(),
+  owner_type text not null check (owner_type in ('clinic', 'doctor')),
+  owner_id uuid not null,
+  doc_type text not null,
+  storage_path text,
+  number text,
+  expiry_date date,
+  not_applicable boolean not null default false,
+  not_applicable_note text,
+  status text not null default 'pending' check (status in ('pending', 'verified', 'rejected')),
+  review_note text,
+  reviewed_by uuid references profiles (id),
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+-- owner_id is polymorphic (a clinics.id or a doctors.id depending on
+-- owner_type) so it can't carry a normal foreign key - ownership is instead
+-- enforced entirely through the RLS policies below.
+
+-- The doctor's written consent to the "Agreement to join Sanjeevni" - one
+-- row per signature. A newer agreement_version being signed again is a new
+-- row, not an update, preserving the full consent history.
+create table if not exists consents (
+  id uuid primary key default gen_random_uuid(),
+  doctor_id uuid not null references doctors (id) on delete cascade,
+  agreement_version text not null,
+  signature_name text not null,
+  agreed_at timestamptz not null default now(),
+  ip text,
+  file_url text
+);
+
+alter table documents enable row level security;
+alter table consents enable row level security;
+
+-- True if the calling clinic owns the given (owner_type, owner_id) pair -
+-- i.e. it's either their own clinic-level documents, or one of their own
+-- doctors' documents. security definer for the same reason is_own_clinic
+-- and owns_doctor already are (avoids RLS-recursion pitfalls when used
+-- inside another table's policy).
+create or replace function public.owns_document_owner(p_owner_type text, p_owner_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select case p_owner_type
+    when 'clinic' then public.is_own_clinic(p_owner_id)
+    when 'doctor' then public.owns_doctor(p_owner_id)
+    else false
+  end;
+$$;
+
+drop policy if exists "documents_select" on documents;
+create policy "documents_select" on documents for select
+  using (public.is_admin() or public.owns_document_owner(owner_type, owner_id));
+
+drop policy if exists "documents_insert" on documents;
+create policy "documents_insert" on documents for insert
+  with check (public.owns_document_owner(owner_type, owner_id));
+
+-- Only admin sets status/review fields - the clinic re-uploading is always a
+-- fresh INSERT (see the table comment above), never an UPDATE.
+drop policy if exists "documents_update" on documents;
+create policy "documents_update" on documents for update
+  using (public.is_admin());
+
+drop policy if exists "consents_select" on consents;
+create policy "consents_select" on consents for select
+  using (public.is_admin() or public.owns_doctor(doctor_id));
+
+drop policy if exists "consents_insert" on consents;
+create policy "consents_insert" on consents for insert
+  with check (public.owns_doctor(doctor_id));
+
+-- A new doctor now starts as 'draft' (invisible to admin, same as 'pending'
+-- already was to patients) until the clinic actually finishes onboarding
+-- them - see enforce_doctor_submission_requirements() below for what
+-- "finished" means. Existing rows already satisfy this constraint (draft is
+-- purely an added option, not a replacement for any existing value).
+alter table doctors alter column status set default 'draft';
+alter table doctors drop constraint if exists doctors_status_check;
+alter table doctors add constraint doctors_status_check
+  check (status in ('draft', 'pending', 'approved', 'rejected'));
+
+-- Previously a clinic could set its own doctor's status to ANYTHING,
+-- including 'approved' - reaffirming this spec's own rule ("nothing goes
+-- live until admin approves it"), a clinic may now only move its doctor
+-- between draft and pending itself; approved/rejected stays admin-only.
+drop policy if exists "doctors_update" on doctors;
+create policy "doctors_update" on doctors for update
+  using (public.is_own_clinic(clinic_id) or public.is_admin())
+  with check (
+    public.is_admin()
+    or (public.is_own_clinic(clinic_id) and status in ('draft', 'pending'))
+  );
+
+-- Blocks a doctor from moving out of 'draft' unless the onboarding
+-- agreement has been signed AND every required document has an on-file
+-- upload whose latest attempt wasn't rejected. This is the hard version of
+-- the rule the onboarding screen also checks client-side before showing
+-- "Submit for review" - this trigger is what actually can't be bypassed by
+-- calling the API directly.
+--
+-- The required-doc-type list here must be kept in sync with the `required:
+-- true` entries for ownerType 'doctor' in src/lib/documentTypes.ts.
+create or replace function public.enforce_doctor_submission_requirements()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  has_consent boolean;
+  missing_required int;
+begin
+  if new.status = 'pending' and old.status = 'draft' then
+    select exists(select 1 from consents where doctor_id = new.id) into has_consent;
+    if not has_consent then
+      raise exception 'This doctor has not signed the onboarding agreement yet.';
+    end if;
+
+    select count(*) into missing_required
+    from unnest(array[
+      'government_id',
+      'medical_registration_certificate',
+      'degree_certificate',
+      'doctor_clinic_association_proof'
+    ]) as t(required_type)
+    where not exists (
+      select 1 from (
+        select distinct on (doc_type) doc_type, status
+        from documents
+        where owner_type = 'doctor' and owner_id = new.id
+        order by doc_type, created_at desc
+      ) latest
+      where latest.doc_type = t.required_type and latest.status <> 'rejected'
+    );
+
+    if missing_required > 0 then
+      raise exception 'All required documents must be uploaded before submitting this doctor for review.';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_doctor_submit_check on doctors;
+create trigger on_doctor_submit_check
+  before update on doctors
+  for each row
+  execute function public.enforce_doctor_submission_requirements();
+
+-- ============================================================================
+-- 15. CLINIC MAP LOCATION
+-- ============================================================================
+
+-- No new RLS needed: clinics_select/clinics_update already govern these
+-- exactly like every other clinic column (owner sees/edits their own;
+-- patients see them once the clinic is approved+active).
+alter table clinics add column if not exists lat double precision;
+alter table clinics add column if not exists lng double precision;
+alter table clinics add column if not exists formatted_address text;
+
+-- Re-declared with clinic_lat/clinic_lng added to the result so the patient
+-- search page can sort/filter by "nearest to me" - drop first since
+-- CREATE OR REPLACE can't change a function's return row shape.
+drop function if exists public.search_doctors(text);
+create function public.search_doctors(search_term text default '')
+returns table (
+  doctor_id uuid,
+  doctor_name text,
+  specialty text,
+  clinic_id uuid,
+  clinic_name text,
+  clinic_address text,
+  clinic_lat double precision,
+  clinic_lng double precision
+)
+language sql
+stable
+as $$
+  select d.id, d.name, d.specialty, c.id, c.name, c.address, c.lat, c.lng
+  from doctors d
+  join clinics c on c.id = d.clinic_id
+  where d.status = 'approved'
+    and c.status = 'approved'
+    and c.is_active
+    and (
+      search_term = ''
+      or d.name ilike '%' || search_term || '%'
+      or d.specialty ilike '%' || search_term || '%'
+      or c.name ilike '%' || search_term || '%'
+      or c.address ilike '%' || search_term || '%'
+    )
+  order by c.name, d.name;
+$$;
+
+-- ============================================================================
+-- 16. ADMIN VERIFICATION + VERIFIED BADGE
+-- ============================================================================
+-- A clinic/doctor becomes "is_verified" only once every REQUIRED checklist
+-- item has its LATEST documents row at status = 'verified' (and, if it has
+-- an expiry_date, not yet expired). Two checklist items - "written consent
+-- signed" and "map location set" - aren't file uploads, so rather than
+-- inventing a parallel review mechanism for them, they're modelled as
+-- ordinary `documents` rows too (doc_type 'written_consent' / 'map_location',
+-- storage_path left null), auto-inserted by the triggers below whenever the
+-- underlying fact becomes true. That means the existing admin checklist UI
+-- (AdminDocumentReview.tsx, driven by src/lib/documentTypes.ts) needs no new
+-- review mechanism to cover them - they just show up as one more row with
+-- the same Verify/Reject buttons as any uploaded document.
+
+alter table clinics add column if not exists is_verified boolean not null default false;
+alter table clinics add column if not exists verified_at timestamptz;
+alter table clinics add column if not exists verified_by uuid references profiles (id);
+
+alter table doctors add column if not exists is_verified boolean not null default false;
+alter table doctors add column if not exists verified_at timestamptz;
+alter table doctors add column if not exists verified_by uuid references profiles (id);
+
+-- Only an admin - or the verification system itself (sync_verification_status
+-- below, which sets this session-local flag right before it writes) - may
+-- change is_verified/verified_at/verified_by. Without this, clinics_update
+-- and doctors_update's existing policies (which already let an owner update
+-- most of their own row) would let a clinic simply set its own
+-- is_verified = true directly.
+create or replace function public.prevent_self_verification()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (
+    new.is_verified is distinct from old.is_verified
+    or new.verified_at is distinct from old.verified_at
+    or new.verified_by is distinct from old.verified_by
+  )
+  and not public.is_admin()
+  and coalesce(current_setting('sanjeevnios.verification_sync', true), 'false') <> 'true'
+  then
+    raise exception 'Verification status can only be changed by an admin.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists guard_clinic_verification on clinics;
+create trigger guard_clinic_verification
+  before update on clinics
+  for each row execute function public.prevent_self_verification();
+
+drop trigger if exists guard_doctor_verification on doctors;
+create trigger guard_doctor_verification
+  before update on doctors
+  for each row execute function public.prevent_self_verification();
+
+-- Recomputes and (if changed) writes is_verified/verified_at/verified_by for
+-- one clinic or doctor, from the latest row per required doc_type, logging
+-- the change to audit_log and notifying the owner. Called automatically by
+-- the documents/consents/clinics triggers below - never called directly by
+-- the client. security definer so it can write is_verified regardless of who
+-- caused the underlying change (e.g. a clinic re-uploading a document that
+-- used to be verified, which must be able to drop verification even though
+-- the clinic itself has no direct write access to is_verified).
+--
+-- The required-type lists here must be kept in sync with the
+-- `requiredForVerification: true` entries in src/lib/documentTypes.ts.
+create or replace function public.sync_verification_status(p_owner_type text, p_owner_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  required_types text[];
+  all_ok boolean;
+  was_verified boolean;
+  owner_name text;
+  notify_user_id uuid;
+begin
+  if p_owner_type = 'clinic' then
+    required_types := array['clinic_registration_certificate', 'map_location'];
+    select is_verified, name, owner_id into was_verified, owner_name, notify_user_id
+    from clinics where id = p_owner_id;
+  elsif p_owner_type = 'doctor' then
+    required_types := array[
+      'written_consent',
+      'government_id',
+      'medical_registration_certificate',
+      'degree_certificate',
+      'doctor_clinic_association_proof'
+    ];
+    select d.is_verified, d.name, c.owner_id into was_verified, owner_name, notify_user_id
+    from doctors d join clinics c on c.id = d.clinic_id
+    where d.id = p_owner_id;
+  else
+    return;
+  end if;
+
+  if owner_name is null then
+    return; -- owner row doesn't exist (shouldn't happen in normal flow)
+  end if;
+
+  select coalesce(bool_and(
+    coalesce(latest.status, 'missing') = 'verified'
+    and (latest.expiry_date is null or latest.expiry_date >= current_date)
+  ), false)
+  into all_ok
+  from unnest(required_types) as t(doc_type)
+  left join lateral (
+    select status, expiry_date from documents
+    where owner_type = p_owner_type and owner_id = p_owner_id and documents.doc_type = t.doc_type
+    order by created_at desc
+    limit 1
+  ) latest on true;
+
+  if all_ok = was_verified then
+    return; -- nothing changed
+  end if;
+
+  perform set_config('sanjeevnios.verification_sync', 'true', true);
+
+  if p_owner_type = 'clinic' then
+    update clinics
+    set is_verified = all_ok,
+        verified_at = case when all_ok then now() else null end,
+        verified_by = case when all_ok then auth.uid() else null end
+    where id = p_owner_id;
+  else
+    update doctors
+    set is_verified = all_ok,
+        verified_at = case when all_ok then now() else null end,
+        verified_by = case when all_ok then auth.uid() else null end
+    where id = p_owner_id;
+  end if;
+
+  insert into audit_log (actor, action, target)
+  values (
+    auth.uid(),
+    p_owner_type || (case when all_ok then '_verified' else '_verification_dropped' end),
+    p_owner_id::text
+  );
+
+  if notify_user_id is not null then
+    insert into notifications (user_id, type, message)
+    values (
+      notify_user_id,
+      p_owner_type || (case when all_ok then '_verified' else '_verification_dropped' end),
+      case when all_ok
+        then format('%s "%s" is now VERIFIED on SanjeevniOS.', initcap(p_owner_type), owner_name)
+        else format('%s "%s" is no longer VERIFIED - a required item needs your attention.', initcap(p_owner_type), owner_name)
+      end
+    );
+  end if;
+end;
+$$;
+
+-- Pure read, live-computed "is this owner's badge currently earned" check -
+-- used everywhere a patient sees a clinic/doctor (search, doctor page,
+-- booking screen). Deliberately does NOT just trust the stored is_verified
+-- flag: this app has no cron/scheduled jobs (every time-based rule
+-- elsewhere is computed lazily too - see the subscription period rollover),
+-- so a document expiring only flips the STORED flag the next time
+-- sync_verification_status happens to run for that owner (a re-upload, or
+-- an admin re-reviewing) - not the instant the calendar date passes. This
+-- function closes that gap for DISPLAY purposes by also checking expiry
+-- live, so the hard rule ("never show the badge to anyone not fully
+-- verified") always holds even for an owner nobody has touched since a
+-- certificate lapsed.
+--
+-- security definer: a plain patient session can't read another owner's
+-- `documents` rows (documents_select is admin/owner-only), so without this
+-- the expiry re-check below would silently see zero rows and always pass.
+-- This only ever exposes a single boolean, never the underlying documents.
+create or replace function public.is_currently_verified(p_owner_type text, p_owner_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    coalesce(
+      (select is_verified from clinics where id = p_owner_id and p_owner_type = 'clinic'),
+      (select is_verified from doctors where id = p_owner_id and p_owner_type = 'doctor'),
+      false
+    )
+    and not exists (
+      select 1 from (
+        select distinct on (doc_type) doc_type, status, expiry_date
+        from documents
+        where owner_type = p_owner_type and owner_id = p_owner_id
+        order by doc_type, created_at desc
+      ) latest
+      where latest.status = 'verified'
+        and latest.expiry_date is not null
+        and latest.expiry_date < current_date
+    );
+$$;
+
+-- Any insert or status change on documents can change whether an owner's
+-- required checklist is fully satisfied - recompute after every one.
+create or replace function public.on_document_change_sync_verification()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.sync_verification_status(new.owner_type, new.owner_id);
+  return new;
+end;
+$$;
+
+drop trigger if exists on_document_change_sync on documents;
+create trigger on_document_change_sync
+  after insert or update on documents
+  for each row execute function public.on_document_change_sync_verification();
+
+-- Signing a (new) consent auto-creates a pending "written_consent" checklist
+-- item for admin to review - re-signing (a newer agreement_version) inserts
+-- another pending row too, correctly re-opening review of a doctor who was
+-- already verified under an older agreement.
+create or replace function public.sync_written_consent_document()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into documents (owner_type, owner_id, doc_type, status)
+  values ('doctor', new.doctor_id, 'written_consent', 'pending');
+  return new;
+end;
+$$;
+
+drop trigger if exists on_consent_signed on consents;
+create trigger on_consent_signed
+  after insert on consents
+  for each row execute function public.sync_written_consent_document();
+
+-- Saving (or moving) the clinic's map pin auto-creates a pending
+-- "map_location" checklist item for admin to review. Firing again on every
+-- future move is intentional: it naturally re-opens review (and, via the
+-- documents trigger above, drops is_verified) if a verified clinic's
+-- location is changed later.
+create or replace function public.sync_map_location_document()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into documents (owner_type, owner_id, doc_type, status)
+  values ('clinic', new.id, 'map_location', 'pending');
+  return new;
+end;
+$$;
+
+drop trigger if exists on_clinic_location_saved on clinics;
+create trigger on_clinic_location_saved
+  after update on clinics
+  for each row
+  when (
+    new.lat is not null and new.lng is not null
+    and (old.lat is distinct from new.lat or old.lng is distinct from new.lng)
+  )
+  execute function public.sync_map_location_document();
+
+-- One-time backfill: clinics/doctors that already had their location set or
+-- consent signed before this migration ran won't have picked up a
+-- written_consent/map_location document from the triggers above (those only
+-- fire on future changes) - give them a pending one now so there's
+-- something for admin to review.
+insert into documents (owner_type, owner_id, doc_type, status)
+select 'clinic', c.id, 'map_location', 'pending'
+from clinics c
+where c.lat is not null and c.lng is not null
+  and not exists (
+    select 1 from documents dd
+    where dd.owner_type = 'clinic' and dd.owner_id = c.id and dd.doc_type = 'map_location'
+  );
+
+insert into documents (owner_type, owner_id, doc_type, status)
+select 'doctor', d.id, 'written_consent', 'pending'
+from doctors d
+where exists (select 1 from consents cs where cs.doctor_id = d.id)
+  and not exists (
+    select 1 from documents dd
+    where dd.owner_type = 'doctor' and dd.owner_id = d.id and dd.doc_type = 'written_consent'
+  );
+
+-- Re-declared again with doctor_verified/clinic_verified added, computed
+-- live via is_currently_verified() so search results are never stale (see
+-- that function's comment re: expiry). Drop first since CREATE OR REPLACE
+-- can't change a function's return row shape.
+drop function if exists public.search_doctors(text);
+create function public.search_doctors(search_term text default '')
+returns table (
+  doctor_id uuid,
+  doctor_name text,
+  specialty text,
+  clinic_id uuid,
+  clinic_name text,
+  clinic_address text,
+  clinic_lat double precision,
+  clinic_lng double precision,
+  doctor_verified boolean,
+  clinic_verified boolean
+)
+language sql
+stable
+as $$
+  select
+    d.id, d.name, d.specialty, c.id, c.name, c.address, c.lat, c.lng,
+    public.is_currently_verified('doctor', d.id),
+    public.is_currently_verified('clinic', c.id)
+  from doctors d
+  join clinics c on c.id = d.clinic_id
+  where d.status = 'approved'
+    and c.status = 'approved'
+    and c.is_active
+    and (
+      search_term = ''
+      or d.name ilike '%' || search_term || '%'
+      or d.specialty ilike '%' || search_term || '%'
+      or c.name ilike '%' || search_term || '%'
+      or c.address ilike '%' || search_term || '%'
+    )
+  order by c.name, d.name;
+$$;
+
+-- ============================================================================
+-- 17. PATIENT DECLARATION + PLATFORM DISCLAIMER
+-- ============================================================================
+-- Records a patient's acceptance of the plain-English "Sanjeevni is a
+-- booking platform, not a care provider" declaration - shown once at signup
+-- (PatientDeclarationGate.tsx, wraps the whole patient app in App.tsx) and
+-- again on their first booking confirmation (BookingForm.tsx). "Latest row
+-- wins" for version currency, same pattern as consents: accepting a new
+-- declaration_version later is a new row, not an update, so the acceptance
+-- history is never destroyed.
+create table if not exists patient_declarations (
+  id uuid primary key default gen_random_uuid(),
+  patient_id uuid not null references profiles (id) on delete cascade,
+  declaration_version text not null,
+  accepted_at timestamptz not null default now(),
+  ip text
+);
+
+alter table patient_declarations enable row level security;
+
+drop policy if exists "patient_declarations_select" on patient_declarations;
+create policy "patient_declarations_select" on patient_declarations for select
+  using (patient_id = auth.uid() or public.is_admin());
+
+drop policy if exists "patient_declarations_insert" on patient_declarations;
+create policy "patient_declarations_insert" on patient_declarations for insert
+  with check (patient_id = auth.uid());
+-- No update/delete policy - an immutable acceptance record, same as consents.
+
+-- Blocks booking at the DB level if the patient has never accepted any
+-- version of the declaration - the hard version of the check
+-- PatientDeclarationGate.tsx/BookingForm.tsx also do client-side. Checks
+-- that a row EXISTS, not that it's the CURRENT version - "must be the
+-- current version" stays a client-side/UX concern (re-prompted at signup
+-- and at first booking on a version bump), the same tradeoff already made
+-- for the doctor consent flow in enforce_doctor_submission_requirements().
+--
+-- Deliberately skipped for a clinic (or admin) creating the appointment:
+-- walk-ins are booked BY the clinic on the patient's behalf, under a
+-- family_members row owned by the CLINIC's own account (see
+-- claim_walk_in_records() in section 9) - that's not a patient using the
+-- self-service app, so the declaration doesn't apply there.
+create or replace function public.enforce_patient_declaration_before_booking()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  booking_patient_id uuid;
+  has_declaration boolean;
+begin
+  if public.is_own_clinic(new.clinic_id) or public.is_admin() then
+    return new;
+  end if;
+
+  select account_id into booking_patient_id from family_members where id = new.member_id;
+  select exists(
+    select 1 from patient_declarations where patient_id = booking_patient_id
+  ) into has_declaration;
+
+  if not has_declaration then
+    raise exception 'You must accept the platform declaration before booking.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_appointment_declaration_check on appointments;
+create trigger on_appointment_declaration_check
+  before insert on appointments
+  for each row execute function public.enforce_patient_declaration_before_booking();

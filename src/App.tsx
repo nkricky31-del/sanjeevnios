@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 
+import PatientDeclarationGate from './components/PatientDeclarationGate';
 import BottomTabBar from './components/ui/BottomTabBar';
 import Button from './components/ui/Button';
+import PlatformFooterNote from './components/ui/PlatformFooterNote';
 import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
 import { supabase } from './lib/supabaseClient';
@@ -103,16 +105,19 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
-      <Routes>
-        <Route path="/" element={<Search />} />
-        <Route path="/doctors/:doctorId" element={<DoctorPage />} />
-        <Route path="/bookings" element={<MyBookings />} />
-        <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
-        <Route path="/timeline" element={<Timeline />} />
-        <Route path="/profile" element={<Profile />} />
-      </Routes>
-      <BottomTabBar />
-    </div>
+    <PatientDeclarationGate>
+      <div className="min-h-screen bg-slate-50 pb-20">
+        <Routes>
+          <Route path="/" element={<Search />} />
+          <Route path="/doctors/:doctorId" element={<DoctorPage />} />
+          <Route path="/bookings" element={<MyBookings />} />
+          <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
+          <Route path="/timeline" element={<Timeline />} />
+          <Route path="/profile" element={<Profile />} />
+        </Routes>
+        <PlatformFooterNote />
+        <BottomTabBar />
+      </div>
+    </PatientDeclarationGate>
   );
 }

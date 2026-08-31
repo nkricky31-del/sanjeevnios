@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 import AddDoctorForm from '../components/AddDoctorForm';
 import DoctorAvailabilityForm from '../components/DoctorAvailabilityForm';
+import DoctorOnboardingScreen from '../components/DoctorOnboardingScreen';
+import DocumentChecklist from '../components/DocumentChecklist';
 import Card from '../components/ui/Card';
 import StatusPill from '../components/ui/StatusPill';
 import { supabase } from '../lib/supabaseClient';
@@ -12,13 +14,15 @@ interface Props {
 }
 
 const STATUS_TONE: Record<DoctorStatus, 'live' | 'warning' | 'neutral'> = {
+  draft: 'neutral',
   pending: 'warning',
   approved: 'live',
   rejected: 'neutral',
 };
 
 const STATUS_LABEL: Record<DoctorStatus, string> = {
-  pending: 'Pending approval',
+  draft: 'Onboarding in progress',
+  pending: 'Submitted for review',
   approved: 'Approved',
   rejected: 'Rejected',
 };
@@ -28,6 +32,8 @@ export default function ClinicDoctors({ clinicId }: Props) {
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [expandedDoctorId, setExpandedDoctorId] = useState<string | null>(null);
+  const [showClinicDocs, setShowClinicDocs] = useState(false);
+  const [onboardingDoctor, setOnboardingDoctor] = useState<{ id: string; name: string } | null>(null);
 
   const loadDoctors = async () => {
     setLoading(true);
@@ -48,9 +54,34 @@ export default function ClinicDoctors({ clinicId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clinicId]);
 
+  if (onboardingDoctor) {
+    return (
+      <DoctorOnboardingScreen
+        doctorId={onboardingDoctor.id}
+        doctorName={onboardingDoctor.name}
+        onClose={() => {
+          setOnboardingDoctor(null);
+          loadDoctors();
+        }}
+      />
+    );
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-slate-900">Clinic documents</h2>
+        <button onClick={() => setShowClinicDocs((s) => !s)} className="text-sm font-semibold text-brand-600">
+          {showClinicDocs ? 'Hide' : 'Show'}
+        </button>
+      </div>
+      {showClinicDocs && (
+        <div className="mt-2">
+          <DocumentChecklist ownerType="clinic" ownerId={clinicId} />
+        </div>
+      )}
+
+      <div className="mt-6 flex items-center justify-between">
         <h2 className="text-lg font-bold text-slate-900">Doctors</h2>
         <button onClick={() => setShowAddForm((s) => !s)} className="text-sm font-semibold text-brand-600">
           {showAddForm ? 'Cancel' : '+ Add doctor'}
@@ -60,9 +91,10 @@ export default function ClinicDoctors({ clinicId }: Props) {
       {showAddForm && (
         <AddDoctorForm
           clinicId={clinicId}
-          onAdded={() => {
+          onAdded={(doctorId) => {
             setShowAddForm(false);
             loadDoctors();
+            setOnboardingDoctor({ id: doctorId, name: 'New doctor' });
           }}
           onCancel={() => setShowAddForm(false)}
         />
@@ -89,12 +121,20 @@ export default function ClinicDoctors({ clinicId }: Props) {
               <StatusPill label={STATUS_LABEL[d.status]} tone={STATUS_TONE[d.status]} />
             </div>
 
-            <button
-              onClick={() => setExpandedDoctorId((prev) => (prev === d.id ? null : d.id))}
-              className="mt-2 text-sm font-medium text-brand-600"
-            >
-              {expandedDoctorId === d.id ? 'Hide availability' : 'Manage availability'}
-            </button>
+            <div className="mt-2 flex flex-wrap gap-3">
+              <button
+                onClick={() => setOnboardingDoctor({ id: d.id, name: d.name })}
+                className="text-sm font-medium text-brand-600"
+              >
+                {d.status === 'draft' ? 'Continue onboarding' : 'View onboarding'}
+              </button>
+              <button
+                onClick={() => setExpandedDoctorId((prev) => (prev === d.id ? null : d.id))}
+                className="text-sm font-medium text-brand-600"
+              >
+                {expandedDoctorId === d.id ? 'Hide availability' : 'Manage availability'}
+              </button>
+            </div>
 
             {expandedDoctorId === d.id && <DoctorAvailabilityForm doctorId={d.id} />}
           </Card>

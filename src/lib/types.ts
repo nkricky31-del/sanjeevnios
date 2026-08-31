@@ -25,7 +25,11 @@ export interface FamilyMember {
 }
 
 export type ClinicStatus = 'pending' | 'approved' | 'rejected';
-export type DoctorStatus = 'pending' | 'approved' | 'rejected';
+// 'draft': added by the clinic but onboarding (consent + required
+// documents) isn't complete yet - invisible to admin, same as 'pending'
+// already was to patients. See enforce_doctor_submission_requirements() in
+// schema.sql for what moves a doctor from draft to pending.
+export type DoctorStatus = 'draft' | 'pending' | 'approved' | 'rejected';
 export type SubscriptionTier = 'free' | 'pro' | 'premium';
 
 export interface Subscription {
@@ -46,8 +50,14 @@ export interface Clinic {
   status: ClinicStatus;
   reject_reason: string | null;
   registration_doc_path: string | null;
+  lat: number | null;
+  lng: number | null;
+  formatted_address: string | null;
   subscription_tier: string;
   is_active: boolean;
+  is_verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   created_at: string;
 }
 
@@ -82,6 +92,44 @@ export interface AuditLogEntry {
   at: string;
 }
 
+export type OwnerType = 'clinic' | 'doctor';
+export type DocumentStatus = 'pending' | 'verified' | 'rejected';
+
+export interface DocumentRow {
+  id: string;
+  owner_type: OwnerType;
+  owner_id: string;
+  doc_type: string;
+  storage_path: string | null;
+  number: string | null;
+  expiry_date: string | null;
+  not_applicable: boolean;
+  not_applicable_note: string | null;
+  status: DocumentStatus;
+  review_note: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export interface Consent {
+  id: string;
+  doctor_id: string;
+  agreement_version: string;
+  signature_name: string;
+  agreed_at: string;
+  ip: string | null;
+  file_url: string | null;
+}
+
+export interface PatientDeclaration {
+  id: string;
+  patient_id: string;
+  declaration_version: string;
+  accepted_at: string;
+  ip: string | null;
+}
+
 // Result row from the search_doctors() RPC - a flattened doctor+clinic pair.
 export interface DoctorSearchResult {
   doctor_id: string;
@@ -90,6 +138,10 @@ export interface DoctorSearchResult {
   clinic_id: string;
   clinic_name: string;
   clinic_address: string | null;
+  clinic_lat: number | null;
+  clinic_lng: number | null;
+  doctor_verified: boolean;
+  clinic_verified: boolean;
 }
 
 export interface Doctor {
@@ -102,6 +154,9 @@ export interface Doctor {
   reject_reason: string | null;
   registration_doc_path: string | null;
   consultation_fee: number;
+  is_verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   created_at: string;
 }
 

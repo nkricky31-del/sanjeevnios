@@ -2,6 +2,7 @@ import { Clock, RefreshCw, Ticket, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
+import ClinicLocationPreview from '../components/ClinicLocationPreview';
 import FileUpload from '../components/FileUpload';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
@@ -9,6 +10,7 @@ import Card from '../components/ui/Card';
 import InfoBanner from '../components/ui/InfoBanner';
 import StatTile from '../components/ui/StatTile';
 import StatusPill from '../components/ui/StatusPill';
+import VerifiedBadge from '../components/VerifiedBadge';
 import VisitDetails from '../components/VisitDetails';
 import { computeNowServing } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
@@ -24,8 +26,9 @@ interface BookingDetail {
   token_no: number | null;
   reject_reason: string | null;
   doctor_id: string;
+  clinic_id: string;
   doctors: { name: string; specialty: string | null } | null;
-  clinics: { name: string } | null;
+  clinics: { name: string; lat: number | null; lng: number | null; formatted_address: string | null } | null;
   family_members: { name: string } | null;
 }
 
@@ -65,16 +68,30 @@ export default function BookingStatus() {
   const [visit, setVisit] = useState<(Visit & { prescriptions: Prescription[] }) | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [doctorVerified, setDoctorVerified] = useState(false);
+  const [clinicVerified, setClinicVerified] = useState(false);
   const alerted = useRef({ thirty: false, next: false });
 
   const loadBooking = async () => {
     const { data } = await supabase
       .from('appointments')
-      .select('*, doctors(name, specialty), clinics(name), family_members(name)')
+      .select('*, doctors(name, specialty), clinics(name, lat, lng, formatted_address), family_members(name)')
       .eq('id', appointmentId)
       .single();
     setBooking(data as BookingDetail | null);
     setLoading(false);
+
+    // Live-computed rather than read off a stored flag - see
+    // is_currently_verified() in schema.sql.
+    if (data) {
+      const detail = data as BookingDetail;
+      const [{ data: docVerified }, { data: clinicVerifiedData }] = await Promise.all([
+        supabase.rpc('is_currently_verified', { p_owner_type: 'doctor', p_owner_id: detail.doctor_id }),
+        supabase.rpc('is_currently_verified', { p_owner_type: 'clinic', p_owner_id: detail.clinic_id }),
+      ]);
+      setDoctorVerified(!!docVerified);
+      setClinicVerified(!!clinicVerifiedData);
+    }
   };
 
   const loadVisit = async () => {
@@ -259,15 +276,18 @@ export default function BookingStatus() {
               <p className="text-5xl font-extrabold text-brand-700">{booking.token_no}</p>
             </div>
             <p className="mt-3 text-sm font-semibold text-slate-600">{STATUS_LABEL[booking.status]}</p>
-            <span className="mt-2 inline-block rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
               {booking.doctors?.name}
+              <VerifiedBadge verified={doctorVerified} ownerType="doctor" />
+              <VerifiedBadge verified={clinicVerified} ownerType="clinic" />
             </span>
           </Card>
         ) : (
           <Card className="mt-4 text-center">
             <StatusPill label={STATUS_LABEL[booking.status]} tone={STATUS_TONE[booking.status]} />
-            <p className="mt-3 text-sm text-slate-500">
-              {booking.doctors?.name} · {booking.clinics?.name}
+            <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-slate-500">
+              {booking.doctors?.name} <VerifiedBadge verified={doctorVerified} ownerType="doctor" /> ·{' '}
+              {booking.clinics?.name} <VerifiedBadge verified={clinicVerified} ownerType="clinic" />
             </p>
           </Card>
         )}
@@ -288,6 +308,13 @@ export default function BookingStatus() {
             </>
           )}
         </Card>
+
+        <ClinicLocationPreview
+          lat={booking.clinics?.lat ?? null}
+          lng={booking.clinics?.lng ?? null}
+          formattedAddress={booking.clinics?.formatted_address ?? null}
+          clinicName={booking.clinics?.name}
+        />
 
         {confirmed && (
           <>
