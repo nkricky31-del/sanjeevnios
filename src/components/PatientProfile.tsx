@@ -5,11 +5,16 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { ageFromDob } from '../lib/date';
 import { supabase } from '../lib/supabaseClient';
-import type { FamilyMember } from '../lib/types';
+import type { FamilyMember, HasKnownConditions } from '../lib/types';
 import StatusPill from './ui/StatusPill';
 
 interface Props {
   mrn: string;
+}
+
+interface ConditionRow {
+  condition_id: string;
+  conditions_ref: { name: string } | null;
 }
 
 interface EncounterRow {
@@ -33,7 +38,15 @@ interface MergedProfile {
   blood_group: string | null;
   city: string | null;
   registered_on: string;
+  hasKnownConditions: HasKnownConditions;
+  knownConditionsOther: string | null;
 }
+
+const CONDITIONS_ANSWER_LABEL: Record<HasKnownConditions, string> = {
+  yes: 'Yes',
+  no: 'No known conditions',
+  not_answered: 'Not answered',
+};
 
 const AVATAR_COLORS = ['bg-brand-500', 'bg-coral-500', 'bg-emerald-500', 'bg-amber-500'];
 
@@ -51,6 +64,11 @@ function mergeProfile(rows: FamilyMember[]): MergedProfile | null {
     }
     return null;
   };
+  // A "yes" or explicit "no" from any visible row should win over another
+  // row that simply never got asked - only fall back to 'not_answered' if
+  // every visible row is still unanswered.
+  const hasKnownConditions = sorted.find((r) => r.has_known_conditions !== 'not_answered')?.has_known_conditions ?? 'not_answered';
+
   return {
     name: (pick('name') as string) ?? 'Unknown',
     gender: pick('gender') as string | null,
@@ -60,6 +78,8 @@ function mergeProfile(rows: FamilyMember[]): MergedProfile | null {
     blood_group: pick('blood_group') as string | null,
     city: pick('city') as string | null,
     registered_on: sorted[0].created_at,
+    hasKnownConditions,
+    knownConditionsOther: pick('known_conditions_other') as string | null,
   };
 }
 
@@ -67,22 +87,37 @@ export default function PatientProfile({ mrn }: Props) {
   const { profile: viewerProfile } = useAuth();
   const [rows, setRows] = useState<FamilyMember[]>([]);
   const [encounters, setEncounters] = useState<EncounterRow[]>([]);
+  const [conditions, setConditions] = useState<ConditionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      supabase.from('family_members').select('*').eq('mrn', mrn),
-      supabase
-        .from('encounters')
-        .select('id, encounter_no, visit_datetime, department, visit_type, reason, status, doctors(name, specialty), clinics(name)')
-        .eq('mrn', mrn)
-        .order('visit_datetime', { ascending: false }),
-    ]).then(([memberRes, encounterRes]) => {
-      setRows((memberRes.data ?? []) as FamilyMember[]);
-      setEncounters((encounterRes.data ?? []) as unknown as EncounterRow[]);
-      setLoading(false);
-    });
+    supabase
+      .from('family_members')
+      .select('*')
+      .eq('mrn', mrn)
+      .then(async ({ data: memberData }) => {
+        const memberRows = (memberData ?? []) as FamilyMember[];
+        setRows(memberRows);
+        const memberIds = memberRows.map((r) => r.id);
+
+        const [encounterRes, conditionsRes] = await Promise.all([
+          supabase
+            .from('encounters')
+            .select(
+              'id, encounter_no, visit_datetime, department, visit_type, reason, status, doctors(name, specialty), clinics(name)'
+            )
+            .eq('mrn', mrn)
+            .order('visit_datetime', { ascending: false }),
+          memberIds.length > 0
+            ? supabase.from('patient_conditions').select('condition_id, conditions_ref(name)').in('patient_id', memberIds)
+            : Promise.resolve({ data: [] as ConditionRow[] }),
+        ]);
+
+        setEncounters((encounterRes.data ?? []) as unknown as EncounterRow[]);
+        setConditions((conditionsRes.data ?? []) as unknown as ConditionRow[]);
+        setLoading(false);
+      });
   }, [mrn]);
 
   if (loading) return <p className="text-sm text-slate-400">Loading patient...</p>;
@@ -99,6 +134,9 @@ export default function PatientProfile({ mrn }: Props) {
 
   const initial = (profile?.name ?? '?').charAt(0).toUpperCase();
   const avatarColor = AVATAR_COLORS[mrn.charCodeAt(mrn.length - 1) % AVATAR_COLORS.length];
+  const conditionNames = [...new Map(conditions.map((c) => [c.condition_id, c.conditions_ref?.name])).values()].filter(
+    (n): n is string => !!n
+  );
 
   return (
     <div>
@@ -144,6 +182,31 @@ export default function PatientProfile({ mrn }: Props) {
             {profile ? new Date(profile.registered_on).toLocaleDateString() : '—'}
           </p>
         </div>
+
+        {profile && (
+          <div className="mt-3 border-t border-slate-100 pt-3 text-sm">
+            <p>
+              <span className="text-slate-400">Known conditions:</span>{' '}
+              {CONDITIONS_ANSWER_LABEL[profile.hasKnownConditions]}
+            </p>
+            {profile.hasKnownConditions === 'yes' && (
+              <>
+                {conditionNames.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {conditionNames.map((n) => (
+                      <span key={n} className="rounded-full bg-coral-50 px-2.5 py-1 text-xs font-semibold text-coral-700">
+                        {n}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {profile.knownConditionsOther && (
+                  <p className="mt-1 text-xs text-slate-500">Other: {profile.knownConditionsOther}</p>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {viewerProfile?.role === 'clinic' && (

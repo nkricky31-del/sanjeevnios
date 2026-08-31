@@ -25,6 +25,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
   const [name, setName] = useState('');
   const [phoneDigits, setPhoneDigits] = useState('');
   const [govtId, setGovtId] = useState('');
+  const [reason, setReason] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState<Gender | ''>('');
   const [guardianConsent, setGuardianConsent] = useState(false);
@@ -101,6 +102,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         clinic_id: clinicId,
         date: todayISO(),
         slot_time: nowTime,
+        reason: reason.trim() || null,
         status: 'pending',
         payment_status: 'cod',
       })
@@ -220,6 +222,17 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
           Helps recognise this patient if they've already been treated at another Sanjeevni clinic, so they keep one
           medical record number.
         </p>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-slate-700">Reason for visit (optional)</label>
+        <input
+          type="text"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. Fever, follow-up, routine checkup"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        />
       </div>
 
       <div className="flex gap-3">

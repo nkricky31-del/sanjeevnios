@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import AppHeader from '../components/ui/AppHeader';
 import Card from '../components/ui/Card';
 import { openAppointmentFile } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 import type { AppointmentFile, AppointmentStatus, FamilyMember, Prescription, Visit } from '../lib/types';
+import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 interface TimelineAppointment {
   id: string;
@@ -25,6 +27,8 @@ const FILE_LABEL: Record<string, string> = {
 };
 
 export default function Timeline() {
+  const navigate = useNavigate();
+  const hasUnread = useUnreadNotifications();
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [memberId, setMemberId] = useState('');
   const [rows, setRows] = useState<TimelineAppointment[]>([]);
@@ -66,7 +70,7 @@ export default function Timeline() {
 
   return (
     <div>
-      <AppHeader title="My health timeline" />
+      <AppHeader title="My health timeline" bellDot={hasUnread} onBellClick={() => navigate('/notifications')} />
       <div className="mx-auto max-w-md px-4 py-6">
         {members.length > 0 && (
           <select

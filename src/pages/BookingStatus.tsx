@@ -16,6 +16,7 @@ import { computeNowServing } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { estimateSlotMinutes } from '../lib/time';
 import type { AppointmentStatus, DoctorAvailability, Prescription, QueueStatusRow, Visit } from '../lib/types';
+import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 interface BookingDetail {
   id: string;
@@ -62,6 +63,7 @@ const CANCEL_WINDOW_HOURS = 2;
 export default function BookingStatus() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
+  const hasUnread = useUnreadNotifications();
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [nowServing, setNowServing] = useState<number | null>(null);
   const [slotMinutes, setSlotMinutes] = useState(15);
@@ -256,7 +258,8 @@ export default function BookingStatus() {
         title="SanjeevniOS"
         subtitle={booking.clinics?.name}
         pill={confirmed ? <StatusPill label="Live Queue" tone="live" /> : undefined}
-        bellDot={!!alertMessage}
+        bellDot={!!alertMessage || hasUnread}
+        onBellClick={() => navigate('/notifications')}
       />
 
       <div className="mx-auto max-w-md px-4 py-6">

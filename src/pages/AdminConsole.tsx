@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import AdminAuditLog from '../components/AdminAuditLog';
+import AdminConditions from '../components/AdminConditions';
 import AdminDashboard from '../components/AdminDashboard';
 import AdminDocumentReview from '../components/AdminDocumentReview';
 import AdminFraud from '../components/AdminFraud';
@@ -18,6 +20,7 @@ import { hasUnresolvedRejection } from '../lib/documents';
 import { openVerificationDoc } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 import type { DocumentRow } from '../lib/types';
+import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 interface PendingClinic {
   id: string;
@@ -61,8 +64,10 @@ function rejectedOwnerIds(documents: DocumentRow[]): Set<string> {
 
 export default function AdminConsole() {
   const { session } = useAuth();
+  const navigate = useNavigate();
+  const hasUnread = useUnreadNotifications();
   const [view, setView] = useState<
-    'dashboard' | 'verification' | 'subscriptions' | 'payments' | 'fraud' | 'audit' | 'patients'
+    'dashboard' | 'verification' | 'subscriptions' | 'payments' | 'fraud' | 'audit' | 'patients' | 'conditions'
   >('dashboard');
   const [clinics, setClinics] = useState<PendingClinic[]>([]);
   const [doctors, setDoctors] = useState<PendingDoctor[]>([]);
@@ -218,11 +223,17 @@ export default function AdminConsole() {
     { key: 'fraud', label: 'Fraud' },
     { key: 'audit', label: 'Audit log' },
     { key: 'patients', label: 'Patients' },
+    { key: 'conditions', label: 'Conditions' },
   ];
 
   return (
     <div>
-      <AppHeader title="Admin" subtitle="Admin console" />
+      <AppHeader
+        title="Admin"
+        subtitle="Admin console"
+        bellDot={hasUnread}
+        onBellClick={() => navigate('/notifications')}
+      />
       <div className="mx-auto max-w-md px-4 py-6">
         <div className="flex flex-wrap gap-1.5 rounded-2xl bg-slate-100 p-1.5">
           {TABS.map((t) => (
@@ -271,6 +282,12 @@ export default function AdminConsole() {
         {view === 'patients' && (
           <div className="mt-4">
             <PatientLookup />
+          </div>
+        )}
+
+        {view === 'conditions' && (
+          <div className="mt-4">
+            <AdminConditions />
           </div>
         )}
 

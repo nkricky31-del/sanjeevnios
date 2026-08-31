@@ -1,12 +1,13 @@
 import { CalendarDays } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import AppHeader from '../components/ui/AppHeader';
 import Card from '../components/ui/Card';
 import StatusPill from '../components/ui/StatusPill';
 import { supabase } from '../lib/supabaseClient';
 import type { AppointmentStatus } from '../lib/types';
+import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 interface Row {
   id: string;
@@ -30,6 +31,8 @@ const STATUS_TONE: Record<AppointmentStatus, 'live' | 'warning' | 'info' | 'neut
 };
 
 export default function MyBookings() {
+  const navigate = useNavigate();
+  const hasUnread = useUnreadNotifications();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,7 +51,7 @@ export default function MyBookings() {
 
   return (
     <div>
-      <AppHeader title="My bookings" />
+      <AppHeader title="My bookings" bellDot={hasUnread} onBellClick={() => navigate('/notifications')} />
       <div className="mx-auto max-w-md px-4 py-6">
         <div className="space-y-2.5">
           {loading && <p className="text-sm text-slate-400">Loading...</p>}

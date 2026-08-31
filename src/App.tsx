@@ -3,6 +3,7 @@ import { Route, Routes, useLocation } from 'react-router-dom';
 
 import PatientDeclarationGate from './components/PatientDeclarationGate';
 import EncounterDetail from './components/EncounterDetail';
+import NotificationsList from './components/NotificationsList';
 import BottomTabBar from './components/ui/BottomTabBar';
 import Button from './components/ui/Button';
 import PlatformFooterNote from './components/ui/PlatformFooterNote';
@@ -83,6 +84,17 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-50">
         <EncounterDetail encounterId={encounterMatch[1]} />
+      </div>
+    );
+  }
+
+  // Same idea as the encounter route above - reachable by any role via the
+  // bell icon on every AppHeader (see useUnreadNotifications.ts), regardless
+  // of which role-specific screen they're currently on.
+  if (location.pathname === '/notifications') {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <NotificationsList />
       </div>
     );
   }

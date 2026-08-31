@@ -2024,3 +2024,328 @@ create policy "encounters_select_patient" on encounters for select
 
 create policy "encounters_select_clinic" on encounters for select
   using (public.is_own_clinic(clinic_id));
+
+-- ============================================================================
+-- 21. CLOSE MRN CROSS-ROW READ GAP
+-- ============================================================================
+-- is_own_member(member_id) (section 3) only matches the EXACT family_members
+-- row a booking references. Since one human can have several family_members
+-- rows sharing an mrn (a walk-in row at a clinic they haven't logged into
+-- yet, alongside their own self-registered row - see section 18), a patient
+-- could see the ENCOUNTER for a visit filed under a sibling row (fixed for
+-- encounters in section 20) but still get an empty appointment/visit/
+-- prescription/files read for it, because those tables' own SELECT policies
+-- were still keyed off the exact row, not the person.
+--
+-- is_own_mrn() closes that: true if the target family_members row's mrn
+-- matches ANY family_members row the caller's own account owns. It's a
+-- strict superset of is_own_member() (a row always shares its own mrn with
+-- itself), so every SELECT policy below simply replaces one with the other.
+-- INSERT/UPDATE policies are deliberately left alone - creating or
+-- cancelling a booking should still only ever act on a row the caller
+-- actually owns, not any row that happens to share their mrn (some of
+-- which may be owned by a CLINIC's account, not the patient's).
+create or replace function public.is_own_mrn(target_member_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from family_members target
+    join family_members mine on mine.mrn = target.mrn
+    where target.id = target_member_id and mine.account_id = auth.uid()
+  );
+$$;
+
+drop policy if exists "appointments_select" on appointments;
+create policy "appointments_select" on appointments for select
+  using (public.is_own_mrn(member_id) or public.is_own_clinic(clinic_id) or public.is_admin());
+
+drop policy if exists "visits_select" on visits;
+create policy "visits_select" on visits for select
+  using (
+    public.is_admin()
+    or exists (
+      select 1 from appointments a
+      where a.id = visits.appointment_id
+        and (public.is_own_mrn(a.member_id) or public.is_own_clinic(a.clinic_id))
+    )
+  );
+
+drop policy if exists "prescriptions_select" on prescriptions;
+create policy "prescriptions_select" on prescriptions for select
+  using (
+    public.is_admin()
+    or exists (
+      select 1 from visits v join appointments a on a.id = v.appointment_id
+      where v.id = prescriptions.visit_id
+        and (public.is_own_mrn(a.member_id) or public.is_own_clinic(a.clinic_id))
+    )
+  );
+
+drop policy if exists "files_select" on files;
+create policy "files_select" on files for select
+  using (
+    public.is_admin()
+    or public.is_own_mrn(member_id)
+    or exists (
+      select 1 from appointments a where a.id = files.appointment_id and public.is_own_clinic(a.clinic_id)
+    )
+  );
+
+-- Same gap, same fix, for the actual file download (not just the files
+-- table row) - otherwise a patient could see the file exists but not
+-- open it.
+drop policy if exists "appointment_files_select" on storage.objects;
+create policy "appointment_files_select" on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'appointment-files'
+    and exists (
+      select 1 from appointments a
+      where a.id::text = (storage.foldername(name))[1]
+        and (public.is_own_mrn(a.member_id) or public.is_own_clinic(a.clinic_id) or public.is_admin())
+    )
+  );
+
+-- ============================================================================
+-- 22. DPDP DATA-CONSENT CHECKBOX
+-- ============================================================================
+-- A second, separate consent - handling the patient's personal/health data
+-- under the DPDP Act - reusing patient_declarations' shape (patient_id,
+-- version, accepted_at, ip) rather than a parallel table, since it's the
+-- exact same kind of record. `consent_type` is the only new thing:
+-- 'platform_disclaimer' is the existing declaration from section 17,
+-- 'dpdp_data_consent' is this one - each tracked, versioned, and re-prompted
+-- on a wording change entirely independently of the other (see
+-- usePatientConsent.ts). Existing rows default to 'platform_disclaimer' so
+-- nothing already accepted needs to be re-accepted under the old type.
+alter table patient_declarations add column if not exists consent_type text not null default 'platform_disclaimer';
+
+-- Redeclared to also require the DPDP consent before a self-service booking,
+-- same "hard version of the rule" reasoning as the platform declaration -
+-- still skipped for a clinic/admin creating the appointment (walk-ins,
+-- see section 17's version of this function for why).
+create or replace function public.enforce_patient_declaration_before_booking()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  booking_patient_id uuid;
+  has_platform_declaration boolean;
+  has_dpdp_consent boolean;
+begin
+  if public.is_own_clinic(new.clinic_id) or public.is_admin() then
+    return new;
+  end if;
+
+  select account_id into booking_patient_id from family_members where id = new.member_id;
+
+  select
+    exists(select 1 from patient_declarations where patient_id = booking_patient_id and consent_type = 'platform_disclaimer'),
+    exists(select 1 from patient_declarations where patient_id = booking_patient_id and consent_type = 'dpdp_data_consent')
+  into has_platform_declaration, has_dpdp_consent;
+
+  if not has_platform_declaration then
+    raise exception 'You must accept the platform declaration before booking.';
+  end if;
+  if not has_dpdp_consent then
+    raise exception 'You must accept the data-sharing consent before booking.';
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ============================================================================
+-- 23. REASON FOR VISIT
+-- ============================================================================
+-- encounters.reason (section 18) has had no way to ever be populated -
+-- nothing in the booking or walk-in flow captured it. Adding it to
+-- appointments (optional, filled in by the patient/clinic at booking time)
+-- and copying it onto the encounter at creation, same snapshot pattern as
+-- department/visit_type already use.
+alter table appointments add column if not exists reason text;
+
+create or replace function public.create_encounter_for_appointment()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_mrn text;
+  v_department text;
+  new_encounter_id uuid;
+begin
+  select mrn into v_mrn from family_members where id = new.member_id;
+  select specialty into v_department from doctors where id = new.doctor_id;
+
+  insert into encounters (encounter_no, mrn, patient_id, clinic_id, doctor_id, department, visit_datetime, reason)
+  values (
+    public.generate_encounter_no(),
+    v_mrn,
+    new.member_id,
+    new.clinic_id,
+    new.doctor_id,
+    v_department,
+    (new.date + new.slot_time)::timestamptz,
+    new.reason
+  )
+  returning id into new_encounter_id;
+
+  new.encounter_id := new_encounter_id;
+  return new;
+end;
+$$;
+
+-- ============================================================================
+-- 24. KNOWN CONDITIONS - DATA
+-- ============================================================================
+-- conditions_ref: a small admin-managed catalog of known-condition options.
+-- Names aren't sensitive on their own (it's just a picklist) - readable by
+-- anyone logged in, writable only by admin.
+create table if not exists conditions_ref (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  is_active boolean not null default true
+);
+
+insert into conditions_ref (name) values
+  ('Diabetes'),
+  ('Hypertension (high BP)'),
+  ('Asthma/respiratory'),
+  ('Thyroid'),
+  ('Heart disease'),
+  ('Liver disease'),
+  ('Kidney disease'),
+  ('Cancer'),
+  ('Epilepsy'),
+  ('Mental-health'),
+  ('Pregnancy (current)')
+on conflict (name) do nothing;
+
+alter table conditions_ref enable row level security;
+
+drop policy if exists "conditions_ref_select" on conditions_ref;
+create policy "conditions_ref_select" on conditions_ref for select
+  to authenticated
+  using (true);
+
+drop policy if exists "conditions_ref_insert" on conditions_ref;
+create policy "conditions_ref_insert" on conditions_ref for insert
+  with check (public.is_admin());
+
+drop policy if exists "conditions_ref_update" on conditions_ref;
+create policy "conditions_ref_update" on conditions_ref for update
+  using (public.is_admin());
+
+-- has_known_conditions is a genuine 3-state answer, not "unset means no" -
+-- 'not_answered' is the explicit default until the patient actually
+-- answers the question either way.
+alter table family_members add column if not exists has_known_conditions text not null default 'not_answered';
+alter table family_members drop constraint if exists family_members_has_known_conditions_check;
+alter table family_members add constraint family_members_has_known_conditions_check
+  check (has_known_conditions in ('yes', 'no', 'not_answered'));
+alter table family_members add column if not exists known_conditions_other text;
+alter table family_members add column if not exists conditions_updated_at timestamptz;
+
+-- The chosen conditions themselves - a plain many-to-many join, one row per
+-- (person, condition). Deliberately not a "latest row wins" history table
+-- like documents/consents: a condition list is a SET, so the UI replaces it
+-- by deleting the rows that got unchecked and inserting the ones that got
+-- checked, rather than layering new rows over old ones.
+create table if not exists patient_conditions (
+  id uuid primary key default gen_random_uuid(),
+  patient_id uuid not null references family_members (id) on delete cascade,
+  condition_id uuid not null references conditions_ref (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (patient_id, condition_id)
+);
+
+alter table patient_conditions enable row level security;
+
+-- Part 40 rule: only the patient themselves, a clinic that has actually
+-- seen them (an appointment exists), or admin may read this. is_own_mrn()
+-- (section 21) rather than is_own_member() so this correctly covers a
+-- person whose identity spans more than one family_members row.
+drop policy if exists "patient_conditions_select" on patient_conditions;
+create policy "patient_conditions_select" on patient_conditions for select
+  using (
+    public.is_admin()
+    or public.is_own_mrn(patient_id)
+    or exists (
+      select 1 from appointments a
+      where a.member_id = patient_conditions.patient_id and public.is_own_clinic(a.clinic_id)
+    )
+  );
+
+-- Insert/delete deliberately narrower than select: only the patient
+-- themselves (any row sharing their mrn) or admin may WRITE this - a
+-- clinic can read it (above) but not edit it, matching family_members'
+-- own has_known_conditions/known_conditions_other, which family_update
+-- already restricts to the owning account or admin.
+drop policy if exists "patient_conditions_insert" on patient_conditions;
+create policy "patient_conditions_insert" on patient_conditions for insert
+  with check (public.is_admin() or public.is_own_mrn(patient_id));
+
+drop policy if exists "patient_conditions_delete" on patient_conditions;
+create policy "patient_conditions_delete" on patient_conditions for delete
+  using (public.is_admin() or public.is_own_mrn(patient_id));
+
+-- "log every change": has_known_conditions/known_conditions_other changing
+-- on family_members, and every patient_conditions add/remove, each write
+-- their own audit_log row. BEFORE UPDATE so it can also stamp
+-- conditions_updated_at server-side (not trusting a client-supplied value).
+create or replace function public.log_known_conditions_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.has_known_conditions is distinct from old.has_known_conditions
+     or new.known_conditions_other is distinct from old.known_conditions_other
+  then
+    new.conditions_updated_at := now();
+    insert into audit_log (actor, action, target)
+    values (auth.uid(), 'update_known_conditions', new.id::text);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_family_member_conditions_change on family_members;
+create trigger on_family_member_conditions_change
+  before update on family_members
+  for each row execute function public.log_known_conditions_change();
+
+create or replace function public.log_patient_condition_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if TG_OP = 'INSERT' then
+    insert into audit_log (actor, action, target)
+    values (auth.uid(), 'add_patient_condition', new.patient_id::text || ':' || new.condition_id::text);
+    return new;
+  elsif TG_OP = 'DELETE' then
+    insert into audit_log (actor, action, target)
+    values (auth.uid(), 'remove_patient_condition', old.patient_id::text || ':' || old.condition_id::text);
+    return old;
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists on_patient_condition_change on patient_conditions;
+create trigger on_patient_condition_change
+  after insert or delete on patient_conditions
+  for each row execute function public.log_patient_condition_change();

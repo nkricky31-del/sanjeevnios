@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import ClinicLocationPicker from '../components/ClinicLocationPicker';
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
@@ -18,6 +19,7 @@ import { computeNowServing } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { TIERS, usageStatus } from '../lib/subscription';
 import type { AppointmentStatus, Clinic, ClinicStatus, Subscription } from '../lib/types';
+import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 import ClinicDoctors from './ClinicDoctors';
 import ClinicSignup from './ClinicSignup';
 
@@ -98,6 +100,8 @@ interface OpenVisit {
 
 export default function ClinicQueue() {
   const { session } = useAuth();
+  const navigate = useNavigate();
+  const hasUnread = useUnreadNotifications();
   const [clinic, setClinic] = useState<Clinic | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [doctors, setDoctors] = useState<DoctorRow[]>([]);
@@ -314,7 +318,7 @@ export default function ClinicQueue() {
   if (!clinic) {
     return (
       <div>
-        <AppHeader title="Clinic" />
+        <AppHeader title="Clinic" bellDot={hasUnread} onBellClick={() => navigate('/notifications')} />
         <div className="mx-auto max-w-md px-4 py-8">
           <ClinicSignup onRegistered={loadClinicAndDoctors} />
           <Button variant="ghost" onClick={signOut} className="mt-4">
@@ -357,6 +361,8 @@ export default function ClinicQueue() {
         title={clinic.name}
         subtitle="Clinic dashboard"
         pill={<StatusPill label={CLINIC_STATUS_LABEL[clinic.status]} tone={CLINIC_STATUS_TONE[clinic.status]} />}
+        bellDot={hasUnread}
+        onBellClick={() => navigate('/notifications')}
       />
 
       <div className="mx-auto max-w-md px-4 py-6">

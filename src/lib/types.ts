@@ -12,6 +12,8 @@ export interface Profile {
 export type FamilyRelation = 'self' | 'spouse' | 'child' | 'parent';
 export type Gender = 'male' | 'female' | 'other';
 
+export type HasKnownConditions = 'yes' | 'no' | 'not_answered';
+
 export interface FamilyMember {
   id: string;
   account_id: string;
@@ -26,6 +28,22 @@ export interface FamilyMember {
   email: string | null;
   blood_group: string | null;
   city: string | null;
+  has_known_conditions: HasKnownConditions;
+  known_conditions_other: string | null;
+  conditions_updated_at: string | null;
+  created_at: string;
+}
+
+export interface ConditionRef {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
+export interface PatientCondition {
+  id: string;
+  patient_id: string;
+  condition_id: string;
   created_at: string;
 }
 
@@ -104,6 +122,16 @@ export interface Payment {
   created_at: string;
 }
 
+export interface Notification {
+  id: string;
+  user_id: string;
+  type: string | null;
+  message: string;
+  read: boolean;
+  at: string;
+  appointment_id: string | null;
+}
+
 export interface AuditLogEntry {
   id: string;
   actor: string | null;
@@ -142,10 +170,13 @@ export interface Consent {
   file_url: string | null;
 }
 
+export type ConsentType = 'platform_disclaimer' | 'dpdp_data_consent';
+
 export interface PatientDeclaration {
   id: string;
   patient_id: string;
   declaration_version: string;
+  consent_type: ConsentType;
   accepted_at: string;
   ip: string | null;
 }
@@ -200,6 +231,7 @@ export interface Appointment {
   token_no: number | null;
   payment_status: string;
   encounter_id: string | null;
+  reason: string | null;
   created_at: string;
 }
 

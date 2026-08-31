@@ -1,12 +1,13 @@
 import { ChevronRight, MapPin, SearchIcon, Stethoscope } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import AppHeader from '../components/ui/AppHeader';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { formatDistanceKm, haversineKm } from '../lib/distance';
 import { supabase } from '../lib/supabaseClient';
 import type { DoctorSearchResult } from '../lib/types';
+import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 const QUICK_FILTERS = ['General Physician', 'Cardiologist', 'Dermatologist', 'Paediatrician', 'Orthopaedics'];
 
@@ -16,6 +17,8 @@ interface MyLocation {
 }
 
 export default function Search() {
+  const navigate = useNavigate();
+  const hasUnread = useUnreadNotifications();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<DoctorSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,7 +77,12 @@ export default function Search() {
 
   return (
     <div>
-      <AppHeader title="SanjeevniOS" subtitle="Find a doctor near you" />
+      <AppHeader
+        title="SanjeevniOS"
+        subtitle="Find a doctor near you"
+        bellDot={hasUnread}
+        onBellClick={() => navigate('/notifications')}
+      />
       <div className="mx-auto max-w-md px-4 py-6">
         <div className="flex items-center rounded-full border border-slate-200 bg-white px-4 shadow-sm shadow-slate-200/50 focus-within:ring-2 focus-within:ring-brand-500">
           <SearchIcon size={17} className="text-slate-400" />

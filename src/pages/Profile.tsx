@@ -1,7 +1,9 @@
 import { ArrowLeft, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import FamilyMemberForm from '../components/FamilyMemberForm';
+import KnownConditionsForm from '../components/KnownConditionsForm';
 import PatientProfile from '../components/PatientProfile';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
@@ -9,6 +11,7 @@ import Card from '../components/ui/Card';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember } from '../lib/types';
+import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 const RELATION_LABEL: Record<string, string> = {
   self: 'Self',
@@ -23,12 +26,15 @@ const AVATAR_COLORS = ['bg-brand-500', 'bg-coral-500', 'bg-emerald-500', 'bg-amb
 
 export default function Profile() {
   const { session, profile, refreshProfile } = useAuth();
+  const navigate = useNavigate();
+  const hasUnread = useUnreadNotifications();
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState(profile?.name ?? '');
   const [savingName, setSavingName] = useState(false);
   const [viewingMrn, setViewingMrn] = useState<string | null>(null);
+  const [conditionsFor, setConditionsFor] = useState<string | null>(null);
 
   const loadMembers = async () => {
     setLoadingMembers(true);
@@ -76,7 +82,7 @@ export default function Profile() {
 
   return (
     <div>
-      <AppHeader title="My profile" />
+      <AppHeader title="My profile" bellDot={hasUnread} onBellClick={() => navigate('/notifications')} />
       <div className="mx-auto max-w-md px-4 py-6">
         <Card>
           <label className="text-sm font-semibold text-slate-700">Name</label>
@@ -138,6 +144,12 @@ export default function Profile() {
               >
                 {m.mrn}
               </button>
+              <button
+                onClick={() => setConditionsFor((prev) => (prev === m.id ? null : m.id))}
+                className="mt-0.5 text-[10px] font-semibold text-slate-500 underline"
+              >
+                {conditionsFor === m.id ? 'Hide health info' : 'Health info'}
+              </button>
             </div>
           ))}
           <button
@@ -150,6 +162,12 @@ export default function Profile() {
             <p className="mt-2 text-sm font-bold">Add profile</p>
           </button>
         </div>
+
+        {conditionsFor && (
+          <div className="mt-4">
+            <KnownConditionsForm patientId={conditionsFor} onSaved={loadMembers} />
+          </div>
+        )}
 
         <Button variant="ghost" onClick={signOut} className="mt-6">
           Sign out

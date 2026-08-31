@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../lib/AuthContext';
+import { DPDP_CONSENT_TEXT } from '../lib/dpdpConsent';
 import { EMERGENCY_NOTE, PATIENT_DECLARATION_TEXT, PLATFORM_DISCLAIMER_SHORT } from '../lib/platformDisclaimer';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember, PaymentMethod } from '../lib/types';
-import { usePatientDeclarationStatus } from '../lib/usePatientDeclaration';
+import { useDpdpConsentStatus, usePatientDeclarationStatus } from '../lib/usePatientConsent';
 import Button from './ui/Button';
 import Card from './ui/Card';
 
@@ -24,11 +25,14 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
   const navigate = useNavigate();
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [memberId, setMemberId] = useState('');
+  const [reason, setReason] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('online');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { status: declarationStatus, accept: acceptDeclaration } = usePatientDeclarationStatus();
   const [declarationChecked, setDeclarationChecked] = useState(false);
+  const { status: dpdpStatus, accept: acceptDpdp } = useDpdpConsentStatus();
+  const [dpdpChecked, setDpdpChecked] = useState(false);
 
   useEffect(() => {
     supabase
@@ -53,6 +57,10 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
       setError('Please accept the platform declaration above to continue.');
       return;
     }
+    if (dpdpStatus === 'needed' && !dpdpChecked) {
+      setError('Please accept the data-sharing consent above to continue.');
+      return;
+    }
 
     setLoading(true);
 
@@ -61,6 +69,14 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
       if (declarationError) {
         setLoading(false);
         setError(declarationError);
+        return;
+      }
+    }
+    if (dpdpStatus === 'needed') {
+      const dpdpError = await acceptDpdp();
+      if (dpdpError) {
+        setLoading(false);
+        setError(dpdpError);
         return;
       }
     }
@@ -73,6 +89,7 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         clinic_id: clinicId,
         date,
         slot_time: slotTime,
+        reason: reason.trim() || null,
         status: 'pending',
         payment_status: method === 'online' ? 'hold' : 'cod',
       })
@@ -140,6 +157,17 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
       </div>
 
       <div className="mt-4">
+        <p className="text-sm font-semibold text-slate-700">Reason for visit (optional)</p>
+        <input
+          type="text"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. Fever, follow-up, routine checkup"
+          className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        />
+      </div>
+
+      <div className="mt-4">
         <p className="text-sm font-semibold text-slate-700">Payment method</p>
         <div className="mt-1.5 flex gap-2">
           <button
@@ -188,12 +216,35 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         </div>
       )}
 
+      {dpdpStatus === 'needed' && (
+        <div className="mt-3 rounded-xl border border-slate-200 p-3">
+          <p className="text-xs font-bold text-slate-800">Data-sharing consent</p>
+          <div className="mt-1 max-h-32 overflow-y-auto whitespace-pre-line text-xs leading-relaxed text-slate-600">
+            {DPDP_CONSENT_TEXT}
+          </div>
+          <label className="mt-2 flex items-start gap-2 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              checked={dpdpChecked}
+              onChange={(e) => setDpdpChecked(e.target.checked)}
+              className="mt-0.5"
+            />
+            I consent to this.
+          </label>
+        </div>
+      )}
+
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
       <div className="mt-5 flex gap-2">
         <Button
           onClick={submit}
-          disabled={loading || members.length === 0 || (declarationStatus === 'needed' && !declarationChecked)}
+          disabled={
+            loading ||
+            members.length === 0 ||
+            (declarationStatus === 'needed' && !declarationChecked) ||
+            (dpdpStatus === 'needed' && !dpdpChecked)
+          }
           full
         >
           {loading ? 'Booking...' : 'Confirm'}
