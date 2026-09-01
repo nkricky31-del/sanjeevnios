@@ -130,7 +130,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
               className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
                 selectedDays.has(day)
                   ? 'border-brand-600 bg-brand-600 text-white'
-                  : 'border-slate-300 bg-white text-slate-600'
+                  : 'border-slate-200 bg-white text-slate-600'
               }`}
             >
               {label}
@@ -145,7 +145,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
               type="time"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
-              className="mt-1 block rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              className="mt-1 block rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
             />
           </div>
           <div>
@@ -154,7 +154,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
               type="time"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}
-              className="mt-1 block rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              className="mt-1 block rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
             />
           </div>
           <div>
@@ -165,7 +165,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
               min={1}
               value={maxPerDay}
               onChange={(e) => setMaxPerDay(e.target.value)}
-              className="mt-1 block w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              className="mt-1 block w-28 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
             />
           </div>
         </div>
@@ -182,7 +182,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
         <button
           onClick={submit}
           disabled={saving}
-          className="mt-3 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="mt-3 rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand-600/25 disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save availability'}
         </button>

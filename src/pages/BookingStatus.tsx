@@ -1,22 +1,33 @@
-import { Clock, RefreshCw, Ticket, Users } from 'lucide-react';
+import {
+  CalendarClock,
+  CalendarDays,
+  CheckCircle2,
+  Clock,
+  MapPin,
+  QrCode,
+  RefreshCw,
+  Stethoscope,
+  Trash2,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
 import FileUpload from '../components/FileUpload';
-import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
-import InfoBanner from '../components/ui/InfoBanner';
-import StatTile from '../components/ui/StatTile';
+import IconTile from '../components/ui/IconTile';
+import InfoNote from '../components/ui/InfoNote';
+import ScreenHeader from '../components/ui/ScreenHeader';
 import StatusPill from '../components/ui/StatusPill';
 import VerifiedBadge from '../components/VerifiedBadge';
 import VisitDetails from '../components/VisitDetails';
-import { computeNowServing } from '../lib/queue';
+import { bookingReference, computeNowServing } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
-import { estimateSlotMinutes } from '../lib/time';
+import { estimateSlotMinutes, formatTimeLabel } from '../lib/time';
 import type { AppointmentStatus, DoctorAvailability, Prescription, QueueStatusRow, Visit } from '../lib/types';
-import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 interface BookingDetail {
   id: string;
@@ -25,12 +36,14 @@ interface BookingDetail {
   slot_time: string;
   status: AppointmentStatus;
   token_no: number | null;
+  reason: string | null;
   reject_reason: string | null;
+  checked_in_at: string | null;
   doctor_id: string;
   clinic_id: string;
   doctors: { name: string; specialty: string | null } | null;
-  clinics: { name: string; lat: number | null; lng: number | null; formatted_address: string | null } | null;
-  family_members: { name: string } | null;
+  clinics: { name: string; address: string | null; lat: number | null; lng: number | null; formatted_address: string | null } | null;
+  family_members: { name: string; mrn: string } | null;
   encounters: { encounter_no: string } | null;
 }
 
@@ -40,11 +53,11 @@ const LIVE_STATUSES: AppointmentStatus[] = ['pending', 'accepted', 'in_progress'
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
   pending: 'Pending clinic approval',
-  accepted: 'You are in queue',
+  accepted: 'Confirmed',
   rejected: 'Rejected by clinic',
   cancelled: 'Cancelled',
   in_progress: 'You are being seen now',
-  done: 'Visit complete',
+  done: 'Completed',
   no_show: 'Marked as no-show',
 };
 
@@ -63,7 +76,6 @@ const CANCEL_WINDOW_HOURS = 2;
 export default function BookingStatus() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
-  const hasUnread = useUnreadNotifications();
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [nowServing, setNowServing] = useState<number | null>(null);
   const [slotMinutes, setSlotMinutes] = useState(15);
@@ -79,7 +91,7 @@ export default function BookingStatus() {
     const { data } = await supabase
       .from('appointments')
       .select(
-        '*, doctors(name, specialty), clinics(name, lat, lng, formatted_address), family_members(name), encounters(encounter_no)'
+        '*, doctors(name, specialty), clinics(name, address, lat, lng, formatted_address), family_members(name, mrn), encounters(encounter_no)'
       )
       .eq('id', appointmentId)
       .single();
@@ -119,7 +131,7 @@ export default function BookingStatus() {
   };
 
   // Accept/reject/reminder notices all land here with richer text than the
-  // plain status label (token number, reject reason + suggested next slot,
+  // plain status label (queue position, reject reason + suggested next slot,
   // "up soon", "moved to the end of the queue"). Read the newest one for
   // this booking and surface it - deduped by id so the same notice doesn't
   // reappear every time an unrelated broadcast on the shared queue channel
@@ -153,7 +165,7 @@ export default function BookingStatus() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appointmentId]);
 
-  // Estimate minutes-per-token from the doctor's working hours, so the
+  // Estimate minutes-per-position from the doctor's working hours, so the
   // "~30 minutes away" alert and the wait estimate have something to base
   // themselves on.
   useEffect(() => {
@@ -196,8 +208,8 @@ export default function BookingStatus() {
   // Fire the two in-app reminders once each, when their condition is first met.
   useEffect(() => {
     if (!booking || booking.token_no == null || nowServing == null) return;
-    const tokensAway = booking.token_no - nowServing;
-    if (tokensAway < 0) return;
+    const ahead = booking.token_no - nowServing;
+    if (ahead < 0) return;
 
     const raiseAlert = async (message: string) => {
       setAlertMessage(message);
@@ -209,10 +221,10 @@ export default function BookingStatus() {
       });
     };
 
-    if (tokensAway === 1 && !alerted.current.next) {
+    if (ahead === 1 && !alerted.current.next) {
       alerted.current.next = true;
       raiseAlert("You're next! Please head to the clinic now.");
-    } else if (tokensAway * slotMinutes <= 30 && !alerted.current.thirty) {
+    } else if (ahead * slotMinutes <= 30 && !alerted.current.thirty) {
       alerted.current.thirty = true;
       raiseAlert('Your turn is about 30 minutes away.');
     }
@@ -223,11 +235,12 @@ export default function BookingStatus() {
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
 
   const confirmed = ['accepted', 'in_progress', 'done'].includes(booking.status);
-  const tokensAway = confirmed && booking.token_no != null && nowServing != null ? booking.token_no - nowServing : null;
-  const estimatedWaitMinutes = tokensAway != null && tokensAway > 0 ? Math.round(tokensAway * slotMinutes) : 0;
-  const queueStatusLabel = tokensAway == null ? 'Waiting' : tokensAway <= 0 ? 'Your turn' : 'Moving';
+  const inQueue = ['accepted', 'in_progress'].includes(booking.status);
+  const ahead = inQueue && booking.token_no != null && nowServing != null ? Math.max(booking.token_no - nowServing, 0) : null;
+  const estimatedWaitMinutes = ahead != null ? Math.round(ahead * slotMinutes) : 0;
 
   const bookingMoment = new Date(`${booking.date}T${booking.slot_time}`);
+  const endMoment = new Date(bookingMoment.getTime() + slotMinutes * 60 * 1000);
   const canModify =
     ['pending', 'accepted'].includes(booking.status) &&
     bookingMoment.getTime() - Date.now() > CANCEL_WINDOW_HOURS * 60 * 60 * 1000;
@@ -252,74 +265,187 @@ export default function BookingStatus() {
     navigate(`/doctors/${booking.doctor_id}`);
   };
 
+  const mapsHref =
+    booking.clinics?.lat != null && booking.clinics?.lng != null
+      ? `https://www.google.com/maps/search/?api=1&query=${booking.clinics.lat},${booking.clinics.lng}`
+      : null;
+
   return (
     <div>
-      <AppHeader
-        title="SanjeevniOS"
-        subtitle={booking.clinics?.name}
-        pill={confirmed ? <StatusPill label="Live Queue" tone="live" /> : undefined}
-        bellDot={!!alertMessage || hasUnread}
-        onBellClick={() => navigate('/notifications')}
-      />
+      <ScreenHeader title="Appointment Details" back={-1} />
 
-      <div className="mx-auto max-w-md px-4 py-6">
-        <p className="text-xs uppercase tracking-wide text-slate-400">Booking ID</p>
-        <p className="font-mono text-sm text-slate-600">{booking.id}</p>
-        {booking.encounters?.encounter_no && (
-          <>
-            <p className="mt-1.5 text-xs uppercase tracking-wide text-slate-400">Encounter number</p>
-            <p className="font-mono text-sm text-slate-600">{booking.encounters.encounter_no}</p>
-          </>
-        )}
-
+      <div className="mx-auto max-w-md px-4 py-4">
         {alertMessage && (
-          <div className="mt-3 rounded-xl bg-amber-100 p-3 text-sm font-medium text-amber-800">{alertMessage}</div>
+          <div className="mb-3 rounded-2xl bg-amber-50 p-3.5 text-sm font-medium text-amber-800">{alertMessage}</div>
         )}
 
-        {confirmed ? (
-          <Card className="relative mt-4 overflow-hidden !rounded-3xl bg-gradient-to-b from-brand-50 via-white to-white text-center">
-            <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Live
-            </span>
-            <span className="inline-block rounded-full bg-coral-100 px-3 py-1 text-xs font-bold text-coral-700">
-              Your Token Number
-            </span>
-            <div className="mx-auto mt-4 flex h-36 w-36 items-center justify-center rounded-full border-[6px] border-brand-500 bg-white shadow-lg shadow-brand-200/60">
-              <p className="text-5xl font-extrabold text-brand-700">{booking.token_no}</p>
+        {/* Status + who/where */}
+        <Card className="!p-0">
+          <div className="p-4">
+            <StatusPill
+              label={STATUS_LABEL[booking.status]}
+              tone={STATUS_TONE[booking.status]}
+              icon={confirmed ? CheckCircle2 : undefined}
+            />
+            <div className="mt-3 flex items-start gap-3">
+              <IconTile icon={CalendarDays} size="md" />
+              <div>
+                <p className="text-lg font-bold text-slate-900">
+                  {new Date(booking.date + 'T00:00:00').toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+                </p>
+                <p className="text-sm font-bold text-brand-600">
+                  {formatTimeLabel(booking.slot_time)} –{' '}
+                  {endMoment.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                </p>
+              </div>
             </div>
-            <p className="mt-3 text-sm font-semibold text-slate-600">{STATUS_LABEL[booking.status]}</p>
-            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-              {booking.doctors?.name}
-              <VerifiedBadge verified={doctorVerified} ownerType="doctor" />
-              <VerifiedBadge verified={clinicVerified} ownerType="clinic" />
+          </div>
+
+          <div className="flex items-start gap-3 border-t border-slate-100 p-4">
+            <IconTile icon={Stethoscope} size="md" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <p className="truncate text-base font-bold text-slate-900">{booking.doctors?.name ?? 'Doctor'}</p>
+                <VerifiedBadge verified={doctorVerified} ownerType="doctor" />
+              </div>
+              <p className="text-sm font-medium text-brand-600">
+                {booking.doctors?.specialty ?? 'General Physician'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3 border-t border-slate-100 p-4">
+            <IconTile icon={MapPin} size="md" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <p className="truncate text-base font-bold text-slate-900">{booking.clinics?.name ?? 'Clinic'}</p>
+                <VerifiedBadge verified={clinicVerified} ownerType="clinic" />
+              </div>
+              <p className="text-sm text-slate-500">{booking.clinics?.address ?? '—'}</p>
+              {mapsHref && (
+                <a
+                  href={mapsHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-flex items-center gap-1 text-sm font-bold text-brand-600"
+                >
+                  <MapPin size={14} /> Get Directions
+                </a>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* Booking facts */}
+        <Card className="mt-3 !p-0">
+          <div className="flex items-center gap-3 p-4">
+            <IconTile icon={UserRound} size="sm" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900">Appointment For</p>
+              <p className="text-sm text-slate-500">{booking.family_members?.name ?? '—'}</p>
+            </div>
+            <span className="shrink-0 font-mono text-xs font-semibold text-slate-500">
+              {booking.family_members?.mrn}
             </span>
-          </Card>
-        ) : (
-          <Card className="mt-4 text-center">
-            <StatusPill label={STATUS_LABEL[booking.status]} tone={STATUS_TONE[booking.status]} />
-            <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-slate-500">
-              {booking.doctors?.name} <VerifiedBadge verified={doctorVerified} ownerType="doctor" /> ·{' '}
-              {booking.clinics?.name} <VerifiedBadge verified={clinicVerified} ownerType="clinic" />
+          </div>
+
+          <div className="flex items-center gap-3 border-t border-slate-100 p-4">
+            <IconTile icon={QrCode} size="sm" />
+            <p className="min-w-0 flex-1 text-sm font-bold text-slate-900">Booking reference</p>
+            <span className="rounded-xl bg-brand-50 px-3 py-1.5 font-mono text-sm font-extrabold text-brand-700">
+              {bookingReference(booking.id)}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3 border-t border-slate-100 p-4">
+            <IconTile icon={Clock} size="sm" />
+            <p className="min-w-0 flex-1 text-sm font-bold text-slate-900">Duration</p>
+            <span className="text-sm text-slate-500">{slotMinutes} mins</span>
+          </div>
+
+          {booking.reason && (
+            <div className="flex items-center gap-3 border-t border-slate-100 p-4">
+              <IconTile icon={CalendarClock} size="sm" />
+              <p className="min-w-0 flex-1 text-sm font-bold text-slate-900">Purpose of Visit</p>
+              <span className="max-w-[55%] truncate text-right text-sm text-slate-500">{booking.reason}</span>
+            </div>
+          )}
+
+          {booking.encounters?.encounter_no && (
+            <div className="flex items-center gap-3 border-t border-slate-100 p-4">
+              <IconTile icon={QrCode} size="sm" tone="slate" />
+              <p className="min-w-0 flex-1 text-sm font-bold text-slate-900">Encounter number</p>
+              <span className="font-mono text-xs text-slate-500">{booking.encounters.encounter_no}</span>
+            </div>
+          )}
+        </Card>
+
+        {/* Live queue */}
+        {inQueue && booking.token_no != null && (
+          <div className="mt-3 rounded-3xl border border-brand-100 bg-white p-5 text-center">
+            {booking.checked_in_at && (
+              <div className="mb-3 flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">
+                <CheckCircle2 size={16} /> Checked in
+              </div>
+            )}
+            <p className="text-sm font-semibold text-slate-500">Your Queue Position</p>
+            <p className="mt-1 text-6xl font-extrabold leading-none text-brand-600">{booking.token_no}</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {booking.status === 'in_progress'
+                ? "It's your turn — please go in."
+                : 'Please wait for your number to be called.'}
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-2xl border border-slate-100 p-3">
+                <div className="flex items-center justify-center gap-1.5 text-slate-500">
+                  <Users size={15} />
+                  <span className="text-xs font-semibold">People ahead</span>
+                </div>
+                <p className="mt-1 text-xl font-extrabold text-slate-900">{ahead ?? '—'}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-100 p-3">
+                <div className="flex items-center justify-center gap-1.5 text-slate-500">
+                  <Clock size={15} />
+                  <span className="text-xs font-semibold">Est. wait</span>
+                </div>
+                <p className="mt-1 text-xl font-extrabold text-slate-900">~{estimatedWaitMinutes}m</p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => loadQueue(booking.doctor_id, booking.date)}
+              className="mx-auto mt-3 flex items-center gap-1.5 text-sm font-bold text-brand-600"
+            >
+              <RefreshCw size={14} /> Refresh status
+            </button>
+
+            <div className="mt-4 text-left">
+              <InfoNote
+                title="Important"
+                bullets={[
+                  'Please wait near the consultation area.',
+                  "You'll be notified here when it's your turn.",
+                  'Your position can change if an earlier patient checks in or a walk-in is seen — your booking reference never changes.',
+                ]}
+              />
+            </div>
+          </div>
+        )}
+
+        {booking.status === 'rejected' && booking.reject_reason && (
+          <Card className="mt-3">
+            <p className="text-sm text-slate-600">Reason: {booking.reject_reason}</p>
+            <p className="mt-2 text-sm text-amber-600">
+              If you paid online, your payment hold has been released automatically.
             </p>
           </Card>
         )}
-
-        <Card className="mt-3">
-          <p className="text-sm text-slate-500">For: {booking.family_members?.name}</p>
-          <p className="text-sm text-slate-500">
-            {booking.date} at {booking.slot_time?.slice(0, 5)}
-          </p>
-          {booking.status === 'rejected' && (
-            <>
-              {booking.reject_reason && (
-                <p className="mt-2 text-sm text-slate-600">Reason: {booking.reject_reason}</p>
-              )}
-              <p className="mt-2 text-sm text-amber-600">
-                If you paid online, your payment hold has been released automatically.
-              </p>
-            </>
-          )}
-        </Card>
 
         <ClinicLocationPreview
           lat={booking.clinics?.lat ?? null}
@@ -328,53 +454,33 @@ export default function BookingStatus() {
           clinicName={booking.clinics?.name}
         />
 
-        {confirmed && (
-          <>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <StatTile icon={Ticket} label="Current token" value={nowServing ?? '—'} tone="brand" />
-              <StatTile icon={Users} label="Patients before you" value={tokensAway != null ? Math.max(tokensAway, 0) : '—'} tone="amber" />
-              <StatTile icon={Clock} label="Estimated wait" value={`~${estimatedWaitMinutes}m`} tone="slate" />
-              <StatTile icon={RefreshCw} label="Queue status" value={queueStatusLabel} tone="emerald" />
-            </div>
-
-            <div className="mt-3 flex items-center justify-between px-2">
-              <div className="text-center">
-                <div className="mx-auto h-3 w-3 rounded-full bg-brand-600" />
-                <p className="mt-1 text-xs font-semibold text-brand-700">{nowServing ?? '—'}</p>
-                <p className="text-[11px] text-slate-400">Now serving</p>
-              </div>
-              <div className="h-px flex-1 bg-slate-200" />
-              <div className="text-center">
-                <div className="mx-auto h-3 w-3 rounded-full border-2 border-brand-300 bg-white" />
-                <p className="mt-1 text-xs font-semibold text-slate-500">Up next</p>
-              </div>
-              <div className="h-px flex-1 bg-slate-200" />
-              <div className="text-center">
-                <div className="mx-auto h-3 w-3 rounded-full border-2 border-emerald-500 bg-white" />
-                <p className="mt-1 text-xs font-semibold text-emerald-700">{booking.token_no}</p>
-                <p className="text-[11px] text-slate-400">Your turn</p>
-              </div>
-            </div>
-
-            <div className="mt-3">
-              <InfoBanner>We'll alert you here when your turn is near.</InfoBanner>
-            </div>
-          </>
+        {!inQueue && ['pending'].includes(booking.status) && (
+          <div className="mt-3">
+            <InfoNote
+              title="Important Information"
+              bullets={[
+                'Please arrive 15 minutes before your appointment time.',
+                'Carry a valid ID proof and previous reports, if any.',
+                `You can reschedule or cancel up to ${CANCEL_WINDOW_HOURS} hours before the appointment.`,
+              ]}
+            />
+          </div>
         )}
 
+        {actionError && <p className="mt-3 text-sm text-red-600">{actionError}</p>}
+
         {canModify && (
-          <div className="mt-4">
-            {actionError && <p className="mb-2 text-sm text-red-600">{actionError}</p>}
-            <div className="flex gap-2">
-              <Button onClick={rescheduleBooking}>Reschedule</Button>
-              <Button variant="danger" onClick={cancelBooking}>
-                Cancel booking
-              </Button>
-            </div>
+          <div className="mt-4 space-y-2">
+            <Button full onClick={rescheduleBooking}>
+              <CalendarClock size={17} /> Reschedule Appointment
+            </Button>
+            <Button variant="danger" full onClick={cancelBooking}>
+              <Trash2 size={16} /> Cancel Appointment
+            </Button>
           </div>
         )}
         {['pending', 'accepted'].includes(booking.status) && !canModify && (
-          <p className="mt-3 text-xs text-slate-400">
+          <p className="mt-3 text-center text-xs text-slate-400">
             Too close to the appointment time to cancel or reschedule (within {CANCEL_WINDOW_HOURS} hours).
           </p>
         )}

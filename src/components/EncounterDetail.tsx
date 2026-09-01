@@ -1,4 +1,4 @@
-import { ArrowLeft, Download } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { useAuth } from '../lib/AuthContext';
@@ -6,6 +6,7 @@ import { downloadEncounterSummary } from '../lib/encounterExport';
 import { supabase } from '../lib/supabaseClient';
 import type { AppointmentFile, Prescription, Visit } from '../lib/types';
 import EncounterFullDetail, { type EncounterSummary, type LinkedAppointment } from './EncounterFullDetail';
+import ScreenHeader from './ui/ScreenHeader';
 
 interface FullEncounter extends EncounterSummary {
   mrn: string;
@@ -81,24 +82,23 @@ export default function EncounterDetail({ encounterId }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between border-b border-slate-100 bg-white px-4 py-4">
-        <button
-          onClick={() => window.history.back()}
-          className="inline-flex items-center gap-1 text-sm font-medium text-slate-500"
-        >
-          <ArrowLeft size={16} /> Back
-        </button>
-        {canExport && encounter && (
-          <button
-            onClick={handleExport}
-            className="inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-3.5 py-2 text-sm font-bold text-white"
-          >
-            <Download size={15} /> Export / Download
-          </button>
-        )}
-      </div>
+      <ScreenHeader
+        title="Encounter / Visit Details"
+        onBack={() => window.history.back()}
+        action={
+          canExport && encounter ? (
+            <button
+              onClick={handleExport}
+              aria-label="Export encounter"
+              className="rounded-full p-2 text-brand-600 hover:bg-brand-50"
+            >
+              <Download size={19} />
+            </button>
+          ) : undefined
+        }
+      />
 
-      <div className="mx-auto max-w-md px-4 py-6">
+      <div className="mx-auto max-w-md px-4 py-4">
         {encounter === undefined && <p className="text-sm text-slate-400">Loading encounter...</p>}
         {encounter === null && (
           <p className="text-sm text-slate-400">This encounter doesn't exist, or you don't have access to view it.</p>

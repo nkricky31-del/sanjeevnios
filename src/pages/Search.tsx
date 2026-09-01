@@ -1,13 +1,12 @@
 import { ChevronRight, MapPin, SearchIcon, Stethoscope } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
-import AppHeader from '../components/ui/AppHeader';
+import ScreenHeader from '../components/ui/ScreenHeader';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { formatDistanceKm, haversineKm } from '../lib/distance';
 import { supabase } from '../lib/supabaseClient';
 import type { DoctorSearchResult } from '../lib/types';
-import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 const QUICK_FILTERS = ['General Physician', 'Cardiologist', 'Dermatologist', 'Paediatrician', 'Orthopaedics'];
 
@@ -17,8 +16,6 @@ interface MyLocation {
 }
 
 export default function Search() {
-  const navigate = useNavigate();
-  const hasUnread = useUnreadNotifications();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<DoctorSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,13 +74,8 @@ export default function Search() {
 
   return (
     <div>
-      <AppHeader
-        title="SanjeevniOS"
-        subtitle="Find a doctor near you"
-        bellDot={hasUnread}
-        onBellClick={() => navigate('/notifications')}
-      />
-      <div className="mx-auto max-w-md px-4 py-6">
+      <ScreenHeader title="Book Appointment" back="/" />
+      <div className="mx-auto max-w-md px-4 py-4">
         <div className="flex items-center rounded-full border border-slate-200 bg-white px-4 shadow-sm shadow-slate-200/50 focus-within:ring-2 focus-within:ring-brand-500">
           <SearchIcon size={17} className="text-slate-400" />
           <input
@@ -140,7 +132,7 @@ export default function Search() {
                       <p className="truncate font-bold text-slate-900">{r.doctor_name}</p>
                       <VerifiedBadge verified={r.doctor_verified} ownerType="doctor" />
                     </div>
-                    {r.specialty && <p className="text-sm font-medium text-coral-600">{r.specialty}</p>}
+                    {r.specialty && <p className="text-sm font-medium text-brand-600">{r.specialty}</p>}
                     <div className="mt-0.5 flex items-center gap-1.5">
                       <p className="truncate text-sm text-slate-500">{r.clinic_name}</p>
                       <VerifiedBadge verified={r.clinic_verified} ownerType="clinic" />

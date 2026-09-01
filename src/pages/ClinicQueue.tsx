@@ -1,6 +1,8 @@
+import { UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import ClinicHolidays from '../components/ClinicHolidays';
 import ClinicLocationPicker from '../components/ClinicLocationPicker';
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
 import FullDayCancelForm from '../components/FullDayCancelForm';
@@ -12,13 +14,17 @@ import WalkInForm from '../components/WalkInForm';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
+import IconTile from '../components/ui/IconTile';
+import SectionTitle from '../components/ui/SectionTitle';
+import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
 import { useAuth } from '../lib/AuthContext';
 import { ageFromDob, todayISO } from '../lib/date';
-import { computeNowServing } from '../lib/queue';
+import { bookingReference, computeNowServing } from '../lib/queue';
+import { formatTimeLabel } from '../lib/time';
 import { supabase } from '../lib/supabaseClient';
 import { TIERS, usageStatus } from '../lib/subscription';
-import type { AppointmentStatus, Clinic, ClinicStatus, Subscription } from '../lib/types';
+import type { AppointmentStatus, Clinic, ClinicStatus, PatientType, Subscription } from '../lib/types';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 import ClinicDoctors from './ClinicDoctors';
 import ClinicSignup from './ClinicSignup';
@@ -33,6 +39,8 @@ interface QueueAppointment {
   id: string;
   status: AppointmentStatus;
   token_no: number | null;
+  patient_type: PatientType;
+  checked_in_at: string | null;
   date: string;
   slot_time: string;
   payment_status: string;
@@ -53,8 +61,12 @@ interface QueueAppointment {
 // info once that member has booked at their clinic. phone/gender/dob are
 // mostly populated for walk-ins (see WalkInForm.tsx) - shown as a quick
 // context line so the desk isn't just working off a bare name.
+// patient_type/checked_in_at drive the "Check in" control below - a
+// scheduled patient who hasn't checked in is subject to the grace-period
+// rule in recompute_queue_positions() (schema.sql section 26); a walk-in
+// always has checked_in_at stamped automatically at accept time.
 const APPOINTMENT_COLUMNS =
-  'id, status, token_no, date, slot_time, payment_status, reminder_count, family_members(name, relation, account_id, phone, gender, dob)';
+  'id, status, token_no, patient_type, checked_in_at, date, slot_time, payment_status, reminder_count, family_members(name, relation, account_id, phone, gender, dob)';
 
 function patientContextLine(m: QueueAppointment['family_members']): string | null {
   if (!m) return null;
@@ -114,6 +126,7 @@ export default function ClinicQueue() {
   const [rejectOpenFor, setRejectOpenFor] = useState<string | null>(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [fullDayCancelOpen, setFullDayCancelOpen] = useState(false);
+  const [holidaysOpen, setHolidaysOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [view, setView] = useState<'queue' | 'doctors' | 'rx' | 'location' | 'patients'>('queue');
 
@@ -223,23 +236,25 @@ export default function ClinicQueue() {
   };
 
   // Capturing the held online payment (or leaving COD as-is, due at the
-  // desk) and assigning the next token number both already happen in the DB
-  // trigger on the status update itself - this just adds the patient notice
-  // on top, reading back what the trigger did.
+  // desk) happens in the DB trigger on the status update itself. The
+  // resulting queue position is computed a moment later by that same
+  // trigger's AFTER counterpart (recompute_queue_positions, schema.sql
+  // section 26) - re-read it back with a fresh select rather than trusting
+  // whatever this UPDATE's .select() raced to return.
   const acceptAppointment = async (a: QueueAppointment) => {
     setActionError(null);
-    const { data: updated, error } = await supabase
-      .from('appointments')
-      .update({ status: 'accepted' })
-      .eq('id', a.id)
-      .select('token_no, payment_status')
-      .single();
-    if (error || !updated) {
-      setActionError(error?.message ?? 'Could not accept this booking.');
+    const { error } = await supabase.from('appointments').update({ status: 'accepted' }).eq('id', a.id);
+    if (error) {
+      setActionError(error.message);
       return;
     }
+    const { data: updated } = await supabase
+      .from('appointments')
+      .select('token_no, payment_status')
+      .eq('id', a.id)
+      .single();
 
-    if (a.family_members?.account_id) {
+    if (a.family_members?.account_id && updated) {
       const paymentNote =
         updated.payment_status === 'captured'
           ? 'Your online payment has been confirmed.'
@@ -248,7 +263,7 @@ export default function ClinicQueue() {
         user_id: a.family_members.account_id,
         appointment_id: a.id,
         type: 'appointment_accepted',
-        message: `Your appointment is confirmed! Your token number is #${updated.token_no}. ${paymentNote}`,
+        message: `Your appointment is confirmed! Your queue position is #${updated.token_no} (booking ref ${bookingReference(a.id)}). ${paymentNote}`,
       });
     }
 
@@ -259,6 +274,25 @@ export default function ClinicQueue() {
     const next = queue.find((q) => q.status === 'accepted');
     if (!next) return;
     await setStatus(next.id, 'in_progress');
+  };
+
+  // A scheduled patient checking in at the desk - flips them into the
+  // "present" tier of recompute_queue_positions() at this moment, holding
+  // their slot-time position if they're within the grace period, or
+  // re-entering behind everyone already checked in if they're not (see
+  // schema.sql section 26). Walk-ins never need this button - they get
+  // checked_in_at stamped automatically the moment they're accepted.
+  const checkIn = async (a: QueueAppointment) => {
+    setActionError(null);
+    const { error } = await supabase
+      .from('appointments')
+      .update({ checked_in_at: new Date().toISOString() })
+      .eq('id', a.id);
+    if (error) {
+      setActionError(error.message);
+      return;
+    }
+    loadAppointments();
   };
 
   const sendReminder = async (a: QueueAppointment) => {
@@ -278,32 +312,29 @@ export default function ClinicQueue() {
         user_id: a.family_members.account_id,
         appointment_id: a.id,
         type: 'clinic_reminder',
-        message: `Reminder from the clinic: your turn (token #${a.token_no}) is coming up soon. Please be ready.`,
+        message: `Reminder from the clinic: your turn (queue position #${a.token_no}) is coming up soon. Please be ready.`,
       });
     }
 
-    // After the 5th reminder with no apparent response, auto-skip the token
-    // to the end of today's queue instead of leaving it blocking everyone
-    // behind it. The clinic can still mark a no-show manually at any time.
+    // After the 5th reminder with no apparent response, treat them as
+    // arriving right now - recompute_queue_positions() will place that at
+    // the back of everyone currently checked in, instead of the old
+    // approach of manually stamping a fresh max(token_no)+1 (booking-order
+    // math that's exactly what this whole model moved away from). The
+    // clinic can still mark a no-show manually at any time.
     if (newCount >= REMINDER_LIMIT) {
-      const { data: maxRow } = await supabase
+      const { error: skipError } = await supabase
         .from('appointments')
-        .select('token_no')
-        .eq('doctor_id', doctorId)
-        .eq('date', queueDate)
-        .not('status', 'in', '(pending,rejected,cancelled)')
-        .order('token_no', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const newToken = (maxRow?.token_no ?? a.token_no ?? 0) + 1;
-      await supabase.from('appointments').update({ token_no: newToken }).eq('id', a.id);
+        .update({ checked_in_at: new Date().toISOString() })
+        .eq('id', a.id);
 
-      if (a.family_members?.account_id) {
+      if (!skipError && a.family_members?.account_id) {
+        const { data: updated } = await supabase.from('appointments').select('token_no').eq('id', a.id).single();
         await supabase.from('notifications').insert({
           user_id: a.family_members.account_id,
           appointment_id: a.id,
           type: 'queue_skip',
-          message: `You've missed ${REMINDER_LIMIT} reminders and been moved to the end of today's queue. Your new token is #${newToken}.`,
+          message: `You've missed ${REMINDER_LIMIT} reminders and been moved to the end of today's queue. Your new queue position is #${updated?.token_no}.`,
         });
       }
     }
@@ -404,48 +435,18 @@ export default function ClinicQueue() {
           );
         })()}
 
-        <div className="flex flex-wrap gap-1.5 rounded-2xl bg-slate-100 p-1.5">
-          <button
-            onClick={() => setView('queue')}
-            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
-              view === 'queue' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
-            }`}
-          >
-            Queue
-          </button>
-          <button
-            onClick={() => setView('rx')}
-            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
-              view === 'rx' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
-            }`}
-          >
-            Rx pending
-          </button>
-          <button
-            onClick={() => setView('doctors')}
-            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
-              view === 'doctors' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
-            }`}
-          >
-            Doctors
-          </button>
-          <button
-            onClick={() => setView('location')}
-            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
-              view === 'location' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
-            }`}
-          >
-            Location
-          </button>
-          <button
-            onClick={() => setView('patients')}
-            className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
-              view === 'patients' ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
-            }`}
-          >
-            Patients
-          </button>
-        </div>
+        <Segmented
+          options={[
+            { value: 'queue', label: 'Queue' },
+            { value: 'rx', label: 'Rx pending' },
+            { value: 'doctors', label: 'Doctors' },
+            { value: 'location', label: 'Location' },
+            { value: 'patients', label: 'Patients' },
+          ]}
+          value={view}
+          onChange={setView}
+          variant="scroll"
+        />
 
         {view === 'patients' && (
           <div className="mt-4">
@@ -508,7 +509,7 @@ export default function ClinicQueue() {
               <select
                 value={doctorId}
                 onChange={(e) => setDoctorId(e.target.value)}
-                className="mt-4 w-full rounded-xl border border-slate-300 px-3 py-2"
+                className="mt-4 w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-brand-500"
               >
                 {doctors.map((d) => (
                   <option key={d.id} value={d.id}>
@@ -522,12 +523,9 @@ export default function ClinicQueue() {
 
             {doctors.length > 0 && (
               <>
-                <div className="mt-6 flex items-center justify-between">
-                  <h2 className="text-lg font-bold text-slate-900">Pending approval</h2>
-                  <button onClick={loadAppointments} className="text-sm font-medium text-brand-600">
-                    Refresh
-                  </button>
-                </div>
+                <SectionTitle className="mt-6" actionLabel="Refresh" onAction={loadAppointments}>
+                  Pending approval
+                </SectionTitle>
                 <div className="mt-2 space-y-2">
                   {pending.length === 0 && <p className="text-sm text-slate-400">Nothing waiting.</p>}
                   {pending.map((a) => {
@@ -541,14 +539,22 @@ export default function ClinicQueue() {
                           </p>
                         )}
                         <Card>
-                          <p className="font-semibold text-slate-900">{a.family_members?.name}</p>
-                          {patientContextLine(a.family_members) && (
-                            <p className="text-xs text-slate-400">{patientContextLine(a.family_members)}</p>
-                          )}
-                          <p className="text-sm text-slate-500">
-                            {a.slot_time?.slice(0, 5)} · {a.payment_status}
-                          </p>
-                          <div className="mt-2 flex gap-2">
+                          <div className="flex items-center gap-3">
+                            <IconTile icon={UserRound} tone="amber" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-bold text-slate-900">{a.family_members?.name}</p>
+                              {patientContextLine(a.family_members) && (
+                                <p className="truncate text-xs text-slate-400">
+                                  {patientContextLine(a.family_members)}
+                                </p>
+                              )}
+                              <p className="text-sm font-medium text-brand-600">
+                                {formatTimeLabel(a.slot_time)}
+                                <span className="text-slate-400"> · {a.payment_status}</span>
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex gap-2">
                             <Button onClick={() => acceptAppointment(a)}>Accept</Button>
                             <Button
                               variant="danger"
@@ -577,12 +583,12 @@ export default function ClinicQueue() {
                 </div>
 
                 <div className="mt-6 flex items-center justify-between gap-2">
-                  <h2 className="text-lg font-bold text-slate-900">Queue</h2>
+                  <h2 className="text-base font-bold text-slate-900">Queue</h2>
                   <input
                     type="date"
                     value={queueDate}
                     onChange={(e) => setQueueDate(e.target.value)}
-                    className="rounded-xl border border-slate-300 px-2 py-1 text-sm"
+                    className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
 
@@ -603,6 +609,9 @@ export default function ClinicQueue() {
                   </Button>
                   <Button variant="danger" onClick={() => setFullDayCancelOpen((s) => !s)}>
                     {fullDayCancelOpen ? 'Cancel' : 'Cancel full day'}
+                  </Button>
+                  <Button variant="secondary" onClick={() => setHolidaysOpen((s) => !s)}>
+                    {holidaysOpen ? 'Hide holidays' : 'Holidays'}
                   </Button>
                 </div>
 
@@ -625,6 +634,8 @@ export default function ClinicQueue() {
                   />
                 )}
 
+                {holidaysOpen && <ClinicHolidays clinicId={clinic.id} />}
+
                 <div className="mt-3 space-y-2">
                   {queue.length === 0 && <p className="text-sm text-slate-400">No confirmed bookings for this date.</p>}
                   {queue.map((a) => {
@@ -633,21 +644,49 @@ export default function ClinicQueue() {
                       a.token_no != null &&
                       currentServing != null &&
                       a.token_no - currentServing <= NEAR_TOKEN_THRESHOLD;
+                    const scheduledNotCheckedIn = a.patient_type === 'scheduled' && !a.checked_in_at;
                     return (
-                      <Card key={a.id}>
-                        <div className="flex items-center justify-between">
-                          <p className="font-semibold text-slate-900">
-                            #{a.token_no} — {a.family_members?.name}
-                          </p>
-                          <StatusPill label={a.status} tone={STATUS_TONE[a.status]} />
+                      <Card key={a.id} className={a.status === 'in_progress' ? '!border-brand-300' : ''}>
+                        <div className="flex items-start gap-3">
+                          <span
+                            className={`flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-2xl text-base font-extrabold ${
+                              a.status === 'in_progress'
+                                ? 'bg-brand-600 text-white'
+                                : a.status === 'done'
+                                  ? 'bg-slate-100 text-slate-400'
+                                  : 'bg-brand-50 text-brand-700'
+                            }`}
+                          >
+                            {a.token_no}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="truncate font-bold text-slate-900">{a.family_members?.name}</p>
+                              <div className="flex shrink-0 items-center gap-1.5">
+                                {a.status === 'accepted' && scheduledNotCheckedIn && (
+                                  <StatusPill label="Not checked in" tone="warning" />
+                                )}
+                                <StatusPill label={a.status.replace('_', ' ')} tone={STATUS_TONE[a.status]} />
+                              </div>
+                            </div>
+                            {patientContextLine(a.family_members) && (
+                              <p className="truncate text-xs text-slate-400">{patientContextLine(a.family_members)}</p>
+                            )}
+                            <p className="font-mono text-[11px] text-slate-400">Ref {bookingReference(a.id)}</p>
+                          </div>
                         </div>
-                        {patientContextLine(a.family_members) && (
-                          <p className="text-xs text-slate-400">{patientContextLine(a.family_members)}</p>
-                        )}
 
                         {a.status === 'accepted' && (
                           <div className="mt-2 flex flex-wrap items-center gap-2">
                             {isNear && <StatusPill label="Up soon" tone="warning" />}
+                            {scheduledNotCheckedIn && (
+                              <button
+                                onClick={() => checkIn(a)}
+                                className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700"
+                              >
+                                Check in
+                              </button>
+                            )}
                             <span className="text-xs text-slate-400">
                               Reminders sent: {a.reminder_count}/{REMINDER_LIMIT}
                             </span>

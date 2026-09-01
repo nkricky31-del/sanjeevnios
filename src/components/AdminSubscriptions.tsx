@@ -133,7 +133,7 @@ export default function AdminSubscriptions() {
                 <select
                   value={tier}
                   onChange={(e) => changeTier(c, e.target.value as SubscriptionTier)}
-                  className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                  className="rounded-2xl border border-slate-200 px-2 py-1 text-sm"
                 >
                   {TIER_ORDER.map((t) => (
                     <option key={t} value={t}>

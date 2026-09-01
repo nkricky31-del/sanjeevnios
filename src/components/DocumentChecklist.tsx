@@ -218,7 +218,7 @@ export default function DocumentChecklist({ ownerType, ownerId, onChanged }: Pro
                       <button
                         onClick={() => upload(config)}
                         disabled={state.saving}
-                        className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                        className="rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                       >
                         {state.saving ? 'Uploading...' : latest ? 'Re-upload' : 'Upload'}
                       </button>
@@ -247,7 +247,7 @@ export default function DocumentChecklist({ ownerType, ownerId, onChanged }: Pro
                       <button
                         onClick={() => saveNotApplicable(config)}
                         disabled={state.saving}
-                        className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                        className="rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                       >
                         {state.saving ? 'Saving...' : 'Save'}
                       </button>

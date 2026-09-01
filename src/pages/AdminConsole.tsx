@@ -1,3 +1,4 @@
+import { Building2, Stethoscope } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -13,6 +14,9 @@ import PatientLookup from '../components/PatientLookup';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
+import IconTile from '../components/ui/IconTile';
+import SectionTitle from '../components/ui/SectionTitle';
+import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
@@ -215,15 +219,15 @@ export default function AdminConsole() {
 
   const signOut = () => supabase.auth.signOut();
 
-  const TABS: { key: typeof view; label: string }[] = [
-    { key: 'dashboard', label: 'Dashboard' },
-    { key: 'verification', label: 'Verification' },
-    { key: 'subscriptions', label: 'Subscriptions' },
-    { key: 'payments', label: 'Payments' },
-    { key: 'fraud', label: 'Fraud' },
-    { key: 'audit', label: 'Audit log' },
-    { key: 'patients', label: 'Patients' },
-    { key: 'conditions', label: 'Conditions' },
+  const TABS: { value: typeof view; label: string }[] = [
+    { value: 'dashboard', label: 'Dashboard' },
+    { value: 'verification', label: 'Verification' },
+    { value: 'subscriptions', label: 'Subscriptions' },
+    { value: 'payments', label: 'Payments' },
+    { value: 'fraud', label: 'Fraud' },
+    { value: 'audit', label: 'Audit log' },
+    { value: 'patients', label: 'Patients' },
+    { value: 'conditions', label: 'Conditions' },
   ];
 
   return (
@@ -234,20 +238,8 @@ export default function AdminConsole() {
         bellDot={hasUnread}
         onBellClick={() => navigate('/notifications')}
       />
-      <div className="mx-auto max-w-md px-4 py-6">
-        <div className="flex flex-wrap gap-1.5 rounded-2xl bg-slate-100 p-1.5">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setView(t.key)}
-              className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-bold transition ${
-                view === t.key ? 'bg-brand-600 text-white' : 'text-slate-500 hover:bg-slate-100'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+      <div className="mx-auto max-w-md px-4 pb-6">
+        <Segmented options={TABS} value={view} onChange={setView} variant="scroll" />
 
         {view === 'dashboard' && (
           <div className="mt-4">
@@ -295,22 +287,22 @@ export default function AdminConsole() {
           <>
             {actionError && <p className="mb-3 mt-4 text-sm text-red-600">{actionError}</p>}
 
-            <div className="mt-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900">Pending clinics</h2>
-              <button onClick={loadPending} className="text-sm font-medium text-brand-600">
-                Refresh
-              </button>
-            </div>
+            <SectionTitle className="mt-5" actionLabel="Refresh" onAction={loadPending}>
+              Pending clinics
+            </SectionTitle>
             <div className="mt-2 space-y-2">
               {loading && <p className="text-sm text-slate-400">Loading...</p>}
               {!loading && clinics.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
               {clinics.map((c) => (
                 <Card key={c.id}>
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-slate-900">{c.name}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <IconTile icon={Building2} size="sm" />
+                      <p className="truncate font-bold text-slate-900">{c.name}</p>
+                    </div>
                     <StatusPill label="Pending" tone="warning" />
                   </div>
-                  <p className="text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
+                  <p className="mt-2 text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
                   {c.address && <p className="text-xs text-slate-400">{c.address}</p>}
                   {c.registration_doc_path && (
                     <button
@@ -359,19 +351,20 @@ export default function AdminConsole() {
               ))}
             </div>
 
-            <div className="mt-6 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900">Pending doctors</h2>
-            </div>
+            <SectionTitle className="mt-6">Pending doctors</SectionTitle>
             <div className="mt-2 space-y-2">
               {loading && <p className="text-sm text-slate-400">Loading...</p>}
               {!loading && doctors.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
               {doctors.map((d) => (
                 <Card key={d.id}>
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-slate-900">{d.name}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <IconTile icon={Stethoscope} size="sm" />
+                      <p className="truncate font-bold text-slate-900">{d.name}</p>
+                    </div>
                     <StatusPill label="Pending" tone="warning" />
                   </div>
-                  {d.specialty && <p className="text-sm text-brand-600">{d.specialty}</p>}
+                  {d.specialty && <p className="mt-2 text-sm font-medium text-brand-600">{d.specialty}</p>}
                   <p className="text-sm text-slate-500">Reg. {d.reg_no ?? '—'}</p>
                   <p className="text-xs text-slate-400">
                     {d.clinics?.name}
@@ -424,9 +417,7 @@ export default function AdminConsole() {
               ))}
             </div>
 
-            <div className="mt-6 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900">Approved clinics — verification</h2>
-            </div>
+            <SectionTitle className="mt-6">Approved clinics — verification</SectionTitle>
             <p className="mt-1 text-xs text-slate-400">
               Already approved and visible to patients. Verify every item below to earn the VERIFIED badge.
             </p>
@@ -436,11 +427,14 @@ export default function AdminConsole() {
               )}
               {approvedClinics.map((c) => (
                 <Card key={c.id}>
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-slate-900">{c.name}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <IconTile icon={Building2} size="sm" tone={c.is_verified ? 'emerald' : 'slate'} />
+                      <p className="truncate font-bold text-slate-900">{c.name}</p>
+                    </div>
                     <StatusPill label={c.is_verified ? 'Verified' : 'Not verified'} tone={c.is_verified ? 'live' : 'neutral'} />
                   </div>
-                  <p className="text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
+                  <p className="mt-2 text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
                   <div className="mt-2">
                     <Button
                       variant="secondary"
@@ -462,20 +456,21 @@ export default function AdminConsole() {
               ))}
             </div>
 
-            <div className="mt-6 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900">Approved doctors — verification</h2>
-            </div>
+            <SectionTitle className="mt-6">Approved doctors — verification</SectionTitle>
             <div className="mt-2 space-y-2">
               {!loading && approvedDoctors.length === 0 && (
                 <p className="text-sm text-slate-400">No approved doctors yet.</p>
               )}
               {approvedDoctors.map((d) => (
                 <Card key={d.id}>
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-slate-900">{d.name}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <IconTile icon={Stethoscope} size="sm" tone={d.is_verified ? 'emerald' : 'slate'} />
+                      <p className="truncate font-bold text-slate-900">{d.name}</p>
+                    </div>
                     <StatusPill label={d.is_verified ? 'Verified' : 'Not verified'} tone={d.is_verified ? 'live' : 'neutral'} />
                   </div>
-                  {d.specialty && <p className="text-sm text-brand-600">{d.specialty}</p>}
+                  {d.specialty && <p className="mt-2 text-sm font-medium text-brand-600">{d.specialty}</p>}
                   <p className="text-xs text-slate-400">{d.clinics?.name}</p>
                   <div className="mt-2">
                     <Button

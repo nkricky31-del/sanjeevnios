@@ -220,6 +220,15 @@ export interface DoctorAvailability {
   max_patients_per_day: number;
 }
 
+export interface ClinicHoliday {
+  id: string;
+  clinic_id: string;
+  date: string; // ISO date
+  reason: string | null;
+}
+
+export type PatientType = 'scheduled' | 'walk_in';
+
 export interface Appointment {
   id: string;
   member_id: string;
@@ -228,7 +237,9 @@ export interface Appointment {
   date: string; // ISO date
   slot_time: string; // "HH:MM:SS"
   status: AppointmentStatus;
-  token_no: number | null;
+  token_no: number | null; // a recomputed queue POSITION, not a permanent ticket number - see recompute_queue_positions() in schema.sql section 26
+  patient_type: PatientType;
+  checked_in_at: string | null;
   payment_status: string;
   encounter_id: string | null;
   reason: string | null;

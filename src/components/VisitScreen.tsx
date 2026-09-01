@@ -210,7 +210,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                     type="text"
                     value={diagnosis}
                     onChange={(e) => setDiagnosis(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
                 <div>
@@ -219,7 +219,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     rows={3}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
                 <div>
@@ -228,7 +228,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                     type="date"
                     value={followUpDate}
                     onChange={(e) => setFollowUpDate(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                    className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
                 {!attachedRx && (
@@ -285,21 +285,21 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                       placeholder="Drug"
                       value={drugName}
                       onChange={(e) => setDrugName(e.target.value)}
-                      className="min-w-[100px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                      className="min-w-[100px] flex-1 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
                     />
                     <input
                       type="text"
                       placeholder="Dosage"
                       value={dosage}
                       onChange={(e) => setDosage(e.target.value)}
-                      className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                      className="w-24 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
                     />
                     <input
                       type="text"
                       placeholder="Freq"
                       value={frequency}
                       onChange={(e) => setFrequency(e.target.value)}
-                      className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                      className="w-20 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
                     />
                     <input
                       type="text"
@@ -307,7 +307,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                       inputMode="numeric"
                       value={duration}
                       onChange={(e) => setDuration(e.target.value)}
-                      className="w-16 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                      className="w-16 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
                     />
                     <button onClick={addDrug} className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm font-medium">
                       + Add

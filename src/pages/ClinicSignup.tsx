@@ -68,7 +68,7 @@ export default function ClinicSignup({ onRegistered }: Props) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Sunrise Family Clinic"
-            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
 
@@ -79,7 +79,7 @@ export default function ClinicSignup({ onRegistered }: Props) {
             value={regNo}
             onChange={(e) => setRegNo(e.target.value)}
             placeholder="e.g. KA-CLINIC-2026-1234"
-            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
 
@@ -90,7 +90,7 @@ export default function ClinicSignup({ onRegistered }: Props) {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             placeholder="Street, area, city"
-            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
 

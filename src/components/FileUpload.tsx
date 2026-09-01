@@ -113,7 +113,7 @@ export default function FileUpload({ appointmentId, memberId }: Props) {
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value as FileCategory)}
-          className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+          className="rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
         >
           <option value="lab_report">Lab report</option>
           <option value="prescription">Prescription</option>

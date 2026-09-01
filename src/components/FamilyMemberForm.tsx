@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 
 import { isMinorDob } from '../lib/date';
+import { livePhoneDigits, normalizePhone } from '../lib/phone';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyRelation } from '../lib/types';
 
@@ -58,7 +59,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
       name: name.trim(),
       relation,
       dob,
-      phone: phoneDigits ? `91${phoneDigits}` : null,
+      phone: phoneDigits ? normalizePhone(phoneDigits) : null,
       email: email.trim() || null,
       blood_group: bloodGroup || null,
       city: city.trim() || null,
@@ -82,7 +83,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+          className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -91,7 +92,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
         <select
           value={relation}
           onChange={(e) => setRelation(e.target.value as FamilyRelation)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+          className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         >
           <option value="self">Self</option>
           <option value="spouse">Spouse</option>
@@ -107,20 +108,20 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
           value={dob}
           onChange={(e) => setDob(e.target.value)}
           max={new Date().toISOString().slice(0, 10)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+          className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
       <div>
         <label className="text-sm font-medium text-slate-700">Phone (optional)</label>
-        <div className="mt-1 flex items-center rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-brand-500">
+        <div className="mt-1 flex items-center rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-brand-500">
           <span className="pl-3 text-sm text-slate-500">+91</span>
           <input
             type="tel"
             inputMode="numeric"
-            maxLength={10}
+            maxLength={15}
             value={phoneDigits}
-            onChange={(e) => setPhoneDigits(e.target.value.replace(/\D/g, ''))}
+            onChange={(e) => setPhoneDigits(livePhoneDigits(e.target.value))}
             placeholder="9876543210"
             className="w-full rounded-lg px-2 py-2 text-sm outline-none"
           />
@@ -135,7 +136,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="name@example.com"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
         <div className="flex-1">
@@ -143,7 +144,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
           <select
             value={bloodGroup}
             onChange={(e) => setBloodGroup(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="">—</option>
             {BLOOD_GROUPS.map((g) => (
@@ -161,7 +162,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
           type="text"
           value={city}
           onChange={(e) => setCity(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
@@ -172,7 +173,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
           value={govtId}
           onChange={(e) => setGovtId(e.target.value)}
           placeholder="Aadhaar, passport, etc."
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+          className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         />
         <p className="mt-1 text-xs text-slate-400">
           Helps us recognise this person if they've already been treated at another Sanjeevni clinic, so they keep one
@@ -198,7 +199,7 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
         <button
           type="submit"
           disabled={loading}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand-600/25 disabled:opacity-50"
         >
           {loading ? 'Saving...' : 'Save member'}
         </button>

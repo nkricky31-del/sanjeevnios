@@ -74,7 +74,7 @@ export default function SuspendUserForm() {
           value={digits}
           onChange={(e) => setDigits(e.target.value.replace(/\D/g, ''))}
           placeholder="Phone number (last digits)"
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          className="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         />
         <Button onClick={search} disabled={loading}>
           {loading ? 'Searching...' : 'Find'}

@@ -3,17 +3,30 @@ import { supabase } from './supabaseClient';
 import { computeSlots, formatTimeLabel } from './time';
 import type { AppointmentStatus, DoctorAvailability, QueueStatusRow } from './types';
 
-export function computeNowServing(dayQueue: QueueStatusRow[]): number | null {
-  const active = dayQueue.filter((r) => ['accepted', 'in_progress', 'done'].includes(r.status));
-  if (active.length === 0) return null;
+// A short, stable identifier to show a patient/front-desk alongside their
+// live queue position - the position can shift (a late-arrival recompute, a
+// walk-in inserted ahead of them), but this never does, since it's derived
+// from the appointment's own id. Not a new column: the row's id was already
+// there and already stable, this just formats it for a human to read/quote
+// at the desk instead of showing the raw UUID.
+export function bookingReference(appointmentId: string): string {
+  return appointmentId.slice(0, 8).toUpperCase();
+}
 
-  const inProgress = active.find((r) => r.status === 'in_progress');
+// Positions are now recomputed 1..N over the currently-active
+// (accepted/in_progress) set only - see recompute_queue_positions() in
+// migration_26_queue_positions.sql. A 'done' row's token_no is a frozen
+// historical value, not a live position, so (unlike the old
+// booking-order model) it plays no part in figuring out who's next -
+// get_queue_status() itself now only ever returns accepted/in_progress
+// rows, so `dayQueue` here never contains a 'done' one.
+export function computeNowServing(dayQueue: QueueStatusRow[]): number | null {
+  if (dayQueue.length === 0) return null;
+
+  const inProgress = dayQueue.find((r) => r.status === 'in_progress');
   if (inProgress) return inProgress.token_no;
 
-  const doneTokens = active.filter((r) => r.status === 'done').map((r) => r.token_no);
-  if (doneTokens.length > 0) return Math.max(...doneTokens) + 1;
-
-  return Math.min(...active.map((r) => r.token_no));
+  return Math.min(...dayQueue.map((r) => r.token_no));
 }
 
 const NEXT_SLOT_SEARCH_DAYS = 7;
@@ -100,12 +113,14 @@ export interface FullDayCancelResult {
 }
 
 // Cancels every still-pending/accepted appointment a doctor has on one date
-// and moves each to the next day the doctor is actually available, in
-// token order (accepted bookings keep their relative order but get a fresh
-// token on the new day; pending ones just move date/slot and stay pending).
-// Appointments already in_progress/done/etc. that day are left alone - if
-// one of those exists the doctor clearly WAS available, so this only makes
-// sense for the ones that hadn't been seen yet.
+// and moves each to the next day the doctor is actually available (accepted
+// bookings keep their relative order via slot_time on the new day - see
+// findRescheduleTargets - and get a fresh position there once
+// recompute_queue_positions() picks up the date change; pending ones just
+// move date/slot and stay pending, no position to assign). Appointments
+// already in_progress/done/etc. that day are left alone - if one of those
+// exists the doctor clearly WAS available, so this only makes sense for the
+// ones that hadn't been seen yet.
 export async function cancelAndRescheduleFullDay(
   doctorId: string,
   fromDateISO: string,
@@ -124,43 +139,29 @@ export async function cancelAndRescheduleFullDay(
   if (affected.length === 0) return { rescheduledCount: 0, unplacedCount: 0 };
 
   const targets = await findRescheduleTargets(doctorId, fromDateISO, affected.length);
-  const nextTokenByDate = new Map<string, number>();
 
   for (let i = 0; i < targets.length; i++) {
     const appt = affected[i];
     const target = targets[i];
 
-    let newToken: number | null = null;
-    if (appt.status === 'accepted') {
-      if (!nextTokenByDate.has(target.date)) {
-        const { data: maxRow } = await supabase
-          .from('appointments')
-          .select('token_no')
-          .eq('doctor_id', doctorId)
-          .eq('date', target.date)
-          .not('status', 'in', '(pending,rejected,cancelled)')
-          .order('token_no', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        nextTokenByDate.set(target.date, (maxRow?.token_no ?? 0) + 1);
-      }
-      newToken = nextTokenByDate.get(target.date) ?? 1;
-      nextTokenByDate.set(target.date, newToken + 1);
-    }
-
+    // checked_in_at is cleared - a check-in on the OLD date/time has no
+    // bearing on the new one; the moved appointment should be judged by
+    // its new slot_time and the usual grace period, same as any other
+    // scheduled booking. The AFTER trigger on this update recomputes
+    // positions for both the old date (now short one member) and the new
+    // date (now one member richer).
     await supabase
       .from('appointments')
-      .update({ date: target.date, slot_time: target.slotTime, token_no: newToken })
+      .update({ date: target.date, slot_time: target.slotTime, checked_in_at: null })
       .eq('id', appt.id);
 
     const accountId = appt.family_members?.account_id;
     if (accountId) {
-      const tokenNote = newToken != null ? ` Your new token is #${newToken}.` : '';
       await supabase.from('notifications').insert({
         user_id: accountId,
         appointment_id: appt.id,
         type: 'full_day_reschedule',
-        message: `Your appointment on ${fromDateISO} at ${formatTimeLabel(appt.slot_time)} was cancelled: "${reason}". You've been rescheduled to ${target.date} at ${formatTimeLabel(target.slotTime)}.${tokenNote}`,
+        message: `Your appointment on ${fromDateISO} at ${formatTimeLabel(appt.slot_time)} was cancelled: "${reason}". You've been rescheduled to ${target.date} at ${formatTimeLabel(target.slotTime)}.`,
       });
     }
   }

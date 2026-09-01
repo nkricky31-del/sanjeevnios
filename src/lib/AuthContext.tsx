@@ -24,12 +24,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     // Best-effort, fire-and-forget: pulls any walk-in visit history filed
     // under this same (now-verified) phone number onto this account. Cheap
-    // no-op on every login after the first successful claim.
+    // no-op on every login after the first successful claim. Not swallowed
+    // silently, though - if this RPC errors (RLS, a DB-side exception), the
+    // patient would otherwise see no visit history with zero indication why,
+    // so at least log it somewhere a developer can find it.
     if (data?.role === 'patient') {
-      supabase.rpc('claim_walk_in_records').then(
-        () => {},
-        () => {}
-      );
+      supabase.rpc('claim_walk_in_records').then(({ error }) => {
+        if (error) console.error('claim_walk_in_records failed:', error.message);
+      });
     }
   };
 

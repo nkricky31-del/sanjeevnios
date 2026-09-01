@@ -15,11 +15,13 @@ import BookingStatus from './pages/BookingStatus';
 import ClinicQueue from './pages/ClinicQueue';
 import ClinicSignup from './pages/ClinicSignup';
 import DoctorPage from './pages/DoctorPage';
+import Home from './pages/Home';
 import Login from './pages/Login';
 import MyBookings from './pages/MyBookings';
+import Payments from './pages/Payments';
 import Profile from './pages/Profile';
+import Records from './pages/Records';
 import Search from './pages/Search';
-import Timeline from './pages/Timeline';
 
 export default function App() {
   const { session, profile, loading } = useAuth();
@@ -42,7 +44,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="flex min-h-screen items-center justify-center bg-canvas">
         <p className="text-slate-400">Loading...</p>
       </div>
     );
@@ -56,7 +58,7 @@ export default function App() {
   // instead of leaving them stuck on forms that silently fail.
   if (profile.suspended) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+      <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
         <div className="w-full max-w-sm rounded-2xl border border-red-100 bg-white p-6 text-center shadow-sm">
           <p className="text-lg font-bold text-slate-900">Account suspended</p>
           <p className="mt-2 text-sm text-slate-500">
@@ -82,7 +84,7 @@ export default function App() {
   const encounterMatch = location.pathname.match(/^\/encounters\/([^/]+)$/);
   if (encounterMatch) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-canvas">
         <EncounterDetail encounterId={encounterMatch[1]} />
       </div>
     );
@@ -93,7 +95,7 @@ export default function App() {
   // of which role-specific screen they're currently on.
   if (location.pathname === '/notifications') {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-canvas">
         <NotificationsList />
       </div>
     );
@@ -101,7 +103,7 @@ export default function App() {
 
   if (profile.role === 'clinic') {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-canvas">
         <ClinicQueue />
       </div>
     );
@@ -109,7 +111,7 @@ export default function App() {
 
   if (profile.role === 'admin') {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-canvas">
         <AdminConsole />
       </div>
     );
@@ -121,7 +123,7 @@ export default function App() {
   // branch above takes over on the very next render.
   if (signupIntent) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
+      <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-8">
         <div className="w-full max-w-sm">
           <ClinicSignup onRegistered={clearSignupIntent} />
           <button
@@ -137,13 +139,17 @@ export default function App() {
 
   return (
     <PatientDeclarationGate>
-      <div className="min-h-screen bg-slate-50 pb-20">
+      <div className="min-h-screen bg-canvas pb-24">
         <Routes>
-          <Route path="/" element={<Search />} />
+          <Route path="/" element={<Home />} />
+          <Route path="/search" element={<Search />} />
           <Route path="/doctors/:doctorId" element={<DoctorPage />} />
           <Route path="/bookings" element={<MyBookings />} />
           <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
-          <Route path="/timeline" element={<Timeline />} />
+          <Route path="/records" element={<Records />} />
+          <Route path="/payments" element={<Payments />} />
+          {/* Kept so old links/bookmarks to the timeline still land somewhere. */}
+          <Route path="/timeline" element={<Records />} />
           <Route path="/profile" element={<Profile />} />
         </Routes>
         <PlatformFooterNote />

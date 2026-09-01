@@ -3,19 +3,20 @@
 @theme {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
 
-  /* Primary: indigo-purple, used for buttons, active states, links on dark. */
-  --color-brand-50: #f2f0fe;
-  --color-brand-100: #e5e1fd;
-  --color-brand-200: #cac1fb;
-  --color-brand-300: #ada0f8;
-  --color-brand-400: #8d7bf4;
-  --color-brand-500: #6c5ce7;
-  --color-brand-600: #5b4bd6;
-  --color-brand-700: #4a3db4;
-  --color-brand-800: #3b3190;
-  --color-brand-900: #2f2870;
+  /* Primary: the deep, saturated violet from the SanjeevniOS mockups -
+     primary buttons, the token number, active tab, links. */
+  --color-brand-50: #f4f2ff;
+  --color-brand-100: #ebe6ff;
+  --color-brand-200: #d9d0ff;
+  --color-brand-300: #bfaeff;
+  --color-brand-400: #9f83fb;
+  --color-brand-500: #7d55f3;
+  --color-brand-600: #5b2ce8;
+  --color-brand-700: #4a1fc9;
+  --color-brand-800: #3c1aa3;
+  --color-brand-900: #2f1580;
 
-  /* Accent: warm coral, used for secondary links, badges, highlights. */
+  /* Accent: warm coral, kept for secondary badges/highlights. */
   --color-coral-50: #fff1ec;
   --color-coral-100: #ffe0d3;
   --color-coral-200: #ffc1aa;
@@ -26,10 +27,15 @@
   --color-coral-700: #c13f22;
   --color-coral-800: #9b3119;
   --color-coral-900: #7a2814;
+
+  /* The lavender-tinted page background the mockups sit on - not a plain
+     grey, it carries a little of the brand hue. */
+  --color-canvas: #f6f5fa;
 }
 
 body {
-  background-color: var(--color-slate-50);
+  background-color: var(--color-canvas);
   color: var(--color-slate-900);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }

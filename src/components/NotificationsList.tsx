@@ -1,11 +1,11 @@
-import { ArrowLeft, Bell } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import type { Notification } from '../lib/types';
-import Button from './ui/Button';
+import ScreenHeader from './ui/ScreenHeader';
 
 // A directly-addressable "/notifications" page (see App.tsx, same pattern
 // as EncounterDetail.tsx) - reachable by any role via the bell icon on
@@ -57,23 +57,19 @@ export default function NotificationsList() {
 
   return (
     <div>
-      <div className="flex items-center justify-between border-b border-slate-100 bg-white px-4 py-4">
-        <button
-          onClick={() => window.history.back()}
-          className="inline-flex items-center gap-1 text-sm font-medium text-slate-500"
-        >
-          <ArrowLeft size={16} /> Back
-        </button>
-        {unreadCount > 0 && (
-          <Button variant="ghost" onClick={markAllRead}>
-            Mark all as read
-          </Button>
-        )}
-      </div>
+      <ScreenHeader
+        title="Notifications"
+        onBack={() => window.history.back()}
+        action={
+          unreadCount > 0 ? (
+            <button onClick={markAllRead} className="whitespace-nowrap text-xs font-bold text-brand-600">
+              Mark all read
+            </button>
+          ) : undefined
+        }
+      />
 
-      <div className="mx-auto max-w-md px-4 py-6">
-        <h1 className="text-lg font-bold text-slate-900">Notifications</h1>
-
+      <div className="mx-auto max-w-md px-4 py-4">
         {loading && <p className="mt-3 text-sm text-slate-400">Loading...</p>}
         {!loading && rows.length === 0 && (
           <div className="mt-8 flex flex-col items-center text-center text-slate-400">
