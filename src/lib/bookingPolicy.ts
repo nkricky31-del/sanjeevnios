@@ -11,6 +11,11 @@ export interface BookingPolicy {
   // 37) - meaningless outside that mode, where same-day is already open.
   sameDayBookingEnabled: boolean;
   sameDayCutoffMinutes: number;
+  // Whether a same-day booking made from a verified location gets checked
+  // in on the spot (section 37.4) - only ever true for an appointment_only
+  // clinic that both allows same-day booking AND opted into this. Gates
+  // whether BookingForm bothers asking for location / promising it at all.
+  autoCheckinVerifiedSameDay: boolean;
 }
 
 export interface DayAvailability {
@@ -26,12 +31,15 @@ export const DEFAULT_POLICY: BookingPolicy = {
   dailyCap: 100,
   sameDayBookingEnabled: false,
   sameDayCutoffMinutes: 30,
+  autoCheckinVerifiedSameDay: false,
 };
 
 export async function getBookingPolicy(clinicId: string): Promise<BookingPolicy> {
   const { data } = await supabase
     .from('clinics')
-    .select('mode, booking_horizon_days, daily_cap, same_day_booking_enabled, same_day_cutoff_minutes')
+    .select(
+      'mode, booking_horizon_days, daily_cap, same_day_booking_enabled, same_day_cutoff_minutes, auto_checkin_verified_same_day'
+    )
     .eq('id', clinicId)
     .maybeSingle();
   if (!data) return DEFAULT_POLICY;
@@ -41,6 +49,7 @@ export async function getBookingPolicy(clinicId: string): Promise<BookingPolicy>
     dailyCap: data.daily_cap ?? 100,
     sameDayBookingEnabled: data.same_day_booking_enabled ?? false,
     sameDayCutoffMinutes: data.same_day_cutoff_minutes ?? 30,
+    autoCheckinVerifiedSameDay: data.auto_checkin_verified_same_day ?? false,
   };
 }
 

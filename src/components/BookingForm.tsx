@@ -3,7 +3,16 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../lib/AuthContext';
-import { getNextAvailableDay, isFullDayError, isSameDayCutoffError, isSlotFullError, joinWaitlist } from '../lib/bookingPolicy';
+import {
+  DEFAULT_POLICY,
+  getBookingPolicy,
+  getNextAvailableDay,
+  isFullDayError,
+  isSameDayCutoffError,
+  isSlotFullError,
+  joinWaitlist,
+  type BookingPolicy,
+} from '../lib/bookingPolicy';
 import { getCurrentCoords } from '../lib/checkIn';
 import { todayISO } from '../lib/date';
 import { DPDP_CONSENT_TEXT } from '../lib/dpdpConsent';
@@ -54,6 +63,12 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
   const [declarationChecked, setDeclarationChecked] = useState(false);
   const { status: dpdpStatus, accept: acceptDpdp } = useDpdpConsentStatus();
   const [dpdpChecked, setDpdpChecked] = useState(false);
+  // Whether this clinic would actually DO anything with a location fix on a
+  // same-day booking (schema.sql section 37.4) - gates both the note below
+  // and whether it's worth asking the browser for location at all. Most
+  // clinics never will, so defaulting to DEFAULT_POLICY (false) is the safe
+  // "don't ask, don't promise" starting state while this loads.
+  const [policy, setPolicy] = useState<BookingPolicy>(DEFAULT_POLICY);
 
   useEffect(() => {
     supabase
@@ -67,6 +82,12 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         setMemberId(self?.id ?? list[0]?.id ?? '');
       });
   }, []);
+
+  useEffect(() => {
+    getBookingPolicy(clinicId).then(setPolicy);
+  }, [clinicId]);
+
+  const sameDayAutoCheckin = date === todayISO() && policy.mode === 'appointment_only' && policy.sameDayBookingEnabled && policy.autoCheckinVerifiedSameDay;
 
   const submit = async () => {
     setError(null);
@@ -102,15 +123,16 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
       }
     }
 
-    // A location fix, only sought for a same-day slot - it's what lets the
-    // server tell "booked while standing at the clinic" apart from "booked
-    // from home" and auto-check-in only the former (schema.sql section
-    // 37.4). Best-effort: getCurrentCoords() resolves to null rather than
-    // rejecting when the patient declines or the device can't get a fix, and
-    // a null fix just means this booking is treated like any other advance
-    // one - it never blocks the booking itself.
-    const isSameDay = date === todayISO();
-    const coords = isSameDay ? await getCurrentCoords() : null;
+    // A location fix, only sought when this clinic would actually act on one
+    // (sameDayAutoCheckin) - it's what lets the server tell "booked while
+    // standing at the clinic" apart from "booked from home" and auto-check-in
+    // only the former (schema.sql section 37.4). Best-effort: getCurrentCoords()
+    // resolves to null rather than rejecting when the patient declines or the
+    // device can't get a fix, and a null fix just means this booking is
+    // treated like any other advance one - it never blocks the booking itself.
+    // Never requested for a clinic that wouldn't use it - asking for location
+    // access for no reason is its own bad UX.
+    const coords = sameDayAutoCheckin ? await getCurrentCoords() : null;
 
     const { data: appointment, error: apptError } = await supabase
       .from('appointments')
@@ -130,8 +152,11 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         // queue priority and does not check anyone in. It only means there's
         // nothing to collect at the counter. See schema.sql section 30.
         payment_status: method === 'online' ? 'paid_online' : 'pay_at_clinic',
-        booking_lat: coords?.lat ?? null,
-        booking_lng: coords?.lng ?? null,
+        // Only referenced at all when there's an actual fix to record - an
+        // ordinary booking (no location sought, or the patient declined/no
+        // fix available) never touches these columns, so it can never be
+        // held hostage by them.
+        ...(coords ? { booking_lat: coords.lat, booking_lng: coords.lng } : {}),
       })
       .select()
       .single();
@@ -321,11 +346,16 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         )}
       </div>
 
-      {date === todayISO() && (
+      {sameDayAutoCheckin && (
         <p className="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
           This is a same-day booking. If you're already at the clinic, allow location access when your browser asks
           — you may be checked in immediately with a token. Booking from elsewhere is fine too; you'll collect your
           token at the counter when you arrive.
+        </p>
+      )}
+      {!sameDayAutoCheckin && date === todayISO() && (
+        <p className="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
+          This is a same-day booking. You'll collect your token when you arrive and check in at the clinic.
         </p>
       )}
 

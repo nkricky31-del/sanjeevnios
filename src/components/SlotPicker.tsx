@@ -80,11 +80,16 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
 
   // A same-day slot inside the clinic's cutoff (schema.sql section 37.3) -
   // greyed out here purely so the grid doesn't invite a tap that the server
-  // will refuse with SAME_DAY_CUTOFF. Only meaningful for today's date; any
-  // other day is either fully in the future or not offered at all.
+  // will refuse with SAME_DAY_CUTOFF. That check only exists server-side for
+  // an appointment_only clinic that has opted into same-day booking - an
+  // allow_walkins clinic has never had a same-day cutoff and still doesn't,
+  // so this must stay scoped to exactly that combination, not applied to
+  // "today" generally.
   const isToday = date === todayISO();
+  const sameDayCutoffApplies = appointmentOnly && policy.sameDayBookingEnabled;
   const cutoffMs = policy.sameDayCutoffMinutes * 60_000;
-  const withinCutoff = (s: string) => isToday && new Date(`${date}T${s}`).getTime() - Date.now() < cutoffMs;
+  const nowMs = Date.now();
+  const withinCutoff = (s: string) => sameDayCutoffApplies && isToday && new Date(`${date}T${s}`).getTime() - nowMs < cutoffMs;
 
   // takenSlots (from get_taken_slots, section 36) already means "this exact
   // time's active bookings have reached its capacity" - a slot with room
