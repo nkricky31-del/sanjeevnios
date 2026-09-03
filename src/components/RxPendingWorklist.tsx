@@ -17,7 +17,7 @@ interface RawVisitRow {
   appointments: {
     date: string;
     slot_time: string;
-    token_no: number | null;
+    token_number: number | null;
     family_members: { name: string } | null;
   } | null;
   prescriptions: { status: string }[];
@@ -41,7 +41,7 @@ export default function RxPendingWorklist({ doctorId, onOpen }: Props) {
     const { data } = await supabase
       .from('visits')
       .select(
-        'id, appointment_id, no_prescription, appointments!inner(date, slot_time, token_no, doctor_id, family_members(name)), prescriptions(status)'
+        'id, appointment_id, no_prescription, appointments!inner(date, slot_time, token_number, doctor_id, family_members(name)), prescriptions(status)'
       )
       .eq('appointments.doctor_id', doctorId);
 
@@ -54,7 +54,7 @@ export default function RxPendingWorklist({ doctorId, onOpen }: Props) {
         patientName: v.appointments?.family_members?.name ?? 'Unknown',
         date: v.appointments!.date,
         slotTime: v.appointments!.slot_time,
-        tokenNo: v.appointments!.token_no,
+        tokenNo: v.appointments!.token_number,
       }))
       .sort((a, b) => (a.date === b.date ? a.slotTime.localeCompare(b.slotTime) : b.date.localeCompare(a.date)));
 

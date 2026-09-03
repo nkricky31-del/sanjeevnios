@@ -3,9 +3,13 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../lib/AuthContext';
+import { getNextAvailableDay, isFullDayError, isSameDayCutoffError, isSlotFullError, joinWaitlist } from '../lib/bookingPolicy';
+import { getCurrentCoords } from '../lib/checkIn';
+import { todayISO } from '../lib/date';
 import { DPDP_CONSENT_TEXT } from '../lib/dpdpConsent';
 import { EMERGENCY_NOTE, PATIENT_DECLARATION_TEXT, PLATFORM_DISCLAIMER_SHORT } from '../lib/platformDisclaimer';
 import { supabase } from '../lib/supabaseClient';
+import { formatTimeLabel } from '../lib/time';
 import type { FamilyMember, PaymentMethod } from '../lib/types';
 import { useDpdpConsentStatus, usePatientDeclarationStatus } from '../lib/usePatientConsent';
 import Button from './ui/Button';
@@ -18,9 +22,14 @@ interface Props {
   slotTime: string;
   consultationFee: number;
   onCancel: () => void;
+  // Someone else took this slot's last seat between the picker loading and
+  // Confirm being pressed (schema.sql section 36.4's SLOT_FULL). Distinct
+  // from onCancel: the caller should also refresh the slot grid, since this
+  // exact time is now stale.
+  onSlotFull: () => void;
 }
 
-export default function BookingForm({ doctorId, clinicId, date, slotTime, consultationFee, onCancel }: Props) {
+export default function BookingForm({ doctorId, clinicId, date, slotTime, consultationFee, onCancel, onSlotFull }: Props) {
   const { session } = useAuth();
   const navigate = useNavigate();
   const [members, setMembers] = useState<FamilyMember[]>([]);
@@ -29,6 +38,18 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
   const [method, setMethod] = useState<PaymentMethod>('online');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The day filled up. Not an error state - a choice between waiting for a
+  // seat here or taking the next day that has one.
+  const [fullDay, setFullDay] = useState(false);
+  const [nextDay, setNextDay] = useState<string | null>(null);
+  const [waitlistPlace, setWaitlistPlace] = useState<number | null>(null);
+  // This exact slot filled up between loading the picker and confirming -
+  // not the whole day, so there's nothing to offer but "go pick again."
+  const [slotFull, setSlotFull] = useState(false);
+  // This exact same-day slot slid inside the clinic's cutoff between loading
+  // the picker and confirming (schema.sql section 37.3) - same "go pick
+  // again" outcome as slotFull, just a different reason to explain.
+  const [sameDayCutoff, setSameDayCutoff] = useState(false);
   const { status: declarationStatus, accept: acceptDeclaration } = usePatientDeclarationStatus();
   const [declarationChecked, setDeclarationChecked] = useState(false);
   const { status: dpdpStatus, accept: acceptDpdp } = useDpdpConsentStatus();
@@ -81,6 +102,16 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
       }
     }
 
+    // A location fix, only sought for a same-day slot - it's what lets the
+    // server tell "booked while standing at the clinic" apart from "booked
+    // from home" and auto-check-in only the former (schema.sql section
+    // 37.4). Best-effort: getCurrentCoords() resolves to null rather than
+    // rejecting when the patient declines or the device can't get a fix, and
+    // a null fix just means this booking is treated like any other advance
+    // one - it never blocks the booking itself.
+    const isSameDay = date === todayISO();
+    const coords = isSameDay ? await getCurrentCoords() : null;
+
     const { data: appointment, error: apptError } = await supabase
       .from('appointments')
       .insert({
@@ -90,14 +121,42 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         date,
         slot_time: slotTime,
         reason: reason.trim() || null,
-        status: 'pending',
-        payment_status: method === 'online' ? 'hold' : 'cod',
+        // 'booked' = waiting for the clinic to confirm. No token is issued
+        // here - the patient collects one when they arrive and check in,
+        // UNLESS this is a same-day booking the clinic can auto-check-in
+        // from the location fix above (still decided server-side).
+        status: 'booked',
+        // Payment is recorded, and that is ALL it does: paying online buys no
+        // queue priority and does not check anyone in. It only means there's
+        // nothing to collect at the counter. See schema.sql section 30.
+        payment_status: method === 'online' ? 'paid_online' : 'pay_at_clinic',
+        booking_lat: coords?.lat ?? null,
+        booking_lng: coords?.lng ?? null,
       })
       .select()
       .single();
 
     if (apptError || !appointment) {
       setLoading(false);
+      // A day that filled up between the patient opening the picker and
+      // pressing Confirm is not a failure to apologise for - it's a fork in
+      // the road, so offer the two ways forward instead of a raw error.
+      if (isFullDayError(apptError?.message)) {
+        setFullDay(true);
+        setNextDay(await getNextAvailableDay(clinicId));
+        setError(null);
+        return;
+      }
+      if (isSlotFullError(apptError?.message)) {
+        setSlotFull(true);
+        setError(null);
+        return;
+      }
+      if (isSameDayCutoffError(apptError?.message)) {
+        setSameDayCutoff(true);
+        setError(null);
+        return;
+      }
       setError(apptError?.message ?? 'Could not create the booking.');
       return;
     }
@@ -120,6 +179,112 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
   };
 
   if (!session) return null;
+
+  // This same-day slot slid inside the clinic's cutoff while the form was
+  // open - same "go pick again" outcome as slotFull, different reason.
+  if (sameDayCutoff) {
+    return (
+      <Card className="mt-4 !rounded-3xl">
+        <p className="text-base font-bold text-slate-900">That time is too close now</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Same-day booking for {formatTimeLabel(slotTime)} has closed - it's too close to start now. Pick a later
+          time below.
+        </p>
+        <Button full className="mt-4" onClick={onSlotFull}>
+          Pick another slot
+        </Button>
+      </Card>
+    );
+  }
+
+  // Just this slot filled up - the day itself is fine, so send them straight
+  // back to a freshly-refreshed picker rather than offering a waitlist.
+  if (slotFull) {
+    return (
+      <Card className="mt-4 !rounded-3xl">
+        <p className="text-base font-bold text-slate-900">That time just filled up</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Someone took the last seat for {formatTimeLabel(slotTime)} on{' '}
+          {new Date(date + 'T00:00:00').toLocaleDateString(undefined, {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+          })}
+          . Pick another time below.
+        </p>
+        <Button full className="mt-4" onClick={onSlotFull}>
+          Pick another slot
+        </Button>
+      </Card>
+    );
+  }
+
+  // The day filled up. Offer the two real options - wait for a seat here, or
+  // take the next day that has one - rather than a dead end.
+  if (fullDay) {
+    return (
+      <Card className="mt-4 !rounded-3xl">
+        <p className="text-base font-bold text-slate-900">That day just filled up</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Someone took the last seat for{' '}
+          {new Date(date + 'T00:00:00').toLocaleDateString(undefined, {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+          })}
+          . Here's where you can go from here.
+        </p>
+
+        {waitlistPlace != null ? (
+          <div className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-800">
+            <p className="font-bold">You're on the waitlist — number {waitlistPlace} in line.</p>
+            <p className="mt-1 text-xs leading-relaxed">
+              If someone cancels we'll notify you. Seats are first come, first served — the alert is an invitation
+              to book, not a reserved seat.
+            </p>
+          </div>
+        ) : (
+          <Button
+            full
+            className="mt-4"
+            onClick={async () => {
+              const result = await joinWaitlist(clinicId, memberId, date, doctorId);
+              if (result.error) setError(result.error);
+              else setWaitlistPlace(result.place ?? null);
+            }}
+          >
+            Join the waitlist for this day
+          </Button>
+        )}
+
+        {nextDay && (
+          <div className="mt-3 rounded-2xl border border-slate-200 p-4">
+            <p className="text-sm font-bold text-slate-900">Next day with room</p>
+            <p className="mt-0.5 text-sm text-slate-500">
+              {new Date(nextDay + 'T00:00:00').toLocaleDateString(undefined, {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+              })}
+            </p>
+            <Button variant="outline" full className="mt-2" onClick={onCancel}>
+              Pick a slot on that day
+            </Button>
+          </div>
+        )}
+        {!nextDay && (
+          <p className="mt-3 text-sm text-slate-500">
+            Every day this clinic is currently taking bookings for is full. The waitlist is your best route in.
+          </p>
+        )}
+
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        <button onClick={onCancel} className="mt-3 w-full text-center text-sm font-medium text-slate-500">
+          Back to the calendar
+        </button>
+      </Card>
+    );
+  }
 
   return (
     <Card className="mt-4 !rounded-3xl">
@@ -156,6 +321,14 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
         )}
       </div>
 
+      {date === todayISO() && (
+        <p className="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
+          This is a same-day booking. If you're already at the clinic, allow location access when your browser asks
+          — you may be checked in immediately with a token. Booking from elsewhere is fine too; you'll collect your
+          token at the counter when you arrive.
+        </p>
+      )}
+
       <div className="mt-4">
         <p className="text-sm font-semibold text-slate-700">Reason for visit (optional)</p>
         <input
@@ -187,7 +360,19 @@ export default function BookingForm({ doctorId, clinicId, date, slotTime, consul
             Cash at clinic
           </button>
         </div>
-        {method === 'online' && <p className="mt-1 text-xs text-slate-400">Demo hold only — no real charge.</p>}
+        {/* What paying online does and does not buy, said up front - so
+            nobody arrives expecting to be seen sooner for it. */}
+        {method === 'online' ? (
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+            Paying now means nothing to settle at the counter, so checking in when you arrive is a single scan.
+            It does <strong>not</strong> move you up the queue — turn order follows appointment time, then arrival.
+            <span className="text-slate-400"> Demo hold only — no real charge.</span>
+          </p>
+        ) : (
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+            You'll check in at the counter when you pay. Your place in the queue is the same either way.
+          </p>
+        )}
       </div>
 
       <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">

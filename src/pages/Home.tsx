@@ -55,15 +55,19 @@ const QUICK_ACTIONS: { label: string; icon: typeof CalendarDays; tone: IconTone;
 ];
 
 const STATUS_TONE: Partial<Record<AppointmentStatus, 'live' | 'warning' | 'info' | 'neutral'>> = {
-  accepted: 'live',
-  pending: 'warning',
-  in_progress: 'live',
+  booked: 'warning',
+  accepted: 'info',
+  checked_in: 'live',
+  called: 'live',
+  in_consultation: 'live',
 };
 
 const STATUS_LABEL: Partial<Record<AppointmentStatus, string>> = {
+  booked: 'Awaiting clinic',
   accepted: 'Confirmed',
-  pending: 'Awaiting clinic',
-  in_progress: 'In progress',
+  checked_in: 'Checked in',
+  called: "You're being called",
+  in_consultation: 'With the doctor',
 };
 
 const AVATAR_TONES: IconTone[] = ['brand', 'emerald', 'amber', 'pink'];
@@ -92,7 +96,7 @@ export default function Home() {
         .from('appointments')
         .select('id, date, slot_time, status, doctors(name, specialty), clinics(name, address)')
         .gte('date', todayISO())
-        .in('status', ['pending', 'accepted', 'in_progress'])
+        .in('status', ['booked', 'accepted', 'checked_in', 'called', 'in_consultation'])
         .order('date', { ascending: true })
         .order('slot_time', { ascending: true })
         .limit(1);

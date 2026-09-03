@@ -17,7 +17,7 @@ interface Row {
   date: string;
   slot_time: string;
   status: AppointmentStatus;
-  token_no: number | null;
+  token_number: number | null;
   doctors: { name: string; specialty: string | null } | null;
   clinics: { name: string; address: string | null } | null;
   family_members: { name: string; mrn: string } | null;
@@ -31,27 +31,31 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'cancelled', label: 'Cancelled' },
 ];
 
-const UPCOMING: AppointmentStatus[] = ['pending', 'accepted', 'in_progress'];
-const COMPLETED: AppointmentStatus[] = ['done'];
+const UPCOMING: AppointmentStatus[] = ['booked', 'accepted', 'checked_in', 'called', 'in_consultation'];
+const COMPLETED: AppointmentStatus[] = ['completed'];
 const CANCELLED: AppointmentStatus[] = ['cancelled', 'rejected', 'no_show'];
 
 const STATUS_TONE: Record<AppointmentStatus, 'live' | 'warning' | 'info' | 'neutral'> = {
-  pending: 'warning',
-  accepted: 'live',
-  in_progress: 'live',
+  booked: 'warning',
+  accepted: 'info',
+  checked_in: 'live',
+  called: 'live',
+  in_consultation: 'live',
+  completed: 'info',
   rejected: 'neutral',
   cancelled: 'neutral',
-  done: 'info',
   no_show: 'neutral',
 };
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
-  pending: 'Awaiting clinic',
+  booked: 'Awaiting clinic',
   accepted: 'Confirmed',
-  in_progress: 'In progress',
+  checked_in: 'Checked in',
+  called: "You're being called",
+  in_consultation: 'With the doctor',
+  completed: 'Completed',
   rejected: 'Rejected',
   cancelled: 'Cancelled',
-  done: 'Completed',
   no_show: 'No-show',
 };
 
@@ -66,7 +70,7 @@ export default function MyBookings() {
     supabase
       .from('appointments')
       .select(
-        'id, date, slot_time, status, token_no, doctors(name, specialty), clinics(name, address), family_members(name, mrn)'
+        'id, date, slot_time, status, token_number, doctors(name, specialty), clinics(name, address), family_members(name, mrn)'
       )
       .order('date', { ascending: false })
       .order('slot_time', { ascending: false })
@@ -146,9 +150,9 @@ export default function MyBookings() {
                   <span className="flex items-center gap-1.5">
                     <Clock size={13} className="text-slate-400" />
                     {r.date === today ? 'Today' : `For ${r.family_members?.name ?? 'you'}`}
-                    {r.token_no != null && r.status !== 'done' && (
+                    {r.token_number != null && r.status !== 'completed' && (
                       <span className="ml-1 rounded-full bg-brand-50 px-2 py-0.5 font-bold text-brand-700">
-                        #{r.token_no} in queue
+                        Token #{r.token_number}
                       </span>
                     )}
                   </span>

@@ -18,12 +18,13 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import FamilyMemberForm from '../components/FamilyMemberForm';
+import FamilyMemberPhoto from '../components/FamilyMemberPhoto';
 import KnownConditionsForm from '../components/KnownConditionsForm';
 import PatientProfile from '../components/PatientProfile';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
-import IconTile, { type IconTone } from '../components/ui/IconTile';
+import IconTile from '../components/ui/IconTile';
 import ScreenHeader from '../components/ui/ScreenHeader';
 import SectionTitle from '../components/ui/SectionTitle';
 import { useAuth } from '../lib/AuthContext';
@@ -37,10 +38,6 @@ const RELATION_LABEL: Record<string, string> = {
   child: 'Child',
   parent: 'Parent',
 };
-
-// Cycled across family member avatars purely for visual variety - not tied
-// to identity or status.
-const AVATAR_TONES: IconTone[] = ['brand', 'emerald', 'amber', 'pink'];
 
 type Panel = 'personal' | 'family' | 'medical' | 'privacy' | 'about' | null;
 
@@ -233,21 +230,14 @@ export default function Profile() {
                     {!loadingMembers && members.length === 0 && (
                       <p className="col-span-3 text-sm text-slate-400">No family members yet.</p>
                     )}
-                    {members.map((m, i) => (
+                    {members.map((m) => (
                       <div key={m.id} className="flex flex-col items-center text-center">
-                        <span
-                          className={`flex h-14 w-14 items-center justify-center rounded-2xl text-lg font-extrabold ${
-                            AVATAR_TONES[i % AVATAR_TONES.length] === 'brand'
-                              ? 'bg-brand-100 text-brand-700'
-                              : AVATAR_TONES[i % AVATAR_TONES.length] === 'emerald'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : AVATAR_TONES[i % AVATAR_TONES.length] === 'amber'
-                                  ? 'bg-amber-100 text-amber-700'
-                                  : 'bg-pink-100 text-pink-700'
-                          }`}
-                        >
-                          {m.name.charAt(0).toUpperCase()}
-                        </span>
+                        <FamilyMemberPhoto
+                          memberId={m.id}
+                          name={m.name}
+                          photoPath={m.photo_path}
+                          onUploaded={loadMembers}
+                        />
                         <p className="mt-1.5 max-w-full truncate text-xs font-bold text-slate-900">{m.name}</p>
                         <p className="text-[11px] text-slate-500">
                           {(m.relation && RELATION_LABEL[m.relation]) ?? '—'}

@@ -4,7 +4,7 @@ import {
   CheckCircle2,
   Clock,
   MapPin,
-  QrCode,
+  QrCode as QrCodeIcon,
   RefreshCw,
   Stethoscope,
   Trash2,
@@ -24,7 +24,8 @@ import ScreenHeader from '../components/ui/ScreenHeader';
 import StatusPill from '../components/ui/StatusPill';
 import VerifiedBadge from '../components/VerifiedBadge';
 import VisitDetails from '../components/VisitDetails';
-import { bookingReference, computeNowServing } from '../lib/queue';
+import { getCheckInOptions, type CheckInOptions } from '../lib/checkIn';
+import { bookingReference, computeNowServing, countAhead } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { estimateSlotMinutes, formatTimeLabel } from '../lib/time';
 import type { AppointmentStatus, DoctorAvailability, Prescription, QueueStatusRow, Visit } from '../lib/types';
@@ -35,10 +36,15 @@ interface BookingDetail {
   date: string;
   slot_time: string;
   status: AppointmentStatus;
-  token_no: number | null;
+  token_number: number | null;
+  checked_in_at: string | null;
+  // The published running order (schema.sql section 34) - a PLAN, assigned
+  // the night before to every booked patient. Separate from token_number,
+  // which only exists once this patient has actually checked in.
+  sequence_no: number | null;
+  estimated_time: string | null;
   reason: string | null;
   reject_reason: string | null;
-  checked_in_at: string | null;
   doctor_id: string;
   clinic_id: string;
   doctors: { name: string; specialty: string | null } | null;
@@ -49,35 +55,48 @@ interface BookingDetail {
 
 // Statuses where something can still change - a rejected/cancelled/no_show
 // booking is done, no point keeping a live channel open for it.
-const LIVE_STATUSES: AppointmentStatus[] = ['pending', 'accepted', 'in_progress', 'done'];
+const WATCHED_STATUSES: AppointmentStatus[] = [
+  'booked',
+  'accepted',
+  'checked_in',
+  'called',
+  'in_consultation',
+  'completed',
+];
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
-  pending: 'Pending clinic approval',
-  accepted: 'Confirmed',
+  booked: 'Pending clinic approval',
+  accepted: 'Confirmed — check in when you arrive',
+  checked_in: 'Checked in — waiting',
+  called: "You're being called now",
+  in_consultation: 'You are being seen now',
+  completed: 'Completed',
   rejected: 'Rejected by clinic',
   cancelled: 'Cancelled',
-  in_progress: 'You are being seen now',
-  done: 'Completed',
   no_show: 'Marked as no-show',
 };
 
 const STATUS_TONE: Record<AppointmentStatus, 'live' | 'warning' | 'info' | 'neutral'> = {
-  pending: 'warning',
-  accepted: 'live',
-  in_progress: 'live',
+  booked: 'warning',
+  accepted: 'info',
+  checked_in: 'live',
+  called: 'live',
+  in_consultation: 'live',
+  completed: 'info',
   rejected: 'neutral',
   cancelled: 'neutral',
-  done: 'info',
   no_show: 'neutral',
 };
 
-const CANCEL_WINDOW_HOURS = 2;
+// Fallback only - the real figure comes from the clinic, and is more
+// forgiving for patients who paid online (see schema.sql section 32).
+const DEFAULT_CANCEL_WINDOW_HOURS = 2;
 
 export default function BookingStatus() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
   const [booking, setBooking] = useState<BookingDetail | null>(null);
-  const [nowServing, setNowServing] = useState<number | null>(null);
+  const [queueRows, setQueueRows] = useState<QueueStatusRow[]>([]);
   const [slotMinutes, setSlotMinutes] = useState(15);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [visit, setVisit] = useState<(Visit & { prescriptions: Prescription[] }) | null>(null);
@@ -85,6 +104,7 @@ export default function BookingStatus() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [doctorVerified, setDoctorVerified] = useState(false);
   const [clinicVerified, setClinicVerified] = useState(false);
+  const [options, setOptions] = useState<CheckInOptions | null>(null);
   const alerted = useRef({ thirty: false, next: false });
 
   const loadBooking = async () => {
@@ -127,7 +147,7 @@ export default function BookingStatus() {
 
   const loadQueue = async (doctorId: string, date: string) => {
     const { data } = await supabase.rpc('get_queue_status', { p_doctor_id: doctorId, p_date: date });
-    setNowServing(computeNowServing((data ?? []) as QueueStatusRow[]));
+    setQueueRows((data ?? []) as QueueStatusRow[]);
   };
 
   // Accept/reject/reminder notices all land here with richer text than the
@@ -162,6 +182,9 @@ export default function BookingStatus() {
     loadBooking();
     loadVisit();
     checkLatestNotification();
+    // Paying online buys a more forgiving rescheduling window (a convenience,
+    // not a queue advantage) - the clinic sets both figures.
+    getCheckInOptions(appointmentId).then(setOptions);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appointmentId]);
 
@@ -180,7 +203,7 @@ export default function BookingStatus() {
   }, [booking?.doctor_id, booking?.date]);
 
   useEffect(() => {
-    if (!booking || !LIVE_STATUSES.includes(booking.status)) return;
+    if (!booking || !WATCHED_STATUSES.includes(booking.status)) return;
 
     let cancelled = false;
     loadQueue(booking.doctor_id, booking.date);
@@ -205,11 +228,15 @@ export default function BookingStatus() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking?.status, booking?.doctor_id, booking?.date]);
 
+  // How many are genuinely in front of this patient, taken from the server's
+  // ordering rather than by subtracting token numbers - under the fair-queue
+  // rule (schema.sql section 31) a lower token does not mean an earlier turn.
+  const nowServing = computeNowServing(queueRows);
+  const aheadOfMe = countAhead(queueRows, booking?.token_number ?? null);
+
   // Fire the two in-app reminders once each, when their condition is first met.
   useEffect(() => {
-    if (!booking || booking.token_no == null || nowServing == null) return;
-    const ahead = booking.token_no - nowServing;
-    if (ahead < 0) return;
+    if (!booking || aheadOfMe == null) return;
 
     const raiseAlert = async (message: string) => {
       setAlertMessage(message);
@@ -221,29 +248,34 @@ export default function BookingStatus() {
       });
     };
 
-    if (ahead === 1 && !alerted.current.next) {
+    if (aheadOfMe === 0 && !alerted.current.next) {
       alerted.current.next = true;
       raiseAlert("You're next! Please head to the clinic now.");
-    } else if (ahead * slotMinutes <= 30 && !alerted.current.thirty) {
+    } else if (aheadOfMe > 0 && aheadOfMe * slotMinutes <= 30 && !alerted.current.thirty) {
       alerted.current.thirty = true;
       raiseAlert('Your turn is about 30 minutes away.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nowServing, booking?.token_no, slotMinutes]);
+  }, [aheadOfMe, booking?.id, slotMinutes]);
 
   if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
 
-  const confirmed = ['accepted', 'in_progress', 'done'].includes(booking.status);
-  const inQueue = ['accepted', 'in_progress'].includes(booking.status);
-  const ahead = inQueue && booking.token_no != null && nowServing != null ? Math.max(booking.token_no - nowServing, 0) : null;
+  const confirmed = ['accepted', 'checked_in', 'called', 'in_consultation', 'completed'].includes(booking.status);
+  // Holding a live token: arrived, not finished.
+  const inQueue = ['checked_in', 'called', 'in_consultation'].includes(booking.status);
+  // Confirmed but not yet through the door - the "you'll get your number when
+  // you arrive" state, which is new in this model.
+  const awaitingArrival = booking.status === 'accepted';
+  const cancelWindowHours = options?.rescheduleWindowHours ?? DEFAULT_CANCEL_WINDOW_HOURS;
+  const ahead = inQueue ? aheadOfMe : null;
   const estimatedWaitMinutes = ahead != null ? Math.round(ahead * slotMinutes) : 0;
 
   const bookingMoment = new Date(`${booking.date}T${booking.slot_time}`);
   const endMoment = new Date(bookingMoment.getTime() + slotMinutes * 60 * 1000);
   const canModify =
-    ['pending', 'accepted'].includes(booking.status) &&
-    bookingMoment.getTime() - Date.now() > CANCEL_WINDOW_HOURS * 60 * 60 * 1000;
+    ['booked', 'accepted'].includes(booking.status) &&
+    bookingMoment.getTime() - Date.now() > cancelWindowHours * 60 * 60 * 1000;
 
   const cancelBooking = async () => {
     setActionError(null);
@@ -355,7 +387,7 @@ export default function BookingStatus() {
           </div>
 
           <div className="flex items-center gap-3 border-t border-slate-100 p-4">
-            <IconTile icon={QrCode} size="sm" />
+            <IconTile icon={QrCodeIcon} size="sm" />
             <p className="min-w-0 flex-1 text-sm font-bold text-slate-900">Booking reference</p>
             <span className="rounded-xl bg-brand-50 px-3 py-1.5 font-mono text-sm font-extrabold text-brand-700">
               {bookingReference(booking.id)}
@@ -378,34 +410,92 @@ export default function BookingStatus() {
 
           {booking.encounters?.encounter_no && (
             <div className="flex items-center gap-3 border-t border-slate-100 p-4">
-              <IconTile icon={QrCode} size="sm" tone="slate" />
+              <IconTile icon={QrCodeIcon} size="sm" tone="slate" />
               <p className="min-w-0 flex-1 text-sm font-bold text-slate-900">Encounter number</p>
               <span className="font-mono text-xs text-slate-500">{booking.encounters.encounter_no}</span>
             </div>
           )}
         </Card>
 
-        {/* Live queue */}
-        {inQueue && booking.token_no != null && (
+        {/* Confirmed, but the patient hasn't arrived yet - no token exists.
+            The scannable code itself lives on the dedicated pass screen,
+            which is what the patient holds up at the desk. */}
+        {awaitingArrival && (
+          <div className="mt-3 rounded-3xl border border-brand-100 bg-white p-5 text-center">
+            {booking.sequence_no != null ? (
+              <>
+                <p className="text-sm font-semibold text-slate-500">Your number for the day</p>
+                <p className="mt-1 text-5xl font-extrabold leading-none text-brand-600">#{booking.sequence_no}</p>
+                {booking.estimated_time && (
+                  <p className="mt-1.5 text-sm font-bold text-slate-700">
+                    Expected around {formatTimeLabel(booking.estimated_time)}
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-slate-500">
+                  This is your place in the published order, not a check-in. Tokens are still given out in arrival
+                  order when you actually check in at the clinic.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-slate-500">Your Token Number</p>
+                <p className="mt-1 text-4xl font-extrabold leading-none text-slate-300">— —</p>
+                <p className="mt-2 text-sm font-semibold text-slate-700">
+                  You'll get your token when you check in at the clinic.
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Tokens are given out in arrival order on the day, so getting there on time is what secures your
+                  place in the queue — not the time you booked.
+                </p>
+              </>
+            )}
+            <Button full className="mt-4" onClick={() => navigate(`/bookings/${booking.id}/pass`)}>
+              <QrCodeIcon size={17} /> Show this at reception
+            </Button>
+            <div className="mt-4 text-left">
+              <InfoNote
+                title="When you arrive"
+                bullets={[
+                  `Check in at the desk from 60 minutes before your ${formatTimeLabel(booking.slot_time)} slot.`,
+                  'Show your check-in code — or just give them your name, phone or MRN.',
+                  'Your token number appears here as soon as the desk checks you in.',
+                ]}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Arrived - the live token. */}
+        {inQueue && booking.token_number != null && (
           <div className="mt-3 rounded-3xl border border-brand-100 bg-white p-5 text-center">
             {booking.checked_in_at && (
               <div className="mb-3 flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">
-                <CheckCircle2 size={16} /> Checked in
+                <CheckCircle2 size={16} /> Checked in at{' '}
+                {new Date(booking.checked_in_at).toLocaleTimeString(undefined, {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
               </div>
             )}
-            <p className="text-sm font-semibold text-slate-500">Your Queue Position</p>
-            <p className="mt-1 text-6xl font-extrabold leading-none text-brand-600">{booking.token_no}</p>
+            <p className="text-sm font-semibold text-slate-500">Your Token Number</p>
+            <p className="mt-1 text-6xl font-extrabold leading-none text-brand-600">{booking.token_number}</p>
             <p className="mt-2 text-sm text-slate-500">
-              {booking.status === 'in_progress'
-                ? "It's your turn — please go in."
-                : 'Please wait for your number to be called.'}
+              {booking.status === 'in_consultation'
+                ? 'You are with the doctor now.'
+                : booking.status === 'called'
+                  ? "It's your turn — please go in."
+                  : 'Please wait for your number to be called.'}
             </p>
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <div className="rounded-2xl border border-slate-100 p-3">
+                <span className="text-xs font-semibold text-slate-500">Now serving</span>
+                <p className="mt-1 text-xl font-extrabold text-slate-900">{nowServing ?? '—'}</p>
+              </div>
               <div className="rounded-2xl border border-slate-100 p-3">
                 <div className="flex items-center justify-center gap-1.5 text-slate-500">
                   <Users size={15} />
-                  <span className="text-xs font-semibold">People ahead</span>
+                  <span className="text-xs font-semibold">Ahead</span>
                 </div>
                 <p className="mt-1 text-xl font-extrabold text-slate-900">{ahead ?? '—'}</p>
               </div>
@@ -417,6 +507,10 @@ export default function BookingStatus() {
                 <p className="mt-1 text-xl font-extrabold text-slate-900">~{estimatedWaitMinutes}m</p>
               </div>
             </div>
+
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              These update as people arrive. Turn order follows appointment time, then arrival.
+            </p>
 
             <button
               onClick={() => loadQueue(booking.doctor_id, booking.date)}
@@ -431,7 +525,7 @@ export default function BookingStatus() {
                 bullets={[
                   'Please wait near the consultation area.',
                   "You'll be notified here when it's your turn.",
-                  'Your position can change if an earlier patient checks in or a walk-in is seen — your booking reference never changes.',
+                  'Your token is fixed for today — it was issued in the order people arrived and does not move.',
                 ]}
               />
             </div>
@@ -454,14 +548,14 @@ export default function BookingStatus() {
           clinicName={booking.clinics?.name}
         />
 
-        {!inQueue && ['pending'].includes(booking.status) && (
+        {booking.status === 'booked' && (
           <div className="mt-3">
             <InfoNote
               title="Important Information"
               bullets={[
                 'Please arrive 15 minutes before your appointment time.',
                 'Carry a valid ID proof and previous reports, if any.',
-                `You can reschedule or cancel up to ${CANCEL_WINDOW_HOURS} hours before the appointment.`,
+                `You can reschedule or cancel up to ${cancelWindowHours} hour${cancelWindowHours === 1 ? '' : 's'} before the appointment.`,
               ]}
             />
           </div>
@@ -479,9 +573,9 @@ export default function BookingStatus() {
             </Button>
           </div>
         )}
-        {['pending', 'accepted'].includes(booking.status) && !canModify && (
+        {['booked', 'accepted'].includes(booking.status) && !canModify && (
           <p className="mt-3 text-center text-xs text-slate-400">
-            Too close to the appointment time to cancel or reschedule (within {CANCEL_WINDOW_HOURS} hours).
+            Too close to the appointment time to cancel or reschedule (within {cancelWindowHours} hour{cancelWindowHours === 1 ? '' : 's'}).
           </p>
         )}
 

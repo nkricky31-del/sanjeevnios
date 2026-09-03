@@ -25,6 +25,10 @@ export default function DoctorPage() {
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  // Bumped when a slot turns out to have filled up already (SLOT_FULL) so
+  // SlotPicker remounts and re-fetches taken slots for the day instead of
+  // showing the now-stale grid it loaded with.
+  const [slotPickerKey, setSlotPickerKey] = useState(0);
   const [doctorVerified, setDoctorVerified] = useState(false);
   const [clinicVerified, setClinicVerified] = useState(false);
 
@@ -97,6 +101,7 @@ export default function DoctorPage() {
 
         <div className="mt-5">
           <SlotPicker
+            key={slotPickerKey}
             doctorId={doctor.id}
             clinicId={doctor.clinic_id}
             selectedDate={selectedDate}
@@ -118,6 +123,12 @@ export default function DoctorPage() {
             onCancel={() => {
               setSelectedDate(null);
               setSelectedSlot(null);
+            }}
+            onSlotFull={() => {
+              // Keep the date so they land back on the same day; only the
+              // slot they picked is stale.
+              setSelectedSlot(null);
+              setSlotPickerKey((k) => k + 1);
             }}
           />
         )}

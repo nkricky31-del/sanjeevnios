@@ -16,6 +16,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
   const [startTime, setStartTime] = useState('10:00');
   const [endTime, setEndTime] = useState('13:00');
   const [maxPerDay, setMaxPerDay] = useState('12');
+  const [slotCapacity, setSlotCapacity] = useState('1');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +46,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
   };
 
   const maxNum = Number(maxPerDay);
+  const slotCapacityNum = Number(slotCapacity);
   // Same math patients see turned into slots on DoctorPage - shown here so
   // the clinic can see exactly what "12 patients/day, 10:00-13:00" produces
   // before they save it.
@@ -68,6 +70,10 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
       setError('Max patients per day must be a positive number.');
       return;
     }
+    if (!Number.isFinite(slotCapacityNum) || slotCapacityNum <= 0) {
+      setError('Capacity per slot must be a positive number.');
+      return;
+    }
 
     setSaving(true);
     const rows = Array.from(selectedDays).map((weekday) => ({
@@ -76,6 +82,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
       start_time: `${startTime}:00`,
       end_time: `${endTime}:00`,
       max_patients_per_day: maxNum,
+      slot_capacity: slotCapacityNum,
     }));
     const { error: insertError } = await supabase.from('doctor_availability').insert(rows);
     setSaving(false);
@@ -108,7 +115,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
                 <span className="font-medium text-slate-800">{WEEKDAY_LABELS[w.weekday]}</span>{' '}
                 <span className="text-slate-600">
                   {formatTimeLabel(w.start_time)} – {formatTimeLabel(w.end_time)} · {w.max_patients_per_day}{' '}
-                  patients/day
+                  patients/day · {w.slot_capacity ?? 1} per slot
                 </span>
               </span>
               <button onClick={() => removeWindow(w.id)} className="text-xs font-medium text-red-600">
@@ -168,12 +175,24 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
               className="mt-1 block w-28 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
             />
           </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600">Capacity per slot</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={slotCapacity}
+              onChange={(e) => setSlotCapacity(e.target.value)}
+              className="mt-1 block w-28 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
+            />
+          </div>
         </div>
 
         {previewSlots.length > 0 && (
           <p className="mt-2 text-xs text-slate-500">
-            → {previewSlots.length} bookable slots/day, {formatTimeLabel(previewSlots[0])} to{' '}
-            {formatTimeLabel(previewSlots[previewSlots.length - 1])}
+            → {previewSlots.length} bookable slot{previewSlots.length === 1 ? '' : 's'}/day,{' '}
+            {formatTimeLabel(previewSlots[0])} to {formatTimeLabel(previewSlots[previewSlots.length - 1])}, each
+            holding {slotCapacityNum > 0 ? slotCapacityNum : 1} patient{slotCapacityNum === 1 ? '' : 's'}
           </p>
         )}
 

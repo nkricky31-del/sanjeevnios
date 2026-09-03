@@ -11,8 +11,10 @@ import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
 import { supabase } from './lib/supabaseClient';
 import AdminConsole from './pages/AdminConsole';
+import BookingPass from './pages/BookingPass';
 import BookingStatus from './pages/BookingStatus';
 import ClinicQueue from './pages/ClinicQueue';
+import ClinicPoster from './pages/ClinicPoster';
 import ClinicSignup from './pages/ClinicSignup';
 import DoctorPage from './pages/DoctorPage';
 import Home from './pages/Home';
@@ -22,6 +24,7 @@ import Payments from './pages/Payments';
 import Profile from './pages/Profile';
 import Records from './pages/Records';
 import Search from './pages/Search';
+import TokenBoard from './pages/TokenBoard';
 
 export default function App() {
   const { session, profile, loading } = useAuth();
@@ -102,6 +105,10 @@ export default function App() {
   }
 
   if (profile.role === 'clinic') {
+    // Both of these are full-bleed screens meant for a second monitor or a
+    // tablet facing the waiting room, so they carry no console chrome.
+    if (location.pathname === '/board') return <TokenBoard />;
+    if (location.pathname === '/poster') return <ClinicPoster />;
     return (
       <div className="min-h-screen bg-canvas">
         <ClinicQueue />
@@ -146,6 +153,7 @@ export default function App() {
           <Route path="/doctors/:doctorId" element={<DoctorPage />} />
           <Route path="/bookings" element={<MyBookings />} />
           <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
+          <Route path="/bookings/:appointmentId/pass" element={<BookingPass />} />
           <Route path="/records" element={<Records />} />
           <Route path="/payments" element={<Payments />} />
           {/* Kept so old links/bookmarks to the timeline still land somewhere. */}

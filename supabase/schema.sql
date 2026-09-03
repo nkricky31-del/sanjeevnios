@@ -2645,3 +2645,3578 @@ as $$
     and a.status in ('accepted', 'in_progress')
   order by a.token_no;
 $$;
+
+-- ============================================================================
+-- 27. ARRIVAL CHECK-IN + LIVE TOKEN
+-- ============================================================================
+-- Replaces section 26's model. There, token_no was a queue POSITION derived
+-- from slot time and recomputed on every change. Here the token is a real,
+-- permanent number handed out at the door: nobody holds a token until they
+-- physically arrive and are checked in, and the number is issued in strict
+-- ARRIVAL ORDER, per clinic, per day. A patient who booked 10:00 and never
+-- turns up simply never takes a number, so they can't hold up the people
+-- standing in the waiting room.
+--
+-- See TESTING.md "Test 7" for how to exercise this.
+
+-- ----------------------------------------------------------------------------
+-- 27.0 Retire section 26's recompute machinery - FIRST, before anything else
+-- ----------------------------------------------------------------------------
+-- This has to happen before the column rename and before the status backfill
+-- below, for two reasons:
+--   * recompute_queue_positions()'s body is stored as TEXT and refers to
+--     token_no. A column rename does NOT rewrite it, so the moment 27.2
+--     renames token_no -> token_number that function is broken.
+--   * its trigger fires on any UPDATE of an accepted/in_progress row - which
+--     is exactly what 27.3's status backfill does. Leaving it attached means
+--     the backfill runs the now-broken function and the whole migration dies
+--     with 'column "token_no" ... does not exist'.
+-- Positions are no longer derived at all under this model - the token is
+-- assigned once, at the door, and never moves - so nothing here should keep
+-- rewriting token numbers.
+
+drop trigger if exists on_appointment_recompute_queue on appointments;
+drop function if exists public.trigger_recompute_queue();
+drop function if exists public.recompute_queue_positions(uuid, date);
+drop index if exists appointments_active_token_unique;
+
+-- The section 5 broadcast trigger's WHEN clause also names token_no, but a
+-- trigger's WHEN expression is stored parsed (by attribute number), so it
+-- follows the rename by itself. It gets rebuilt in 27.8 regardless.
+
+-- ----------------------------------------------------------------------------
+-- 27.1 Clinic-level settings the check-in window depends on
+-- ----------------------------------------------------------------------------
+
+-- How long after a slot has finished the desk may still check someone in.
+alter table clinics add column if not exists checkin_grace_minutes int not null default 30;
+
+-- Every date/time in this app is clinic-local wall-clock (todayISO() on the
+-- client is the browser's local calendar date, and slot_time is a plain
+-- time). Supabase runs Postgres in UTC, so comparing those against now()
+-- directly is wrong by the UTC offset - which matters a great deal for a
+-- window like "60 minutes before the slot". Storing the clinic's timezone
+-- lets the check-in guard below compare local wall-clock to local
+-- wall-clock instead.
+alter table clinics add column if not exists timezone text not null default 'Asia/Kolkata';
+
+-- ----------------------------------------------------------------------------
+-- 27.2 Appointment columns
+-- ----------------------------------------------------------------------------
+
+-- token_no (section 26) becomes token_number - same column, renamed to the
+-- name the arrival-token model uses. Guarded so the migration is re-runnable
+-- and so a database built fresh from schema.sql (which already declares
+-- token_number) isn't disturbed.
+do $$
+begin
+  if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'appointments' and column_name = 'token_no'
+      )
+     and not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'appointments' and column_name = 'token_number'
+      )
+  then
+    alter table appointments rename column token_no to token_number;
+  end if;
+end $$;
+
+alter table appointments add column if not exists token_number int;
+-- The day a token belongs to. Kept explicitly rather than inferred from
+-- `date` so a token always carries the day it was actually issued, even if
+-- an appointment's date is later corrected.
+alter table appointments add column if not exists token_date date;
+-- The raw per-clinic-per-day arrival counter. token_number is what gets
+-- shown/called; arrival_seq is the ordinal it was issued from. They're
+-- identical today - they're separate so a clinic can later renumber or
+-- prefix displayed tokens without disturbing the record of who arrived in
+-- what order.
+alter table appointments add column if not exists arrival_seq int;
+-- checked_in_at already exists from section 26; the rest are new.
+alter table appointments add column if not exists checked_in_by uuid references profiles (id);
+alter table appointments add column if not exists check_in_method text;
+
+alter table appointments drop constraint if exists appointments_check_in_method_check;
+alter table appointments add constraint appointments_check_in_method_check
+  check (check_in_method is null or check_in_method in ('clinic_scan', 'patient_scan', 'manual'));
+
+-- ----------------------------------------------------------------------------
+-- 27.3 Status lifecycle
+-- ----------------------------------------------------------------------------
+-- booked -> accepted -> checked_in -> called -> in_consultation -> completed
+-- plus cancelled / no_show, and rejected (the clinic declining a booking,
+-- which the reject flow in the app has always had).
+--
+-- Renames of the three existing states are applied to live rows first, with
+-- the constraint dropped, then the new constraint goes on.
+
+alter table appointments drop constraint if exists appointments_status_check;
+
+update appointments set status = 'booked' where status = 'pending';
+update appointments set status = 'in_consultation' where status = 'in_progress';
+update appointments set status = 'completed' where status = 'done';
+
+alter table appointments alter column status set default 'booked';
+alter table appointments add constraint appointments_status_check
+  check (status in (
+    'booked', 'accepted', 'checked_in', 'called',
+    'in_consultation', 'completed', 'cancelled', 'rejected', 'no_show'
+  ));
+
+-- Every token in the table right now predates this model. Section 26 issued
+-- them as per-DOCTOR queue positions, so the same number legitimately repeats
+-- across two doctors at one clinic on one day - which the per-CLINIC unique
+-- index in 27.4 then (correctly) rejects. They were never arrival tokens, so
+-- rather than renumber them into a history that didn't happen, clear them.
+-- Completed visits keep their encounter, visit notes and prescriptions; they
+-- just stop claiming a token number that was never issued at a door.
+--
+-- checked_in_at goes with them, deliberately. This model's invariant is
+-- "checked_in_at is set exactly when a token has been issued" - leaving a
+-- stale timestamp behind with no number would make check_in_appointment()
+-- take its already-checked-in branch forever and hand back a null token.
+-- Anyone mid-flow simply gets checked in again at the desk, which is what
+-- actually draws them a real number.
+update appointments
+set token_number = null,
+    arrival_seq = null,
+    token_date = null,
+    checked_in_at = null,
+    checked_in_by = null,
+    check_in_method = null;
+
+-- Nothing can be mid-arrival either: section 26 had no checked_in/called
+-- states, so any row that survived the rename as one of those came from a
+-- re-run, and the cleared timestamps above mean it holds no token. Send it
+-- back to 'accepted' so the desk re-checks it in properly.
+update appointments set status = 'accepted' where status in ('checked_in', 'called');
+
+-- ----------------------------------------------------------------------------
+-- 27.4 One token per clinic per day
+-- ----------------------------------------------------------------------------
+-- (The section 26 machinery this replaces was already dropped up in 27.0.)
+--
+-- One token per clinic per day, full stop. This is the DB-level guarantee
+-- that two receptionists checking people in at the same instant can't hand
+-- out the same number - the counter below serialises them, and this catches
+-- anything that ever slipped past it.
+drop index if exists appointments_clinic_token_unique;
+create unique index appointments_clinic_token_unique
+  on appointments (clinic_id, token_date, token_number)
+  where token_number is not null;
+
+-- ----------------------------------------------------------------------------
+-- 27.5 The per-clinic-per-day token counter
+-- ----------------------------------------------------------------------------
+-- A single row per (clinic, day) holding the last number issued. The
+-- INSERT ... ON CONFLICT DO UPDATE ... RETURNING in check_in_appointment()
+-- takes a row lock, so concurrent check-ins queue behind each other and each
+-- one comes away with its own number - no max()+1 read-then-write race.
+create table if not exists clinic_token_counters (
+  clinic_id uuid not null references clinics (id) on delete cascade,
+  token_date date not null,
+  last_seq int not null default 0,
+  primary key (clinic_id, token_date)
+);
+
+-- No policies: this table is reached ONLY through the security-definer
+-- function below, never directly by a client.
+alter table clinic_token_counters enable row level security;
+
+-- ----------------------------------------------------------------------------
+-- 27.6 Slot length helper
+-- ----------------------------------------------------------------------------
+-- The same "window divided by daily capacity" arithmetic computeSlots() uses
+-- on the client, so the server's idea of when a slot ends matches the one the
+-- patient was shown when booking. Falls back to 15 minutes when the doctor
+-- has no availability configured for that weekday.
+create or replace function public.slot_minutes_for(p_doctor_id uuid, p_date date)
+returns int
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (
+      select greatest(
+        1,
+        floor(
+          (extract(epoch from (da.end_time - da.start_time)) / 60)
+          / nullif(da.max_patients_per_day, 0)
+        )::int
+      )
+      from doctor_availability da
+      where da.doctor_id = p_doctor_id
+        and da.weekday = extract(dow from p_date)::int
+      order by da.start_time
+      limit 1
+    ),
+    15
+  );
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 27.7 check_in_appointment(): the only way a token is ever issued
+-- ----------------------------------------------------------------------------
+-- Guardrails, in order:
+--   * caller must be the owning clinic, an admin, or the patient themselves
+--     (the patient_scan case),
+--   * a second check-in is not an error - it just returns the token already
+--     held, so a double scan at the desk is harmless,
+--   * status must be 'accepted' (a booking the clinic hasn't confirmed, or
+--     one already cancelled/rejected, can't take a number),
+--   * the appointment must be for today in the CLINIC's timezone,
+--   * now must be inside [slot - 60 min, slot end + clinic grace].
+-- Only then does it draw the next number.
+create or replace function public.check_in_appointment(
+  p_appointment_id uuid,
+  p_method text default 'manual'
+)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+-- The RETURNS TABLE names above are also plpgsql variables, and three of
+-- them are real column names on `appointments`. Every reference below is
+-- either qualified (a.token_number) or an unambiguous SET/INSERT target, and
+-- every local is p_/v_ prefixed - this directive makes the intent explicit
+-- so a bare identifier can never silently resolve to the OUT variable.
+#variable_conflict use_column
+declare
+  a appointments;
+  v_tz text;
+  v_grace int;
+  v_now_local timestamp;
+  v_slot_start timestamp;
+  v_slot_end timestamp;
+  v_seq int;
+begin
+  if p_method is null or p_method not in ('clinic_scan', 'patient_scan', 'manual') then
+    raise exception 'Unknown check-in method: %', p_method;
+  end if;
+
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+
+  if not (
+    public.is_admin()
+    or public.is_own_clinic(a.clinic_id)
+    or public.is_own_mrn(a.member_id)
+  ) then
+    raise exception 'You are not allowed to check in this appointment.';
+  end if;
+
+  -- Idempotent by design: "a second scan just shows the existing token".
+  -- Requires a token to actually be there, not merely a timestamp - a row
+  -- with checked_in_at set but no number (only reachable from legacy data)
+  -- must fall through and draw a real one rather than return null forever.
+  if a.checked_in_at is not null and a.token_number is not null then
+    return query select a.token_number, a.arrival_seq, a.token_date, true;
+    return;
+  end if;
+
+  if a.status <> 'accepted' then
+    raise exception 'Only an accepted appointment can be checked in (this one is "%").', a.status;
+  end if;
+
+  select coalesce(c.timezone, 'Asia/Kolkata'), coalesce(c.checkin_grace_minutes, 30)
+    into v_tz, v_grace
+  from clinics c where c.id = a.clinic_id;
+
+  v_now_local := now() at time zone v_tz;
+
+  if a.date <> v_now_local::date then
+    raise exception 'This appointment is for %, not today.', to_char(a.date, 'DD Mon YYYY');
+  end if;
+
+  v_slot_start := (a.date + a.slot_time);
+  v_slot_end := v_slot_start + make_interval(mins => public.slot_minutes_for(a.doctor_id, a.date));
+
+  if v_now_local < v_slot_start - interval '60 minutes' then
+    raise exception 'Too early - check-in opens 60 minutes before the % slot.',
+      to_char(v_slot_start, 'HH12:MI AM');
+  end if;
+
+  if v_now_local > v_slot_end + make_interval(mins => v_grace) then
+    raise exception 'Too late - check-in for the % slot closed % minutes after it ended.',
+      to_char(v_slot_start, 'HH12:MI AM'), v_grace;
+  end if;
+
+  -- Draw the next arrival number for this clinic, this day. The row lock
+  -- taken by ON CONFLICT DO UPDATE is what makes concurrent check-ins safe.
+  insert into clinic_token_counters (clinic_id, token_date, last_seq)
+  values (a.clinic_id, a.date, 1)
+  on conflict (clinic_id, token_date)
+  do update set last_seq = clinic_token_counters.last_seq + 1
+  returning clinic_token_counters.last_seq into v_seq;
+
+  update appointments
+  set status = 'checked_in',
+      checked_in_at = now(),
+      checked_in_by = auth.uid(),
+      check_in_method = p_method,
+      token_number = v_seq,
+      arrival_seq = v_seq,
+      token_date = a.date
+  where id = a.id;
+
+  return query select v_seq, v_seq, a.date, false;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 27.8 Status-driven side effects, updated for the new names
+-- ----------------------------------------------------------------------------
+-- Token assignment is gone from here entirely (it lives in
+-- check_in_appointment above). What's left is the payment hold/capture/refund
+-- behaviour, unchanged except for the renamed statuses.
+create or replace function public.handle_appointment_status_change()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status = 'accepted' and old.status is distinct from 'accepted' then
+    if new.payment_status = 'hold' then
+      new.payment_status := 'captured';
+    end if;
+    update payments set status = 'captured' where appointment_id = new.id and status = 'hold';
+  elsif new.status in ('rejected', 'cancelled') and old.status is distinct from new.status then
+    if new.payment_status = 'hold' then
+      new.payment_status := 'refunded';
+    end if;
+    update payments set status = 'refunded' where appointment_id = new.id and status = 'hold';
+  end if;
+  return new;
+end;
+$$;
+
+-- The live-queue broadcast fired on token_no; that column is token_number now.
+drop trigger if exists on_appointment_queue_broadcast on appointments;
+create trigger on_appointment_queue_broadcast
+  after update on appointments
+  for each row
+  when (old.status is distinct from new.status or old.token_number is distinct from new.token_number)
+  execute function public.broadcast_appointment_queue_change();
+
+-- ----------------------------------------------------------------------------
+-- 27.9 Queries the app reads the live queue through
+-- ----------------------------------------------------------------------------
+-- The waiting room for one doctor on one day: everyone who has actually
+-- arrived and not yet finished. Tokens are issued per CLINIC, so these
+-- numbers won't be contiguous when a clinic runs two doctors at once - they
+-- stay correctly ordered, which is all the "who's next" logic needs.
+--
+-- Dropped rather than replaced: this function's OUT column was token_no and
+-- is now token_number, and CREATE OR REPLACE cannot rename OUT parameters
+-- ("cannot change return type of existing function"). Nothing in the
+-- database depends on it - it's called over RPC from the client - so
+-- dropping it is safe.
+drop function if exists public.get_queue_status(uuid, date);
+create or replace function public.get_queue_status(p_doctor_id uuid, p_date date)
+returns table (token_number int, status text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select a.token_number, a.status
+  from appointments a
+  where a.doctor_id = p_doctor_id
+    and a.date = p_date
+    and a.status in ('checked_in', 'called', 'in_consultation')
+    and a.token_number is not null
+  order by a.token_number;
+$$;
+
+-- Slots are taken by any booking that hasn't been called off - the renamed
+-- statuses don't change which those are, but this is re-declared so a fresh
+-- run of the file leaves no reference to the old vocabulary.
+create or replace function public.get_taken_slots(p_doctor_id uuid, p_date date)
+returns table (slot_time time)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select a.slot_time
+  from appointments a
+  where a.doctor_id = p_doctor_id
+    and a.date = p_date
+    and a.status not in ('rejected', 'cancelled');
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 27.10 RLS, updated for the renamed statuses
+-- ----------------------------------------------------------------------------
+-- Unchanged in substance: a patient may only cancel their own booking, and
+-- only while it's still 'booked'/'accepted' and more than two hours out.
+-- Once they're checked in, the desk owns the record.
+drop policy if exists "appointments_update" on appointments;
+create policy "appointments_update" on appointments for update
+  using (
+    public.is_admin()
+    or public.is_own_clinic(clinic_id)
+    or (public.is_own_member(member_id) and status in ('booked', 'accepted'))
+  )
+  with check (
+    public.is_admin()
+    or public.is_own_clinic(clinic_id)
+    or (
+      public.is_own_member(member_id)
+      and status = 'cancelled'
+      and (date + slot_time)::timestamp > now() + interval '2 hours'
+    )
+  );
+
+-- ============================================================================
+-- 28. SIGNED BOOKING QR + OPTIONAL SELF CHECK-IN
+-- ============================================================================
+-- Two things, both about making arrival trustworthy:
+--
+--   1. The patient's booking QR is now SIGNED and short-lived. Section 27's
+--      code was just the appointment id in plain text - anyone who learned an
+--      id (a screenshot, a shared link, a log line) could reproduce a valid
+--      code. Now the code carries an HMAC over (appointment, expiry) taken
+--      with a server-side secret, so it can only be minted by the database,
+--      for a patient who actually owns that booking, and it goes stale within
+--      minutes so an old photo is worthless.
+--
+--   2. Optional SELF check-in, off unless a clinic turns it on. The patient
+--      scans a rotating code shown on a screen at reception. Because that
+--      code changes every few minutes and is verified server-side, a photo of
+--      it taken yesterday - or sent to a friend at home - won't work. A clinic
+--      can additionally require the phone to be physically near the clinic.
+--
+-- See TESTING.md "Test 9" for how to exercise these.
+
+-- ----------------------------------------------------------------------------
+-- 28.1 The signing secret
+-- ----------------------------------------------------------------------------
+-- One row, one secret, reachable ONLY through the security-definer functions
+-- below. RLS is enabled with no policy at all, which means no client - not
+-- even an admin's session - can select it. If this ever leaks, delete the row
+-- and it regenerates on the next call, invalidating every outstanding code.
+create table if not exists app_secrets (
+  name text primary key,
+  value text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table app_secrets enable row level security;
+
+-- Fetches the QR signing secret, creating it on first use. gen_random_bytes
+-- comes from pgcrypto, which on Supabase lives in the `extensions` schema -
+-- hence the search_path on every function in this file that touches it.
+create or replace function public.qr_secret()
+returns text
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_secret text;
+begin
+  select value into v_secret from app_secrets where name = 'qr_signing_key';
+  if v_secret is null then
+    insert into app_secrets (name, value)
+    values ('qr_signing_key', encode(gen_random_bytes(32), 'hex'))
+    on conflict (name) do nothing;
+    select value into v_secret from app_secrets where name = 'qr_signing_key';
+  end if;
+  return v_secret;
+end;
+$$;
+
+-- Truncated to 16 hex characters (64 bits): plenty against forgery for a code
+-- that also has to name a real appointment and expires in minutes, and short
+-- enough to keep the QR sparse and quick to scan across a reception desk.
+create or replace function public.sign_qr_payload(p_payload text)
+returns text
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  return left(encode(hmac(p_payload, public.qr_secret(), 'sha256'), 'hex'), 16);
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 28.2 The patient's signed booking QR
+-- ----------------------------------------------------------------------------
+-- Format: sanjeevni:appt:v2:<appointment uuid>:<expiry epoch>:<signature>
+-- Only the owning patient (or the clinic/admin, e.g. to reprint a slip) can
+-- mint one, and it lives for 10 minutes - the app re-issues it while the
+-- screen is open, so the patient always has a fresh one to show.
+create or replace function public.issue_booking_qr(p_appointment_id uuid)
+returns table (code text, expires_at timestamptz)
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  a appointments;
+  v_exp timestamptz;
+  v_payload text;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+
+  if not (public.is_admin() or public.is_own_mrn(a.member_id) or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your booking.';
+  end if;
+
+  v_exp := now() + interval '10 minutes';
+  v_payload := a.id::text || '|' || extract(epoch from v_exp)::bigint::text;
+
+  return query
+  select
+    'sanjeevni:appt:v2:' || a.id::text || ':' ||
+      extract(epoch from v_exp)::bigint::text || ':' || public.sign_qr_payload(v_payload),
+    v_exp;
+end;
+$$;
+
+-- Verifies a scanned booking code and returns the appointment id it names.
+-- Returns null rather than raising, so the scanner can tell "not one of our
+-- codes / expired / tampered" apart from a database error.
+create or replace function public.verify_booking_qr(p_code text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  parts text[];
+  v_id uuid;
+  v_exp bigint;
+  v_sig text;
+begin
+  -- sanjeevni : appt : v2 : <uuid> : <exp> : <sig>
+  parts := string_to_array(coalesce(p_code, ''), ':');
+  if array_length(parts, 1) <> 6
+     or parts[1] <> 'sanjeevni' or parts[2] <> 'appt' or parts[3] <> 'v2'
+  then
+    return null;
+  end if;
+
+  begin
+    v_id := parts[4]::uuid;
+    v_exp := parts[5]::bigint;
+  exception when others then
+    return null;
+  end;
+  v_sig := parts[6];
+
+  if public.sign_qr_payload(parts[4] || '|' || parts[5]) <> v_sig then
+    return null; -- forged or tampered
+  end if;
+  if to_timestamp(v_exp) < now() then
+    return null; -- stale screenshot
+  end if;
+
+  return v_id;
+end;
+$$;
+
+-- What the clinic's scanner actually calls. Verifies the signature first,
+-- then hands off to the same check_in_appointment() every other path uses -
+-- so the arrival-order counter, the window guardrails and the clinic
+-- ownership check are all exactly the same code.
+create or replace function public.check_in_with_qr(p_code text)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean)
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_id uuid;
+begin
+  v_id := public.verify_booking_qr(p_code);
+  if v_id is null then
+    raise exception 'This code is not valid or has expired. Ask the patient to refresh their screen.';
+  end if;
+  return query select * from public.check_in_appointment(v_id, 'clinic_scan');
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 28.3 Clinic settings for self check-in
+-- ----------------------------------------------------------------------------
+-- Off by default: a clinic opts in, because it changes who is allowed to move
+-- an appointment into the queue.
+alter table clinics add column if not exists self_checkin_enabled boolean not null default false;
+-- Additionally require the phone to be physically near the clinic. Belt and
+-- braces on top of the rotating code, for clinics that want it.
+alter table clinics add column if not exists self_checkin_require_location boolean not null default false;
+alter table clinics add column if not exists self_checkin_radius_m int not null default 150;
+
+-- ----------------------------------------------------------------------------
+-- 28.4 The rotating reception code
+-- ----------------------------------------------------------------------------
+-- Format: sanjeevni:clinic:v1:<clinic uuid>:<window>:<signature>
+-- `window` is the number of whole rotation periods since the epoch, so the
+-- code changes on its own every ROTATE_SECONDS and a photograph of it is
+-- worthless within minutes. Displayed on a screen/tablet at reception - a
+-- genuinely printed poster is deliberately NOT supported here, because a
+-- static code is exactly the thing an old photo defeats.
+create or replace function public.clinic_checkin_window(p_at timestamptz default now())
+returns bigint
+language sql
+immutable
+as $$
+  select floor(extract(epoch from p_at) / 180)::bigint;  -- rotates every 3 minutes
+$$;
+
+create or replace function public.issue_clinic_checkin_code(p_clinic_id uuid)
+returns table (code text, expires_at timestamptz)
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_window bigint;
+  v_payload text;
+begin
+  if not (public.is_admin() or public.is_own_clinic(p_clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+
+  v_window := public.clinic_checkin_window();
+  v_payload := p_clinic_id::text || '|' || v_window::text;
+
+  return query
+  select
+    'sanjeevni:clinic:v1:' || p_clinic_id::text || ':' || v_window::text || ':'
+      || public.sign_qr_payload(v_payload),
+    to_timestamp((v_window + 1) * 180);
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 28.5 Distance helper for the optional geofence
+-- ----------------------------------------------------------------------------
+-- Plain haversine rather than PostGIS: one point-to-point check at check-in
+-- time doesn't justify the extension, and this mirrors haversineKm() the
+-- client already uses for "clinics near me".
+create or replace function public.distance_metres(
+  p_lat1 double precision, p_lng1 double precision,
+  p_lat2 double precision, p_lng2 double precision
+)
+returns double precision
+language sql
+immutable
+as $$
+  select 2 * 6371000 * asin(
+    sqrt(
+      sin(radians(p_lat2 - p_lat1) / 2) ^ 2
+      + cos(radians(p_lat1)) * cos(radians(p_lat2)) * sin(radians(p_lng2 - p_lng1) / 2) ^ 2
+    )
+  );
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 28.6 Self check-in
+-- ----------------------------------------------------------------------------
+-- The patient scans reception's rotating code from their own app. Everything
+-- that makes this safe is checked here, server-side:
+--   * the clinic has switched self check-in on at all,
+--   * the scanned code is a real, correctly-signed, CURRENT code for that
+--     clinic (the previous window is also accepted, so a scan that lands a
+--     second after the code rotates doesn't fail for no visible reason),
+--   * the caller genuinely has an accepted appointment at that clinic today,
+--   * optionally, the phone is within the clinic's radius,
+-- and then the ordinary check_in_appointment() applies the time-window rules
+-- and draws the token. A patient sitting at home cannot satisfy the second
+-- condition, which is the whole point.
+create or replace function public.self_check_in(
+  p_code text,
+  p_lat double precision default null,
+  p_lng double precision default null
+)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean)
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  parts text[];
+  v_clinic_id uuid;
+  v_window bigint;
+  v_now_window bigint;
+  c clinics;
+  v_appt_id uuid;
+  v_distance double precision;
+begin
+  parts := string_to_array(coalesce(p_code, ''), ':');
+  if array_length(parts, 1) <> 6
+     or parts[1] <> 'sanjeevni' or parts[2] <> 'clinic' or parts[3] <> 'v1'
+  then
+    raise exception 'That is not a clinic check-in code.';
+  end if;
+
+  begin
+    v_clinic_id := parts[4]::uuid;
+    v_window := parts[5]::bigint;
+  exception when others then
+    raise exception 'That is not a clinic check-in code.';
+  end;
+
+  if public.sign_qr_payload(parts[4] || '|' || parts[5]) <> parts[6] then
+    raise exception 'That check-in code is not valid.';
+  end if;
+
+  -- Current window, or the one just before it. Anything older is a photo.
+  v_now_window := public.clinic_checkin_window();
+  if v_window <> v_now_window and v_window <> v_now_window - 1 then
+    raise exception 'That check-in code has expired - please scan the code on the screen at reception.';
+  end if;
+
+  select * into c from clinics where id = v_clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+  if not c.self_checkin_enabled then
+    raise exception 'This clinic does not offer self check-in - please see the reception desk.';
+  end if;
+
+  if c.self_checkin_require_location then
+    if p_lat is null or p_lng is null then
+      raise exception 'Location is required to check yourself in here. Allow location access and try again.';
+    end if;
+    if c.lat is null or c.lng is null then
+      raise exception 'This clinic has not set its location yet - please see the reception desk.';
+    end if;
+    v_distance := public.distance_metres(p_lat, p_lng, c.lat, c.lng);
+    if v_distance > c.self_checkin_radius_m then
+      raise exception 'You appear to be about %m from the clinic. Self check-in only works at the clinic.',
+        round(v_distance)::int;
+    end if;
+  end if;
+
+  -- The caller's own accepted appointment at this clinic, today. is_own_mrn()
+  -- rather than a plain account match so this still works for a person whose
+  -- identity spans more than one family_members row (see section 21).
+  select a.id into v_appt_id
+  from appointments a
+  where a.clinic_id = v_clinic_id
+    and a.date = (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))::date
+    and a.status = 'accepted'
+    and public.is_own_mrn(a.member_id)
+  order by a.slot_time
+  limit 1;
+
+  if v_appt_id is null then
+    raise exception 'No confirmed appointment found for you at this clinic today.';
+  end if;
+
+  return query select * from public.check_in_appointment(v_appt_id, 'patient_scan');
+end;
+$$;
+
+-- ============================================================================
+-- 29. LATE ARRIVALS, NO-SHOWS, AND SKIPPING
+-- ============================================================================
+-- What happens around arrival time:
+--
+--   * LATE: checking in after your slot but still inside the window is
+--     completely normal - you join the live queue at the position your
+--     arrival earns, exactly like everyone else. It's only flagged so the
+--     clinic can see it, never penalised.
+--   * NO-SHOW: never arriving. The clinic can mark it by hand, or the system
+--     sweeps it automatically once the cut-off the clinic sets has passed.
+--     A no-show holds no token - it never had one.
+--   * TURNING UP ANYWAY: a no-show who walks in later can still be admitted
+--     by the desk, which draws them the next token like a walk-in.
+--   * SKIPPING: a patient who was called and didn't come forward, after the
+--     clinic's set number of reminders, can be pushed to the back of the
+--     queue with a fresh token rather than being written off.
+--
+-- See TESTING.md "Test 10".
+
+-- ----------------------------------------------------------------------------
+-- 29.1 Clinic-set thresholds
+-- ----------------------------------------------------------------------------
+-- How long after the check-in window closes before an unarrived patient is
+-- automatically written off.
+alter table clinics add column if not exists no_show_cutoff_minutes int not null default 30;
+-- How many unanswered reminders before the desk may skip someone.
+alter table clinics add column if not exists reminder_limit int not null default 3;
+
+-- ----------------------------------------------------------------------------
+-- 29.2 Appointment columns
+-- ----------------------------------------------------------------------------
+-- Purely informational: the token was still issued in arrival order.
+alter table appointments add column if not exists was_late boolean not null default false;
+alter table appointments add column if not exists no_show_marked_at timestamptz;
+-- Distinguishes the automatic sweep from a receptionist's decision, which
+-- matters when someone asks why a booking was written off.
+alter table appointments add column if not exists no_show_auto boolean not null default false;
+-- How many times this patient has been pushed to the back after being called
+-- and not coming forward.
+alter table appointments add column if not exists skip_count int not null default 0;
+
+-- ----------------------------------------------------------------------------
+-- 29.3 check_in_appointment(), now with a late/no-show override
+-- ----------------------------------------------------------------------------
+-- The 2-argument version has to go first: adding a defaulted third parameter
+-- alongside it would leave two candidate functions and PostgREST could not
+-- tell which one a call meant.
+drop function if exists public.check_in_appointment(uuid, text);
+
+-- p_allow_late lets the DESK (never a patient self-scan) admit somebody whose
+-- window has closed, or who has already been written off as a no-show. It
+-- skips the timing guards only - the clinic-ownership check, the arrival
+-- counter and the one-token-per-person rule all still apply, so an override
+-- still produces an ordinary next-in-line token.
+create or replace function public.check_in_appointment(
+  p_appointment_id uuid,
+  p_method text default 'manual',
+  p_allow_late boolean default false
+)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean, was_late boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  a appointments;
+  v_tz text;
+  v_grace int;
+  v_now_local timestamp;
+  v_slot_start timestamp;
+  v_slot_end timestamp;
+  v_seq int;
+  v_late boolean := false;
+  v_is_desk boolean;
+begin
+  if p_method is null or p_method not in ('clinic_scan', 'patient_scan', 'manual') then
+    raise exception 'Unknown check-in method: %', p_method;
+  end if;
+
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+
+  v_is_desk := public.is_admin() or public.is_own_clinic(a.clinic_id);
+
+  if not (v_is_desk or public.is_own_mrn(a.member_id)) then
+    raise exception 'You are not allowed to check in this appointment.';
+  end if;
+
+  -- Only the desk may override the timing rules. A patient scanning the
+  -- reception code can never let themselves in late.
+  if p_allow_late and not v_is_desk then
+    raise exception 'Only the clinic can admit a late or no-show patient.';
+  end if;
+
+  -- Idempotent: "a second scan just shows the existing token".
+  if a.checked_in_at is not null and a.token_number is not null then
+    return query select a.token_number, a.arrival_seq, a.token_date, true, a.was_late;
+    return;
+  end if;
+
+  -- A no-show holds no token, and can only re-enter through an explicit
+  -- desk override - which is exactly the "they turned up after all" case.
+  if a.status = 'no_show' and not p_allow_late then
+    raise exception 'This patient was marked as a no-show. Use "Check in anyway" to admit them.';
+  end if;
+
+  if a.status not in ('accepted', 'no_show') then
+    raise exception 'Only an accepted appointment can be checked in (this one is "%").', a.status;
+  end if;
+
+  select coalesce(c.timezone, 'Asia/Kolkata'), coalesce(c.checkin_grace_minutes, 30)
+    into v_tz, v_grace
+  from clinics c where c.id = a.clinic_id;
+
+  v_now_local := now() at time zone v_tz;
+  v_slot_start := (a.date + a.slot_time);
+  v_slot_end := v_slot_start + make_interval(mins => public.slot_minutes_for(a.doctor_id, a.date));
+
+  -- Arriving after your slot is "late", not "refused" - the flag is recorded
+  -- either way, and the token is drawn in arrival order regardless.
+  v_late := v_now_local > v_slot_end;
+
+  if not p_allow_late then
+    if a.date <> v_now_local::date then
+      raise exception 'This appointment is for %, not today.', to_char(a.date, 'DD Mon YYYY');
+    end if;
+    if v_now_local < v_slot_start - interval '60 minutes' then
+      raise exception 'Too early - check-in opens 60 minutes before the % slot.',
+        to_char(v_slot_start, 'HH12:MI AM');
+    end if;
+    if v_now_local > v_slot_end + make_interval(mins => v_grace) then
+      raise exception 'Too late - check-in for the % slot closed % minutes after it ended.',
+        to_char(v_slot_start, 'HH12:MI AM'), v_grace;
+    end if;
+  end if;
+
+  insert into clinic_token_counters (clinic_id, token_date, last_seq)
+  values (a.clinic_id, a.date, 1)
+  on conflict (clinic_id, token_date)
+  do update set last_seq = clinic_token_counters.last_seq + 1
+  returning clinic_token_counters.last_seq into v_seq;
+
+  update appointments
+  set status = 'checked_in',
+      checked_in_at = now(),
+      checked_in_by = auth.uid(),
+      check_in_method = p_method,
+      token_number = v_seq,
+      arrival_seq = v_seq,
+      token_date = a.date,
+      was_late = v_late,
+      -- Re-admitting a no-show clears the write-off.
+      no_show_marked_at = null,
+      no_show_auto = false
+  where id = a.id;
+
+  return query select v_seq, v_seq, a.date, false, v_late;
+end;
+$$;
+
+-- These two call through to it, so they have to be redeclared for the new
+-- return shape. Neither ever passes the override - a scan is never a
+-- late-admission decision.
+--
+-- Dropped rather than replaced, for the same reason as the 2-arg check-in
+-- above: they now return an extra `was_late` column, and CREATE OR REPLACE
+-- cannot change a function's OUT parameters ("cannot change return type of
+-- existing function"). Both are only ever called over RPC from the client,
+-- so nothing in the database depends on them.
+drop function if exists public.check_in_with_qr(text);
+drop function if exists public.self_check_in(text, double precision, double precision);
+
+create or replace function public.check_in_with_qr(p_code text)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean, was_late boolean)
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_id uuid;
+begin
+  v_id := public.verify_booking_qr(p_code);
+  if v_id is null then
+    raise exception 'This code is not valid or has expired. Ask the patient to refresh their screen.';
+  end if;
+  return query select * from public.check_in_appointment(v_id, 'clinic_scan', false);
+end;
+$$;
+
+create or replace function public.self_check_in(
+  p_code text,
+  p_lat double precision default null,
+  p_lng double precision default null
+)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean, was_late boolean)
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  parts text[];
+  v_clinic_id uuid;
+  v_window bigint;
+  v_now_window bigint;
+  c clinics;
+  v_appt_id uuid;
+  v_distance double precision;
+begin
+  parts := string_to_array(coalesce(p_code, ''), ':');
+  if array_length(parts, 1) <> 6
+     or parts[1] <> 'sanjeevni' or parts[2] <> 'clinic' or parts[3] <> 'v1'
+  then
+    raise exception 'That is not a clinic check-in code.';
+  end if;
+
+  begin
+    v_clinic_id := parts[4]::uuid;
+    v_window := parts[5]::bigint;
+  exception when others then
+    raise exception 'That is not a clinic check-in code.';
+  end;
+
+  if public.sign_qr_payload(parts[4] || '|' || parts[5]) <> parts[6] then
+    raise exception 'That check-in code is not valid.';
+  end if;
+
+  v_now_window := public.clinic_checkin_window();
+  if v_window <> v_now_window and v_window <> v_now_window - 1 then
+    raise exception 'That check-in code has expired - please scan the code on the screen at reception.';
+  end if;
+
+  select * into c from clinics where id = v_clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+  if not c.self_checkin_enabled then
+    raise exception 'This clinic does not offer self check-in - please see the reception desk.';
+  end if;
+
+  if c.self_checkin_require_location then
+    if p_lat is null or p_lng is null then
+      raise exception 'Location is required to check yourself in here. Allow location access and try again.';
+    end if;
+    if c.lat is null or c.lng is null then
+      raise exception 'This clinic has not set its location yet - please see the reception desk.';
+    end if;
+    v_distance := public.distance_metres(p_lat, p_lng, c.lat, c.lng);
+    if v_distance > c.self_checkin_radius_m then
+      raise exception 'You appear to be about %m from the clinic. Self check-in only works at the clinic.',
+        round(v_distance)::int;
+    end if;
+  end if;
+
+  select a.id into v_appt_id
+  from appointments a
+  where a.clinic_id = v_clinic_id
+    and a.date = (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))::date
+    and a.status = 'accepted'
+    and public.is_own_mrn(a.member_id)
+  order by a.slot_time
+  limit 1;
+
+  if v_appt_id is null then
+    raise exception 'No confirmed appointment found for you at this clinic today.';
+  end if;
+
+  return query select * from public.check_in_appointment(v_appt_id, 'patient_scan', false);
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 29.4 Automatic no-show sweep
+-- ----------------------------------------------------------------------------
+-- Writes off every accepted appointment nobody ever arrived for, once the
+-- clinic's cut-off has passed. Deliberately touches ONLY status='accepted':
+-- anyone who checked in holds a token and is the queue's problem, not this
+-- function's. Also sweeps up stragglers from previous days, which otherwise
+-- sit as "expected" forever.
+--
+-- Returns how many it marked, so the caller can say something useful.
+-- p_clinic_id null = every clinic the caller is allowed to sweep (admin, or
+-- a scheduled job running as the definer).
+create or replace function public.auto_mark_no_shows(p_clinic_id uuid default null)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int := 0;
+begin
+  if p_clinic_id is not null and not (public.is_admin() or public.is_own_clinic(p_clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+
+  with due as (
+    select a.id
+    from appointments a
+    join clinics c on c.id = a.clinic_id
+    where a.status = 'accepted'
+      and (p_clinic_id is null or a.clinic_id = p_clinic_id)
+      and (
+        -- A day that has already ended, in the clinic's own timezone.
+        a.date < (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))::date
+        -- ...or today, once slot end + grace + cut-off has gone by.
+        or (
+          a.date = (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))::date
+          and (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))
+              > (a.date + a.slot_time)
+                + make_interval(mins => public.slot_minutes_for(a.doctor_id, a.date))
+                + make_interval(mins => coalesce(c.checkin_grace_minutes, 30))
+                + make_interval(mins => coalesce(c.no_show_cutoff_minutes, 30))
+        )
+      )
+  )
+  update appointments a
+  set status = 'no_show',
+      no_show_marked_at = now(),
+      no_show_auto = true
+  from due
+  where a.id = due.id;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+-- Best-effort scheduling. pg_cron isn't guaranteed to be available (or
+-- enabled) on every project, and the clinic console also calls
+-- auto_mark_no_shows() when it loads - so the sweep still happens either way,
+-- and this block never breaks the migration if the extension isn't there.
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
+    begin
+      create extension if not exists pg_cron;
+      perform cron.unschedule('sanjeevni_auto_no_shows');
+    exception when others then
+      null; -- no existing job to unschedule, or no permission - fall through
+    end;
+    begin
+      perform cron.schedule('sanjeevni_auto_no_shows', '*/10 * * * *',
+        $cron$select public.auto_mark_no_shows()$cron$);
+    exception when others then
+      raise notice 'pg_cron present but scheduling failed; the console will sweep on load instead.';
+    end;
+  else
+    raise notice 'pg_cron unavailable; the clinic console sweeps no-shows when it loads.';
+  end if;
+end $$;
+
+-- ----------------------------------------------------------------------------
+-- 29.5 Skipping a called patient to the back
+-- ----------------------------------------------------------------------------
+-- The patient was called and didn't come forward. Rather than writing them
+-- off, the desk can draw them a FRESH token - they keep their place in the
+-- day, just at the back of it. Their original number is gone, which is the
+-- honest outcome: the queue moved on without them.
+create or replace function public.skip_to_back(p_appointment_id uuid)
+returns table (token_number int, arrival_seq int)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  a appointments;
+  v_seq int;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+  if a.status not in ('checked_in', 'called') then
+    raise exception 'Only a waiting or called patient can be skipped (this one is "%").', a.status;
+  end if;
+
+  insert into clinic_token_counters (clinic_id, token_date, last_seq)
+  values (a.clinic_id, coalesce(a.token_date, a.date), 1)
+  on conflict (clinic_id, token_date)
+  do update set last_seq = clinic_token_counters.last_seq + 1
+  returning clinic_token_counters.last_seq into v_seq;
+
+  update appointments
+  set token_number = v_seq,
+      arrival_seq = v_seq,
+      status = 'checked_in',
+      skip_count = a.skip_count + 1
+  where id = a.id;
+
+  return query select v_seq, v_seq;
+end;
+$$;
+
+-- ============================================================================
+-- 30. FAIR QUEUE - DATA: PAYMENT AND PRESENCE ARE SEPARATE FACTS
+-- ============================================================================
+-- Two facts about an appointment that must never be conflated:
+--
+--   payment_status  - has the money been dealt with?
+--                     pay_at_clinic / paid_online / paid_at_clinic / refunded
+--   checked_in_at   - is the patient PHYSICALLY here?
+--
+-- Paying online does NOT check anyone in and buys NO queue priority. Someone
+-- who paid online from their sofa is not in the live queue at all; they hold
+-- no token until they walk through the door, exactly like everyone else. All
+-- online payment buys is a faster tap at the desk, because there's no cash to
+-- count.
+--
+-- This file makes that separation structural rather than merely intended:
+-- section 30.5 stops presence columns being written by anything other than
+-- the check-in path, so no amount of updating payment_status can manufacture
+-- a token.
+--
+-- See TESTING.md "Test 11".
+
+-- ----------------------------------------------------------------------------
+-- 30.1 payment_status vocabulary
+-- ----------------------------------------------------------------------------
+-- The old values came from the demo payment flow: 'unpaid' (nothing decided),
+-- 'cod' (pay cash on the day), 'hold' (money authorised online), 'captured'
+-- (taken online). They collapse cleanly onto the four states that actually
+-- matter to a receptionist.
+alter table appointments drop constraint if exists appointments_payment_status_check;
+
+update appointments set payment_status = 'pay_at_clinic'
+where payment_status in ('unpaid', 'cod');
+
+-- A hold is money already committed by the patient online; for this app's
+-- purposes that is "paid online" - the desk has nothing to collect.
+update appointments set payment_status = 'paid_online'
+where payment_status in ('hold', 'captured');
+
+alter table appointments alter column payment_status set default 'pay_at_clinic';
+alter table appointments add constraint appointments_payment_status_check
+  check (payment_status in ('pay_at_clinic', 'paid_online', 'paid_at_clinic', 'refunded'));
+
+-- ----------------------------------------------------------------------------
+-- 30.2 grace_minutes
+-- ----------------------------------------------------------------------------
+-- The clinic-wide setting already exists (clinics.checkin_grace_minutes, from
+-- section 27). This adds an optional PER-APPOINTMENT override for the
+-- occasional "this patient warned us they'd be late" case; null means "use
+-- the clinic's setting", which is the normal state of the world.
+alter table appointments add column if not exists grace_minutes int;
+
+create or replace function public.effective_grace_minutes(p_appointment_id uuid)
+returns int
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(a.grace_minutes, c.checkin_grace_minutes, 30)
+  from appointments a
+  join clinics c on c.id = a.clinic_id
+  where a.id = p_appointment_id;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 30.3 effective_order_time
+-- ----------------------------------------------------------------------------
+-- What the queue will actually sort on. The full fairness formula (weighing
+-- the booked slot against real arrival, so a punctual 3PM booking isn't
+-- overtaken by a 4PM booking who merely walked in first) lands in the NEXT
+-- step. For now it is stamped with the arrival moment, which is exactly what
+-- the queue orders by today - so the column is already true, just not yet
+-- clever.
+alter table appointments add column if not exists effective_order_time timestamptz;
+
+-- Backfill the rows that already have a real arrival.
+update appointments
+set effective_order_time = checked_in_at
+where checked_in_at is not null and effective_order_time is null;
+
+-- ----------------------------------------------------------------------------
+-- 30.4 Status changes no longer touch payment except to refund
+-- ----------------------------------------------------------------------------
+-- Accepting a booking used to flip 'hold' to 'captured'. Under the new
+-- vocabulary there is nothing to flip: money paid online is already
+-- paid_online, and a pay_at_clinic booking stays pay_at_clinic until someone
+-- actually hands over cash (see mark_paid_at_clinic below). The only
+-- automatic transition left is a refund when a booking is called off.
+create or replace function public.handle_appointment_status_change()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status in ('rejected', 'cancelled') and old.status is distinct from new.status then
+    if new.payment_status = 'paid_online' then
+      new.payment_status := 'refunded';
+    end if;
+    update payments set status = 'refunded'
+    where appointment_id = new.id and status in ('hold', 'captured', 'pending');
+  end if;
+  return new;
+end;
+$$;
+
+-- Collecting cash at the counter. Deliberately its own function, and
+-- deliberately says nothing about presence: marking someone paid does not
+-- check them in, and checking someone in does not mark them paid.
+create or replace function public.mark_paid_at_clinic(p_appointment_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  a appointments;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+  if a.payment_status = 'paid_online' then
+    raise exception 'This appointment was already paid online - there is nothing to collect.';
+  end if;
+  if a.payment_status = 'refunded' then
+    raise exception 'This appointment has been refunded.';
+  end if;
+
+  update appointments set payment_status = 'paid_at_clinic' where id = a.id;
+  update payments set status = 'captured' where appointment_id = a.id and status = 'pending';
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 30.5 Presence cannot be forged
+-- ----------------------------------------------------------------------------
+-- appointments_update lets a clinic update its own rows, which until now
+-- included checked_in_at, token_number and arrival_seq - so a determined
+-- client could hand itself a token straight from the API, bypassing the
+-- arrival counter entirely. Since this whole part rests on "presence is a
+-- fact, not a claim", those columns are now writable ONLY from inside the
+-- check-in functions, which announce themselves with a transaction-local
+-- flag before they write.
+--
+-- Clearing a value back to null is still allowed: undoing a mistaken
+-- check-in is a legitimate desk correction, and it grants nobody a place in
+-- the queue.
+create or replace function public.guard_presence_columns()
+returns trigger
+language plpgsql
+as $$
+begin
+  if coalesce(current_setting('app.checkin_write', true), '') = '1' then
+    return new;  -- we're inside check_in_appointment()/skip_to_back()
+  end if;
+
+  if new.checked_in_at is not null and new.checked_in_at is distinct from old.checked_in_at then
+    raise exception 'checked_in_at is set by checking a patient in, not by writing to it directly.';
+  end if;
+  if new.token_number is not null and new.token_number is distinct from old.token_number then
+    raise exception 'token_number is issued by the arrival counter, not by writing to it directly.';
+  end if;
+  if new.arrival_seq is not null and new.arrival_seq is distinct from old.arrival_seq then
+    raise exception 'arrival_seq is issued by the arrival counter, not by writing to it directly.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_appointment_guard_presence on appointments;
+create trigger on_appointment_guard_presence
+  before update on appointments
+  for each row execute function public.guard_presence_columns();
+
+-- ----------------------------------------------------------------------------
+-- 30.6 The check-in path, re-declared to set the flag
+-- ----------------------------------------------------------------------------
+-- Same behaviour as section 29, plus: it announces itself to the guard above,
+-- and it stamps effective_order_time. Note what it still does NOT do - it
+-- never reads or writes payment_status. Presence and payment stay strangers.
+create or replace function public.check_in_appointment(
+  p_appointment_id uuid,
+  p_method text default 'manual',
+  p_allow_late boolean default false
+)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean, was_late boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  a appointments;
+  v_tz text;
+  v_grace int;
+  v_now_local timestamp;
+  v_slot_start timestamp;
+  v_slot_end timestamp;
+  v_seq int;
+  v_late boolean := false;
+  v_is_desk boolean;
+  v_now timestamptz := now();
+begin
+  if p_method is null or p_method not in ('clinic_scan', 'patient_scan', 'manual') then
+    raise exception 'Unknown check-in method: %', p_method;
+  end if;
+
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+
+  v_is_desk := public.is_admin() or public.is_own_clinic(a.clinic_id);
+
+  if not (v_is_desk or public.is_own_mrn(a.member_id)) then
+    raise exception 'You are not allowed to check in this appointment.';
+  end if;
+
+  if p_allow_late and not v_is_desk then
+    raise exception 'Only the clinic can admit a late or no-show patient.';
+  end if;
+
+  if a.checked_in_at is not null and a.token_number is not null then
+    return query select a.token_number, a.arrival_seq, a.token_date, true, a.was_late;
+    return;
+  end if;
+
+  if a.status = 'no_show' and not p_allow_late then
+    raise exception 'This patient was marked as a no-show. Use "Check in anyway" to admit them.';
+  end if;
+
+  if a.status not in ('accepted', 'no_show') then
+    raise exception 'Only an accepted appointment can be checked in (this one is "%").', a.status;
+  end if;
+
+  select coalesce(c.timezone, 'Asia/Kolkata') into v_tz from clinics c where c.id = a.clinic_id;
+  v_grace := public.effective_grace_minutes(a.id);
+
+  v_now_local := v_now at time zone v_tz;
+  v_slot_start := (a.date + a.slot_time);
+  v_slot_end := v_slot_start + make_interval(mins => public.slot_minutes_for(a.doctor_id, a.date));
+
+  v_late := v_now_local > v_slot_end;
+
+  if not p_allow_late then
+    if a.date <> v_now_local::date then
+      raise exception 'This appointment is for %, not today.', to_char(a.date, 'DD Mon YYYY');
+    end if;
+    if v_now_local < v_slot_start - interval '60 minutes' then
+      raise exception 'Too early - check-in opens 60 minutes before the % slot.',
+        to_char(v_slot_start, 'HH12:MI AM');
+    end if;
+    if v_now_local > v_slot_end + make_interval(mins => v_grace) then
+      raise exception 'Too late - check-in for the % slot closed % minutes after it ended.',
+        to_char(v_slot_start, 'HH12:MI AM'), v_grace;
+    end if;
+  end if;
+
+  insert into clinic_token_counters (clinic_id, token_date, last_seq)
+  values (a.clinic_id, a.date, 1)
+  on conflict (clinic_id, token_date)
+  do update set last_seq = clinic_token_counters.last_seq + 1
+  returning clinic_token_counters.last_seq into v_seq;
+
+  perform set_config('app.checkin_write', '1', true);
+
+  update appointments
+  set status = 'checked_in',
+      checked_in_at = v_now,
+      checked_in_by = auth.uid(),
+      check_in_method = p_method,
+      token_number = v_seq,
+      arrival_seq = v_seq,
+      token_date = a.date,
+      was_late = v_late,
+      -- Placeholder until the fairness formula arrives: arrival time is what
+      -- the queue orders by today.
+      effective_order_time = v_now,
+      no_show_marked_at = null,
+      no_show_auto = false
+  where id = a.id;
+
+  perform set_config('app.checkin_write', '0', true);
+
+  return query select v_seq, v_seq, a.date, false, v_late;
+end;
+$$;
+
+create or replace function public.skip_to_back(p_appointment_id uuid)
+returns table (token_number int, arrival_seq int)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  a appointments;
+  v_seq int;
+  v_now timestamptz := now();
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+  if a.status not in ('checked_in', 'called') then
+    raise exception 'Only a waiting or called patient can be skipped (this one is "%").', a.status;
+  end if;
+
+  insert into clinic_token_counters (clinic_id, token_date, last_seq)
+  values (a.clinic_id, coalesce(a.token_date, a.date), 1)
+  on conflict (clinic_id, token_date)
+  do update set last_seq = clinic_token_counters.last_seq + 1
+  returning clinic_token_counters.last_seq into v_seq;
+
+  perform set_config('app.checkin_write', '1', true);
+
+  update appointments
+  set token_number = v_seq,
+      arrival_seq = v_seq,
+      status = 'checked_in',
+      skip_count = a.skip_count + 1,
+      effective_order_time = v_now
+  where id = a.id;
+
+  perform set_config('app.checkin_write', '0', true);
+
+  return query select v_seq, v_seq;
+end;
+$$;
+
+-- ============================================================================
+-- 31. FAIR QUEUE - THE ORDER RULE
+-- ============================================================================
+-- Who gets served first. Two ideas, held together:
+--
+--   1. Only patients who are CHECKED IN can be called at all. Someone who
+--      hasn't walked through the door is not in the running, however early
+--      their slot and however they paid.
+--
+--   2. Among those present, order by:
+--          effective_order_time ASC, then checked_in_at ASC
+--      where effective_order_time is
+--        * the patient's SLOT time, if they arrived on time (checked in at
+--          or before slot + grace) - so the earlier appointment wins, which
+--          is the whole point of booking one; or
+--        * their ACTUAL arrival time, if they were more than grace late -
+--          so a 9AM booking wandering in at 2PM can't leapfrog everyone who
+--          turned up when they said they would.
+--
+-- Payment is not consulted anywhere in this file. It cannot be: nothing here
+-- reads payment_status.
+--
+-- Worked example (see TESTING.md "Test 12"):
+--   A - 4PM slot, paid online, checks in 2:45 -> on time  -> effective 16:00
+--   B - 3PM slot, paid at desk, checks in 2:55 -> on time -> effective 15:00
+--   B is called first, despite A having arrived ten minutes earlier and paid
+--   online. The earlier APPOINTMENT wins among punctual patients.
+
+-- ----------------------------------------------------------------------------
+-- 31.1 The rule itself, as one function
+-- ----------------------------------------------------------------------------
+-- Kept separate so check-in, the backfill below, and anyone reasoning about
+-- the queue are all using literally the same arithmetic.
+--
+-- Everything is computed in the clinic's own wall-clock: slot_time is a plain
+-- local time, so comparing it against a UTC now() would be wrong by the
+-- offset. The result is converted back to timestamptz for storage.
+create or replace function public.compute_effective_order_time(
+  p_date date,
+  p_slot_time time,
+  p_checked_in_at timestamptz,
+  p_grace_minutes int,
+  p_timezone text default 'Asia/Kolkata'
+)
+returns timestamptz
+language sql
+immutable
+as $$
+  select case
+    when p_checked_in_at is null then null
+    -- On time (or early): the booked slot is what orders them.
+    when (p_checked_in_at at time zone p_timezone)
+         <= (p_date + p_slot_time) + make_interval(mins => p_grace_minutes)
+      then ((p_date + p_slot_time) at time zone p_timezone)
+    -- More than grace late: they forfeit slot priority and are ordered by
+    -- when they actually turned up.
+    else p_checked_in_at
+  end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 31.2 Stamp it at check-in
+-- ----------------------------------------------------------------------------
+-- Identical to section 30's version except for the effective_order_time line,
+-- which now applies the rule instead of always using the arrival moment.
+create or replace function public.check_in_appointment(
+  p_appointment_id uuid,
+  p_method text default 'manual',
+  p_allow_late boolean default false
+)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean, was_late boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  a appointments;
+  v_tz text;
+  v_grace int;
+  v_now_local timestamp;
+  v_slot_start timestamp;
+  v_slot_end timestamp;
+  v_seq int;
+  v_late boolean := false;
+  v_is_desk boolean;
+  v_now timestamptz := now();
+begin
+  if p_method is null or p_method not in ('clinic_scan', 'patient_scan', 'manual') then
+    raise exception 'Unknown check-in method: %', p_method;
+  end if;
+
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+
+  v_is_desk := public.is_admin() or public.is_own_clinic(a.clinic_id);
+
+  if not (v_is_desk or public.is_own_mrn(a.member_id)) then
+    raise exception 'You are not allowed to check in this appointment.';
+  end if;
+
+  if p_allow_late and not v_is_desk then
+    raise exception 'Only the clinic can admit a late or no-show patient.';
+  end if;
+
+  if a.checked_in_at is not null and a.token_number is not null then
+    return query select a.token_number, a.arrival_seq, a.token_date, true, a.was_late;
+    return;
+  end if;
+
+  if a.status = 'no_show' and not p_allow_late then
+    raise exception 'This patient was marked as a no-show. Use "Check in anyway" to admit them.';
+  end if;
+
+  if a.status not in ('accepted', 'no_show') then
+    raise exception 'Only an accepted appointment can be checked in (this one is "%").', a.status;
+  end if;
+
+  select coalesce(c.timezone, 'Asia/Kolkata') into v_tz from clinics c where c.id = a.clinic_id;
+  v_grace := public.effective_grace_minutes(a.id);
+
+  v_now_local := v_now at time zone v_tz;
+  v_slot_start := (a.date + a.slot_time);
+  v_slot_end := v_slot_start + make_interval(mins => public.slot_minutes_for(a.doctor_id, a.date));
+
+  v_late := v_now_local > v_slot_end;
+
+  if not p_allow_late then
+    if a.date <> v_now_local::date then
+      raise exception 'This appointment is for %, not today.', to_char(a.date, 'DD Mon YYYY');
+    end if;
+    if v_now_local < v_slot_start - interval '60 minutes' then
+      raise exception 'Too early - check-in opens 60 minutes before the % slot.',
+        to_char(v_slot_start, 'HH12:MI AM');
+    end if;
+    if v_now_local > v_slot_end + make_interval(mins => v_grace) then
+      raise exception 'Too late - check-in for the % slot closed % minutes after it ended.',
+        to_char(v_slot_start, 'HH12:MI AM'), v_grace;
+    end if;
+  end if;
+
+  insert into clinic_token_counters (clinic_id, token_date, last_seq)
+  values (a.clinic_id, a.date, 1)
+  on conflict (clinic_id, token_date)
+  do update set last_seq = clinic_token_counters.last_seq + 1
+  returning clinic_token_counters.last_seq into v_seq;
+
+  perform set_config('app.checkin_write', '1', true);
+
+  update appointments
+  set status = 'checked_in',
+      checked_in_at = v_now,
+      checked_in_by = auth.uid(),
+      check_in_method = p_method,
+      token_number = v_seq,
+      arrival_seq = v_seq,
+      token_date = a.date,
+      was_late = v_late,
+      effective_order_time =
+        public.compute_effective_order_time(a.date, a.slot_time, v_now, v_grace, v_tz),
+      no_show_marked_at = null,
+      no_show_auto = false
+  where id = a.id;
+
+  perform set_config('app.checkin_write', '0', true);
+
+  return query select v_seq, v_seq, a.date, false, v_late;
+end;
+$$;
+
+-- Bring existing checked-in rows onto the rule (section 30 stamped them with
+-- the plain arrival time).
+update appointments a
+set effective_order_time = public.compute_effective_order_time(
+      a.date, a.slot_time, a.checked_in_at,
+      coalesce(a.grace_minutes, c.checkin_grace_minutes, 30),
+      coalesce(c.timezone, 'Asia/Kolkata'))
+from clinics c
+where c.id = a.clinic_id and a.checked_in_at is not null;
+
+-- ----------------------------------------------------------------------------
+-- 31.3 The ordered queue, for the clinic
+-- ----------------------------------------------------------------------------
+-- SECURITY INVOKER on purpose: ordinary RLS applies, so a clinic sees exactly
+-- its own appointments and nobody else's. Because a clinic can see ALL of its
+-- own rows for that doctor/day, the position computed here is the true one.
+create or replace function public.get_clinic_queue(p_doctor_id uuid, p_date date)
+returns table (
+  queue_position int,
+  id uuid,
+  token_number int,
+  status text,
+  slot_time time,
+  checked_in_at timestamptz,
+  effective_order_time timestamptz,
+  was_late boolean,
+  reminder_count int,
+  skip_count int,
+  payment_status text,
+  patient_name text,
+  account_id uuid,
+  phone text,
+  gender text,
+  dob date
+)
+language sql
+stable
+as $$
+  select
+    row_number() over (order by a.effective_order_time asc, a.checked_in_at asc)::int,
+    a.id, a.token_number, a.status, a.slot_time, a.checked_in_at, a.effective_order_time,
+    a.was_late, a.reminder_count, a.skip_count, a.payment_status,
+    f.name, f.account_id, f.phone, f.gender, f.dob
+  from appointments a
+  join family_members f on f.id = a.member_id
+  where a.doctor_id = p_doctor_id
+    and a.date = p_date
+    and a.status in ('checked_in', 'called', 'in_consultation')
+  order by a.effective_order_time asc, a.checked_in_at asc;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 31.4 The ordered queue, for patients
+-- ----------------------------------------------------------------------------
+-- Same ordering, but carrying nothing that identifies anybody - just the
+-- position, the token being called, and the state. A patient finds their own
+-- row by their own token number. security definer because a patient cannot
+-- (and must not) read other patients' appointment rows directly.
+--
+-- Dropped rather than replaced: it gains a `position` column, and OUT
+-- parameters are part of a function's return type.
+drop function if exists public.get_queue_status(uuid, date);
+create or replace function public.get_queue_status(p_doctor_id uuid, p_date date)
+returns table (queue_position int, token_number int, status text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    row_number() over (order by a.effective_order_time asc, a.checked_in_at asc)::int,
+    a.token_number,
+    a.status
+  from appointments a
+  where a.doctor_id = p_doctor_id
+    and a.date = p_date
+    and a.status in ('checked_in', 'called', 'in_consultation')
+    and a.token_number is not null
+  order by a.effective_order_time asc, a.checked_in_at asc;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 31.5 Calling the next patient
+-- ----------------------------------------------------------------------------
+-- Server-side so the order rule can't be reinterpreted by a client.
+--
+-- No preemption: if somebody is already called or in consultation, this
+-- refuses rather than pulling the doctor off them.
+--
+-- No idling: the candidate set is only ever patients who are physically here,
+-- so the doctor is never held waiting for someone who hasn't arrived. An
+-- earlier-slot patient who turns up within grace simply sorts to the front
+-- and takes the NEXT free turn - never the current one.
+create or replace function public.call_next_patient(p_doctor_id uuid, p_date date)
+returns table (id uuid, token_number int, queue_position int, patient_name text, account_id uuid)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  v_clinic_id uuid;
+  v_busy uuid;
+  v_next appointments;
+begin
+  select a.clinic_id into v_clinic_id
+  from appointments a where a.doctor_id = p_doctor_id limit 1;
+
+  if v_clinic_id is null then
+    raise exception 'No appointments for this doctor.';
+  end if;
+  if not (public.is_admin() or public.is_own_clinic(v_clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+
+  select a.id into v_busy
+  from appointments a
+  where a.doctor_id = p_doctor_id and a.date = p_date
+    and a.status in ('called', 'in_consultation')
+  limit 1;
+
+  if v_busy is not null then
+    raise exception 'Someone is already being seen - finish or skip them first.';
+  end if;
+
+  select * into v_next
+  from appointments a
+  where a.doctor_id = p_doctor_id and a.date = p_date and a.status = 'checked_in'
+  order by a.effective_order_time asc, a.checked_in_at asc
+  limit 1;
+
+  if v_next.id is null then
+    raise exception 'Nobody is checked in and waiting.';
+  end if;
+
+  update appointments set status = 'called' where id = v_next.id;
+
+  return query
+  select v_next.id, v_next.token_number, 1, f.name, f.account_id
+  from family_members f where f.id = v_next.member_id;
+end;
+$$;
+
+-- ============================================================================
+-- 32. REWARDING ONLINE PAYMENT - WITH CONVENIENCE, NEVER PRIORITY
+-- ============================================================================
+-- Paying online may buy a patient a faster, calmer arrival. It may never buy
+-- them an earlier turn.
+--
+-- Everything in this file is about the DOOR, not the QUEUE:
+--   * skip the counter - check in by self-scan instead of queueing to pay,
+--   * a guaranteed confirmed slot - the booking is accepted without waiting
+--     on the clinic's inbox,
+--   * a gentler rescheduling window.
+--
+-- Note what is absent, deliberately and permanently: nothing here touches
+-- effective_order_time, checked_in_at, token_number or arrival_seq. The order
+-- rule in section 31 reads none of these settings and never reads
+-- payment_status at all, so no combination of them can move a paid patient
+-- ahead of an earlier-slot one. Section 30.5's guard trigger keeps the
+-- presence columns unwritable from outside the check-in path regardless.
+--
+-- All three perks are opt-in per clinic - they change how a clinic runs its
+-- front desk, which is the clinic's call, not the platform's.
+--
+-- See TESTING.md "Test 13".
+
+-- ----------------------------------------------------------------------------
+-- 32.1 Clinic settings
+-- ----------------------------------------------------------------------------
+
+-- Skip the counter: a patient who has already paid online may self-scan
+-- reception's rotating code even at a clinic that hasn't opened self check-in
+-- to everyone. Presence is still proven exactly as in section 28 - the code
+-- rotates every few minutes and is verified server-side, plus the optional
+-- geofence. This shortens the QUEUE AT THE COUNTER, not the queue for the
+-- doctor.
+alter table clinics add column if not exists fast_checkin_paid_online boolean not null default false;
+
+-- Guaranteed confirmed slot: a booking paid online is accepted on the spot
+-- rather than waiting in the clinic's approval inbox.
+alter table clinics add column if not exists auto_confirm_paid_online boolean not null default false;
+
+-- Easier rescheduling: how close to the appointment a patient may still
+-- cancel or move it. The paid-online window is allowed to be shorter (i.e.
+-- more forgiving) - it is never used to grant queue position.
+alter table clinics add column if not exists reschedule_window_hours int not null default 2;
+alter table clinics add column if not exists reschedule_window_hours_paid_online int not null default 1;
+
+-- ----------------------------------------------------------------------------
+-- 32.2 Guaranteed confirmed slot
+-- ----------------------------------------------------------------------------
+-- Fires on insert, before the booking ever reaches the clinic's inbox. Only
+-- for a clinic that has switched it on, and only for money actually taken
+-- online. It sets status - never a presence column - so the patient still
+-- holds no token and must still physically arrive.
+create or replace function public.auto_confirm_paid_booking()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_auto boolean;
+begin
+  if new.payment_status = 'paid_online' and new.status = 'booked' then
+    select auto_confirm_paid_online into v_auto from clinics where id = new.clinic_id;
+    if coalesce(v_auto, false) then
+      new.status := 'accepted';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_appointment_auto_confirm on appointments;
+create trigger on_appointment_auto_confirm
+  before insert on appointments
+  for each row execute function public.auto_confirm_paid_booking();
+
+-- ----------------------------------------------------------------------------
+-- 32.3 Skip-the-counter self check-in
+-- ----------------------------------------------------------------------------
+-- Same function as section 28/29, with one clause widened: the clinic gate
+-- now passes if self check-in is open to everyone OR this particular patient
+-- paid online and the clinic offers the fast lane. Every anti-fraud check is
+-- untouched - correctly signed CURRENT reception code, an accepted
+-- appointment at this clinic today, optional geofence - and it still ends in
+-- the ordinary check_in_appointment(), which draws an ordinary token.
+drop function if exists public.self_check_in(text, double precision, double precision);
+create or replace function public.self_check_in(
+  p_code text,
+  p_lat double precision default null,
+  p_lng double precision default null
+)
+returns table (token_number int, arrival_seq int, token_date date, already_checked_in boolean, was_late boolean)
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  parts text[];
+  v_clinic_id uuid;
+  v_window bigint;
+  v_now_window bigint;
+  c clinics;
+  v_appt_id uuid;
+  v_paid boolean;
+  v_distance double precision;
+begin
+  parts := string_to_array(coalesce(p_code, ''), ':');
+  if array_length(parts, 1) <> 6
+     or parts[1] <> 'sanjeevni' or parts[2] <> 'clinic' or parts[3] <> 'v1'
+  then
+    raise exception 'That is not a clinic check-in code.';
+  end if;
+
+  begin
+    v_clinic_id := parts[4]::uuid;
+    v_window := parts[5]::bigint;
+  exception when others then
+    raise exception 'That is not a clinic check-in code.';
+  end;
+
+  if public.sign_qr_payload(parts[4] || '|' || parts[5]) <> parts[6] then
+    raise exception 'That check-in code is not valid.';
+  end if;
+
+  v_now_window := public.clinic_checkin_window();
+  if v_window <> v_now_window and v_window <> v_now_window - 1 then
+    raise exception 'That check-in code has expired - please scan the code on the screen at reception.';
+  end if;
+
+  select * into c from clinics where id = v_clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+
+  -- The caller's own accepted appointment at this clinic, today.
+  select a.id, (a.payment_status = 'paid_online')
+    into v_appt_id, v_paid
+  from appointments a
+  where a.clinic_id = v_clinic_id
+    and a.date = (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))::date
+    and a.status = 'accepted'
+    and public.is_own_mrn(a.member_id)
+  order by a.slot_time
+  limit 1;
+
+  if v_appt_id is null then
+    raise exception 'No confirmed appointment found for you at this clinic today.';
+  end if;
+
+  -- The widened gate. Either the clinic lets everyone self check in, or this
+  -- patient has already paid online and the clinic offers the fast lane.
+  if not (c.self_checkin_enabled or (c.fast_checkin_paid_online and coalesce(v_paid, false))) then
+    raise exception 'This clinic does not offer self check-in - please see the reception desk.';
+  end if;
+
+  if c.self_checkin_require_location then
+    if p_lat is null or p_lng is null then
+      raise exception 'Location is required to check yourself in here. Allow location access and try again.';
+    end if;
+    if c.lat is null or c.lng is null then
+      raise exception 'This clinic has not set its location yet - please see the reception desk.';
+    end if;
+    v_distance := public.distance_metres(p_lat, p_lng, c.lat, c.lng);
+    if v_distance > c.self_checkin_radius_m then
+      raise exception 'You appear to be about %m from the clinic. Self check-in only works at the clinic.',
+        round(v_distance)::int;
+    end if;
+  end if;
+
+  return query select * from public.check_in_appointment(v_appt_id, 'patient_scan', false);
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 32.4 What the patient's app needs to know
+-- ----------------------------------------------------------------------------
+-- The pass screen has to explain the right thing to the right patient - "tap
+-- to check in" versus "check in at the counter when you pay" - which means
+-- knowing the clinic's settings for THIS booking. A patient can already read
+-- the clinic row, but not the columns that matter here, so this hands back
+-- exactly the four facts the screen needs and nothing else.
+create or replace function public.get_checkin_options(p_appointment_id uuid)
+returns table (
+  can_self_check_in boolean,
+  requires_location boolean,
+  paid_online boolean,
+  reschedule_window_hours int
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  a appointments;
+  c clinics;
+  v_paid boolean;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_mrn(a.member_id) or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your booking.';
+  end if;
+
+  select * into c from clinics where id = a.clinic_id;
+  v_paid := (a.payment_status = 'paid_online');
+
+  return query select
+    (c.self_checkin_enabled or (c.fast_checkin_paid_online and v_paid)),
+    c.self_checkin_require_location,
+    v_paid,
+    case when v_paid then c.reschedule_window_hours_paid_online else c.reschedule_window_hours end;
+end;
+$$;
+
+-- ============================================================================
+-- 33. ADVANCE-ONLY BOOKING WITH A DAILY CAP (a clinic MODE)
+-- ============================================================================
+-- Some clinics don't want a waiting room full of hopefuls. They take a fixed
+-- number of patients per day, booked in advance only, and that's that.
+--
+-- This is a MODE, not a rewrite: a clinic runs either
+--   'allow_walkins'     - everything as before (the default; nothing changes
+--                         for existing clinics), or
+--   'appointment_only'  - no same-day booking, no walk-ins from anyone
+--                         (patient app OR front desk), bookings limited to a
+--                         horizon of N days ahead, and a hard daily cap.
+--
+-- In appointment_only mode a booking inside the cap is auto-confirmed - there
+-- is nothing for the clinic to approve when the only question was "is there a
+-- seat". The clinic can still cancel an individual booking with a reason.
+--
+-- When a day is full the patient is offered the waitlist for that day and/or
+-- the next day that still has room.
+--
+-- See TESTING.md "Test 14".
+
+-- ----------------------------------------------------------------------------
+-- 33.1 Clinic settings
+-- ----------------------------------------------------------------------------
+alter table clinics add column if not exists mode text not null default 'allow_walkins';
+alter table clinics drop constraint if exists clinics_mode_check;
+alter table clinics add constraint clinics_mode_check
+  check (mode in ('allow_walkins', 'appointment_only'));
+
+-- How far ahead patients may book. 1 = tomorrow only, which is the default
+-- for this mode's archetype.
+alter table clinics add column if not exists booking_horizon_days int not null default 1;
+alter table clinics add column if not exists daily_cap int not null default 100;
+
+-- ----------------------------------------------------------------------------
+-- 33.2 The per-day lock
+-- ----------------------------------------------------------------------------
+-- One row per (clinic, day), used purely as a mutex. Two patients racing for
+-- the last seat both try to take this row; the second waits for the first to
+-- commit and then counts again, so it sees the seat gone.
+--
+-- Deliberately NOT a stored seat count. A cached number drifts the moment a
+-- booking is cancelled, rescheduled or moved by the full-day tool, and a
+-- capacity limit that quietly drifts is worse than none. The row is the lock;
+-- the count is always taken live from `appointments`.
+create table if not exists clinic_day_locks (
+  clinic_id uuid not null references clinics (id) on delete cascade,
+  date date not null,
+  updated_at timestamptz not null default now(),
+  primary key (clinic_id, date)
+);
+
+alter table clinic_day_locks enable row level security;
+-- No policies: reached only from the security-definer functions below.
+
+-- ----------------------------------------------------------------------------
+-- 33.3 How full is a day?
+-- ----------------------------------------------------------------------------
+-- Cancelled and rejected bookings free their seat. A no-show does NOT - that
+-- seat was held all day by someone who simply didn't come, and the day is
+-- over by the time it matters.
+create or replace function public.day_availability(p_clinic_id uuid, p_date date)
+returns table (seats_taken int, daily_cap int, seats_left int, is_full boolean)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    taken.n::int,
+    c.daily_cap,
+    greatest(c.daily_cap - taken.n, 0)::int,
+    (taken.n >= c.daily_cap)
+  from clinics c
+  cross join lateral (
+    select count(*) as n
+    from appointments a
+    where a.clinic_id = c.id
+      and a.date = p_date
+      and a.status not in ('cancelled', 'rejected')
+  ) taken
+  where c.id = p_clinic_id;
+$$;
+
+-- The soonest day inside the horizon that still has room. Used to offer a
+-- patient somewhere to go when their preferred day is full.
+create or replace function public.next_available_day(p_clinic_id uuid)
+returns date
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  c clinics;
+  v_today date;
+  v_day date;
+  v_full boolean;
+  i int;
+begin
+  select * into c from clinics where id = p_clinic_id;
+  if c.id is null then
+    return null;
+  end if;
+
+  v_today := (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))::date;
+
+  -- appointment_only starts at tomorrow; allow_walkins can still use today.
+  for i in (case when c.mode = 'appointment_only' then 1 else 0 end)..c.booking_horizon_days loop
+    v_day := v_today + i;
+    if exists (select 1 from clinic_holidays h where h.clinic_id = c.id and h.date = v_day) then
+      continue;
+    end if;
+    select is_full into v_full from public.day_availability(c.id, v_day);
+    if not coalesce(v_full, false) then
+      return v_day;
+    end if;
+  end loop;
+
+  return null;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 33.4 The policy, enforced on insert
+-- ----------------------------------------------------------------------------
+-- Named to sort FIRST among this table's BEFORE INSERT triggers (Postgres
+-- fires them in alphabetical order). It has to beat
+-- on_appointment_create_encounter, or a booking that's about to be refused
+-- would burn an encounter number on its way out.
+create or replace function public.enforce_booking_policy()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c clinics;
+  v_today date;
+  v_taken int;
+  v_full boolean;
+begin
+  select * into c from clinics where id = new.clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+
+  -- Everything below is this mode's contract. Other clinics are untouched.
+  if c.mode <> 'appointment_only' then
+    return new;
+  end if;
+
+  v_today := (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))::date;
+
+  if new.patient_type = 'walk_in' then
+    raise exception 'This clinic is appointment-only - walk-ins are not accepted.';
+  end if;
+
+  if new.date <= v_today then
+    raise exception 'This clinic takes advance bookings only - the earliest you can book is %.',
+      to_char(v_today + 1, 'DD Mon YYYY');
+  end if;
+
+  if new.date > v_today + c.booking_horizon_days then
+    raise exception 'This clinic accepts bookings up to % day(s) ahead - the latest you can book is %.',
+      c.booking_horizon_days, to_char(v_today + c.booking_horizon_days, 'DD Mon YYYY');
+  end if;
+
+  -- Take the day's lock BEFORE counting. Two patients going for the last seat
+  -- serialise here: the second one waits, then counts a day that is now full.
+  insert into clinic_day_locks (clinic_id, date)
+  values (new.clinic_id, new.date)
+  on conflict (clinic_id, date) do update set updated_at = now();
+
+  select seats_taken, is_full into v_taken, v_full
+  from public.day_availability(new.clinic_id, new.date);
+
+  if coalesce(v_full, false) then
+    raise exception 'FULL_DAY: % is fully booked (% of % seats taken).',
+      to_char(new.date, 'DD Mon YYYY'), v_taken, c.daily_cap;
+  end if;
+
+  -- Inside the cap, so there is nothing to approve: the only question this
+  -- clinic asks of a booking is whether a seat exists.
+  if new.status = 'booked' then
+    new.status := 'accepted';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_appointment_aa_booking_policy on appointments;
+create trigger on_appointment_aa_booking_policy
+  before insert on appointments
+  for each row execute function public.enforce_booking_policy();
+
+-- ----------------------------------------------------------------------------
+-- 33.5 Waitlist
+-- ----------------------------------------------------------------------------
+create table if not exists waitlist (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references clinics (id) on delete cascade,
+  member_id uuid not null references family_members (id) on delete cascade,
+  doctor_id uuid references doctors (id) on delete set null,
+  date date not null,
+  status text not null default 'waiting'
+    check (status in ('waiting', 'offered', 'converted', 'cancelled')),
+  offered_at timestamptz,
+  created_at timestamptz not null default now(),
+  -- One entry per person per clinic per day; asking twice doesn't buy a
+  -- better place.
+  unique (clinic_id, member_id, date)
+);
+
+alter table waitlist enable row level security;
+
+drop policy if exists "waitlist_select" on waitlist;
+create policy "waitlist_select" on waitlist for select
+  using (public.is_admin() or public.is_own_clinic(clinic_id) or public.is_own_mrn(member_id));
+
+drop policy if exists "waitlist_insert" on waitlist;
+create policy "waitlist_insert" on waitlist for insert
+  with check (public.is_admin() or public.is_own_clinic(clinic_id) or public.is_own_mrn(member_id));
+
+drop policy if exists "waitlist_update" on waitlist;
+create policy "waitlist_update" on waitlist for update
+  using (public.is_admin() or public.is_own_clinic(clinic_id) or public.is_own_mrn(member_id));
+
+create index if not exists waitlist_clinic_date_idx on waitlist (clinic_id, date, created_at);
+
+-- When a seat frees on a full day, tell the person who has been waiting
+-- longest. It only NOTIFIES - it never books on their behalf, because a seat
+-- silently allocated to someone who has since made other plans is worse than
+-- no seat at all.
+create or replace function public.notify_waitlist_on_free_seat()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  w waitlist;
+  v_clinic clinics;
+begin
+  if new.status not in ('cancelled', 'rejected') or old.status = new.status then
+    return new;
+  end if;
+
+  select * into v_clinic from clinics where id = new.clinic_id;
+  if v_clinic.mode <> 'appointment_only' then
+    return new;
+  end if;
+
+  select * into w
+  from waitlist
+  where clinic_id = new.clinic_id and date = new.date and status = 'waiting'
+  order by created_at
+  limit 1;
+
+  if w.id is null then
+    return new;
+  end if;
+
+  update waitlist set status = 'offered', offered_at = now() where id = w.id;
+
+  insert into notifications (user_id, type, message)
+  select f.account_id, 'waitlist_seat',
+         'A seat has opened up at ' || v_clinic.name || ' on '
+           || to_char(new.date, 'DD Mon YYYY') || '. Book now - it is first come, first served.'
+  from family_members f
+  where f.id = w.member_id;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_appointment_free_seat on appointments;
+create trigger on_appointment_free_seat
+  after update on appointments
+  for each row execute function public.notify_waitlist_on_free_seat();
+
+-- Joining the waitlist. Idempotent: asking again returns the existing entry
+-- rather than creating a second one or moving anybody up.
+create or replace function public.join_waitlist(
+  p_clinic_id uuid,
+  p_member_id uuid,
+  p_date date,
+  p_doctor_id uuid default null
+)
+returns table (id uuid, already_waiting boolean, place int)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_existing waitlist;
+  v_id uuid;
+begin
+  if not (public.is_admin() or public.is_own_mrn(p_member_id) or public.is_own_clinic(p_clinic_id)) then
+    raise exception 'This is not your booking.';
+  end if;
+
+  select * into v_existing
+  from waitlist
+  where clinic_id = p_clinic_id and member_id = p_member_id and date = p_date;
+
+  if v_existing.id is not null then
+    if v_existing.status = 'cancelled' then
+      update waitlist set status = 'waiting', created_at = now() where id = v_existing.id;
+    end if;
+    v_id := v_existing.id;
+  else
+    insert into waitlist (clinic_id, member_id, doctor_id, date)
+    values (p_clinic_id, p_member_id, p_doctor_id, p_date)
+    returning waitlist.id into v_id;
+  end if;
+
+  return query
+  select v_id,
+         (v_existing.id is not null),
+         (select count(*)::int
+          from waitlist w2
+          where w2.clinic_id = p_clinic_id and w2.date = p_date
+            and w2.status in ('waiting', 'offered')
+            and w2.created_at <= (select w3.created_at from waitlist w3 where w3.id = v_id));
+end;
+$$;
+
+-- ============================================================================
+-- 34. PUBLISH THE DAY SCHEDULE (the night-before batch)
+-- ============================================================================
+-- This is SCHEDULING, not check-in. The evening before (or whenever the
+-- clinic opens), the desk publishes the running order for that day's booked
+-- patients in ONE action. For every booked patient that day, publishing:
+--
+--   * assigns a sequence number - their place in the day's order, 1..N,
+--   * works out an estimated appointment time, walking forward from the
+--     clinic's day-start time in fixed per-patient minutes, and
+--   * notifies the patient that their number and time are now available.
+--
+-- Publishing does NOT check anyone in and does NOT touch token_number - that
+-- stays exactly what section 27 made it: a real number handed out at the
+-- door, in arrival order, the moment a patient is actually checked in. A
+-- published sequence number is a plan; the arrival token is what actually
+-- happened. Being CALLED still requires check-in on arrival, which is what
+-- keeps a no-show from stalling the queue - see check_in_appointment().
+--
+-- Ordering follows booked slot time (every appointment has one), falling
+-- back to booking time (created_at) only to break a tie between two
+-- identical slot times. The clinic can override that order, or block out a
+-- break, before publishing - see 34.3 and 34.4.
+--
+-- See TESTING.md "Test 15".
+
+-- ----------------------------------------------------------------------------
+-- 34.1 Clinic settings the estimate is built from
+-- ----------------------------------------------------------------------------
+alter table clinics add column if not exists publish_start_time time not null default '09:00:00';
+
+alter table clinics drop constraint if exists clinics_avg_minutes_per_patient_check;
+alter table clinics add column if not exists avg_minutes_per_patient int not null default 10;
+alter table clinics add constraint clinics_avg_minutes_per_patient_check check (avg_minutes_per_patient > 0);
+
+-- ----------------------------------------------------------------------------
+-- 34.2 Appointment columns
+-- ----------------------------------------------------------------------------
+-- The published running-order number. Deliberately a separate column from
+-- token_number (section 27): this one is assigned the night before, to
+-- EVERY booked patient, in booking order; token_number is assigned at the
+-- door, only to patients who actually showed up, in arrival order. Mixing
+-- the two would silently reintroduce the "a punctual booking loses its place
+-- to whoever happens to arrive first" problem section 27 was written to fix.
+alter table appointments add column if not exists sequence_no int;
+alter table appointments add column if not exists estimated_time time;
+-- Null until the first publish for this appointment's day; set on every
+-- publish/republish after that. Read by the client purely to decide whether
+-- to show "your number will be published" or the number itself - it isn't
+-- used in check-in.
+alter table appointments add column if not exists schedule_published_at timestamptz;
+-- The clinic's manual reorder, set directly (appointments RLS already lets
+-- the owning clinic update its own rows). A plain rank rather than an
+-- integer position: to move a patient between two neighbours, the clinic
+-- sets this to the midpoint of their two ranks, so reordering one patient
+-- never requires renumbering everyone else. Null means "no override - use
+-- slot time".
+alter table appointments add column if not exists day_order_override double precision;
+
+-- One published sequence number per clinic per day. Catches a bug in
+-- compute_day_schedule() rather than silently handing two patients the same
+-- slip.
+drop index if exists appointments_clinic_day_sequence_unique;
+create unique index appointments_clinic_day_sequence_unique
+  on appointments (clinic_id, date, sequence_no)
+  where sequence_no is not null;
+
+-- ----------------------------------------------------------------------------
+-- 34.3 Breaks the clinic blocks out before publishing
+-- ----------------------------------------------------------------------------
+-- "Insert a `minutes`-long gap before whoever ends up as the `before_seq`th
+-- patient." Kept as a position in the FINAL order rather than a clock time,
+-- because the whole point of a break is to hold regardless of how the
+-- clinic reorders people around it - a lunch break "before patient 15" stays
+-- before patient 15 even if patient 15 changes.
+create table if not exists clinic_schedule_breaks (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references clinics (id) on delete cascade,
+  date date not null,
+  before_seq int not null check (before_seq > 0),
+  minutes int not null check (minutes > 0),
+  label text,
+  created_at timestamptz not null default now()
+);
+
+alter table clinic_schedule_breaks enable row level security;
+
+drop policy if exists "clinic_schedule_breaks_all" on clinic_schedule_breaks;
+create policy "clinic_schedule_breaks_all" on clinic_schedule_breaks for all
+  using (public.is_own_clinic(clinic_id) or public.is_admin())
+  with check (public.is_own_clinic(clinic_id) or public.is_admin());
+
+create index if not exists clinic_schedule_breaks_day_idx on clinic_schedule_breaks (clinic_id, date);
+
+-- ----------------------------------------------------------------------------
+-- 34.4 compute_day_schedule(): the ordering, shared by preview and publish
+-- ----------------------------------------------------------------------------
+-- Everyone with a live reservation for the day - booked, accepted, or
+-- already further along (a republish mid-day must not drop someone who has
+-- since been checked in). Cancelled/rejected/completed/no_show hold no
+-- place in a running order.
+--
+-- Order: the clinic's manual rank if it set one, else booking-time-derived
+-- rank (slot_time, then created_at to break a tie). Read-only - this never
+-- writes anything, so calling it twice in the same publish (once to find
+-- who fell out, once to write) is cheap and always consistent.
+create or replace function public.compute_day_schedule(p_clinic_id uuid, p_date date)
+returns table (appointment_id uuid, seq int, estimated_time time)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  c clinics;
+  v_clock time;
+  v_minutes int;
+  v_seq int := 0;
+  v_break_minutes int;
+  r record;
+begin
+  if not (public.is_admin() or public.is_own_clinic(p_clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+
+  select * into c from clinics where id = p_clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+
+  v_clock := c.publish_start_time;
+  v_minutes := greatest(c.avg_minutes_per_patient, 1);
+
+  for r in (
+    with base as (
+      select a.id,
+             row_number() over (order by a.slot_time, a.created_at) as base_rank,
+             a.day_order_override
+      from appointments a
+      where a.clinic_id = p_clinic_id
+        and a.date = p_date
+        and a.status in ('booked', 'accepted', 'checked_in', 'called', 'in_consultation')
+    )
+    select id
+    from base
+    order by coalesce(day_order_override, base_rank), base_rank
+  ) loop
+    v_seq := v_seq + 1;
+
+    -- Any break(s) the clinic placed right before this position push the
+    -- clock forward before this patient's time is set.
+    select coalesce(sum(b.minutes), 0) into v_break_minutes
+    from clinic_schedule_breaks b
+    where b.clinic_id = p_clinic_id and b.date = p_date and b.before_seq = v_seq;
+    v_clock := v_clock + make_interval(mins => v_break_minutes);
+
+    appointment_id := r.id;
+    seq := v_seq;
+    estimated_time := v_clock;
+    return next;
+
+    v_clock := v_clock + make_interval(mins => v_minutes);
+  end loop;
+end;
+$$;
+
+-- Read-only look at what publishing WOULD do, so the clinic can review the
+-- order (and add breaks / drag people around) before committing to it.
+-- Touches nothing.
+create or replace function public.preview_day_schedule(p_clinic_id uuid, p_date date)
+returns table (
+  appointment_id uuid,
+  seq int,
+  estimated_time time,
+  member_name text,
+  doctor_name text,
+  slot_time time,
+  status text,
+  patient_type text,
+  day_order_override double precision
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.appointment_id, c.seq, c.estimated_time, fm.name, d.name, a.slot_time, a.status, a.patient_type,
+         a.day_order_override
+  from public.compute_day_schedule(p_clinic_id, p_date) c
+  join appointments a on a.id = c.appointment_id
+  join family_members fm on fm.id = a.member_id
+  join doctors d on d.id = a.doctor_id
+  order by c.seq;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 34.5 publish_day_schedule(): the one action
+-- ----------------------------------------------------------------------------
+-- Writes sequence_no/estimated_time/schedule_published_at onto every
+-- appointment compute_day_schedule() names, notifies each patient, and hands
+-- back the published list (with the patient's permanent visit id - the
+-- encounter_no every booking already carries, see section 18 - so the
+-- clinic/patient screens have something stable to print or scan against).
+-- Nothing here sets checked_in_at, status, or token_number: this function
+-- never makes anyone "present".
+create or replace function public.publish_day_schedule(p_clinic_id uuid, p_date date)
+returns table (
+  appointment_id uuid,
+  seq int,
+  estimated_time time,
+  member_name text,
+  encounter_no text,
+  doctor_name text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := now();
+  c clinics;
+begin
+  if not (public.is_admin() or public.is_own_clinic(p_clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+
+  select * into c from clinics where id = p_clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+
+  -- Anyone who has fallen out of today's run since the last publish
+  -- (cancelled, rejected, written off as a no-show) loses their stale number
+  -- rather than go on showing a slip for a place that no longer exists.
+  update appointments a
+  set sequence_no = null, estimated_time = null
+  where a.clinic_id = p_clinic_id and a.date = p_date
+    and a.sequence_no is not null
+    and not exists (
+      select 1 from public.compute_day_schedule(p_clinic_id, p_date) comp where comp.appointment_id = a.id
+    );
+
+  update appointments a
+  set sequence_no = comp.seq,
+      estimated_time = comp.estimated_time,
+      schedule_published_at = v_now
+  from public.compute_day_schedule(p_clinic_id, p_date) comp
+  where a.id = comp.appointment_id;
+
+  -- Tell every patient in this run their place and time. Sent on every
+  -- publish, including a republish after a reorder - the point is that the
+  -- number on the patient's phone always matches what's on file, not that it
+  -- is announced exactly once.
+  insert into notifications (user_id, appointment_id, type, message)
+  select fm.account_id, a.id, 'schedule_published',
+    'Your number for ' || to_char(p_date, 'DD Mon YYYY') || ' at ' || c.name || ' is #' || a.sequence_no
+      || ', expected around ' || to_char(a.estimated_time, 'HH12:MI AM')
+      || '. This is your place in the day''s order, not a check-in - you will still need to check in when you arrive.'
+  from appointments a
+  join family_members fm on fm.id = a.member_id
+  where a.clinic_id = p_clinic_id and a.date = p_date and a.schedule_published_at = v_now;
+
+  return query
+  select a.id, a.sequence_no, a.estimated_time, fm.name, e.encounter_no, d.name
+  from appointments a
+  join family_members fm on fm.id = a.member_id
+  join doctors d on d.id = a.doctor_id
+  left join encounters e on e.id = a.encounter_id
+  where a.clinic_id = p_clinic_id and a.date = p_date and a.schedule_published_at = v_now
+  order by a.sequence_no;
+end;
+$$;
+
+-- ============================================================================
+-- 35. ON-THE-DAY CHECK-IN: SCAN OR PATIENT ID, AND THE LIVE QUEUE
+-- ============================================================================
+-- The reception-desk screen for the day itself: scan the patient's QR (or
+-- type their patient ID - their MRN, see section 18) and see, in one look,
+-- who they are, their photo, their PRE-ASSIGNED number and time from the
+-- night-before publish (section 34), and what's owed - before committing to
+-- anything. Only pressing "Check in" actually does something.
+--
+-- Nothing about arrival order, no-idle, no-preemption or the grace window is
+-- reimplemented here. Those rules already exist, already tested (see
+-- TESTING.md "Test 7" and "Test 12"), and this migration deliberately reuses
+-- them exactly as they stand:
+--   * check_in_appointment() / check_in_with_qr()  (sections 27, 28, 30.6, 31)
+--     are what actually marks a patient present and puts them on the live
+--     board. This migration does not touch them.
+--   * get_clinic_queue() / call_next_patient() / get_queue_status()
+--     (section 31) are what serves the live board in order, skipping anyone
+--     not checked in, never preempting, and applying the grace-period rule to
+--     a late arrival. Also untouched.
+--   * mark_paid_at_clinic() (section 30.4) is what the "Mark paid" button
+--     calls. Also untouched.
+--
+-- What this migration adds is the piece in front of all of that: a single
+-- read-only lookup that resolves "this QR" or "this patient ID" to the one
+-- appointment it means, for TODAY at THIS clinic, and hands back everything
+-- the scan card needs to show - without checking anyone in. The "sequence
+-- number" a patient is quoted here is the one publish_day_schedule() (section
+-- 34) already assigned the night before; it stays a distinct fact from
+-- token_number by the same reasoning section 34.2 already gives - this is
+-- what the desk shows as "your expected number" right up until the patient
+-- is actually standing at the door, at which point checking them in is what
+-- puts them on the live board, ordered by the existing fair-queue rule.
+--
+-- Also new: a patient photo, shown on the scan card so the desk can match
+-- face to name at a glance. Stored the same way every other upload in this
+-- app is - a private bucket, a path column, and a signed URL fetched on
+-- demand.
+--
+-- See TESTING.md "Test 16".
+
+-- ----------------------------------------------------------------------------
+-- 35.1 Patient photo
+-- ----------------------------------------------------------------------------
+alter table family_members add column if not exists photo_path text;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'patient-photos', 'patient-photos', false, 5242880,
+  array['image/jpeg', 'image/png']
+)
+on conflict (id) do update set
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- Stored as "{member_id}/{random}-{filename}". Readable by the owning
+-- account (to preview their own upload) and by any clinic that has an
+-- appointment with this patient (so the check-in scan card can show it) -
+-- the same "has this clinic ever seen this patient" reach get_clinic_queue()
+-- already relies on via family_members. Writable only by the owning account.
+drop policy if exists "patient_photos_select" on storage.objects;
+create policy "patient_photos_select" on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'patient-photos'
+    and exists (
+      select 1 from family_members fm
+      where fm.id::text = (storage.foldername(name))[1]
+        and (
+          public.is_own_member(fm.id)
+          or public.is_admin()
+          or exists (
+            select 1 from appointments a
+            where a.member_id = fm.id and public.is_own_clinic(a.clinic_id)
+          )
+        )
+    )
+  );
+
+drop policy if exists "patient_photos_insert" on storage.objects;
+create policy "patient_photos_insert" on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'patient-photos'
+    and exists (
+      select 1 from family_members fm
+      where fm.id::text = (storage.foldername(name))[1] and public.is_own_member(fm.id)
+    )
+  );
+
+drop policy if exists "patient_photos_update" on storage.objects;
+create policy "patient_photos_update" on storage.objects for update
+  to authenticated
+  using (
+    bucket_id = 'patient-photos'
+    and exists (
+      select 1 from family_members fm
+      where fm.id::text = (storage.foldername(name))[1] and public.is_own_member(fm.id)
+    )
+  );
+
+drop policy if exists "patient_photos_delete" on storage.objects;
+create policy "patient_photos_delete" on storage.objects for delete
+  to authenticated
+  using (
+    bucket_id = 'patient-photos'
+    and exists (
+      select 1 from family_members fm
+      where fm.id::text = (storage.foldername(name))[1] and public.is_own_member(fm.id)
+    )
+  );
+
+-- ----------------------------------------------------------------------------
+-- 35.2 lookup_checkin(): resolve a scan or a patient ID to today's
+-- appointment, read-only
+-- ----------------------------------------------------------------------------
+-- Exactly one of p_qr_code / p_mrn is supplied by the caller. Raises rather
+-- than returning an empty set, so the scan card can show one clear reason
+-- ("not found", "not your clinic", "no appointment today") instead of a
+-- silent blank.
+--
+-- The QR branch trusts verify_booking_qr() (section 28.2) for identity and
+-- does not itself re-check the date - check_in_with_qr() still enforces the
+-- arrival window when the desk actually presses "Check in", so scanning a
+-- code for the wrong day surfaces as an error at that point, same as it
+-- always has.
+--
+-- The patient-ID branch is scoped to TODAY in the CLINIC's own timezone
+-- (same reasoning as check_in_appointment()'s date guard, section 27.7) and
+-- to appointments actually live for the desk to act on: confirmed but not
+-- yet arrived, marked no-show but possibly walking in anyway, or already on
+-- the live board (so re-scanning/re-typing after check-in just shows the
+-- same patient again rather than an error).
+create or replace function public.lookup_checkin(
+  p_clinic_id uuid,
+  p_qr_code text default null,
+  p_mrn text default null
+)
+returns table (
+  appointment_id uuid,
+  member_id uuid,
+  patient_name text,
+  photo_path text,
+  mrn text,
+  dob date,
+  gender text,
+  status text,
+  already_checked_in boolean,
+  token_number int,
+  sequence_no int,
+  estimated_time time,
+  slot_time time,
+  doctor_name text,
+  payment_status text,
+  amount_due numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c clinics;
+  v_today date;
+  v_appt_id uuid;
+begin
+  if not (public.is_admin() or public.is_own_clinic(p_clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+
+  select * into c from clinics where id = p_clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+  v_today := (now() at time zone coalesce(c.timezone, 'Asia/Kolkata'))::date;
+
+  if p_qr_code is not null and trim(p_qr_code) <> '' then
+    v_appt_id := public.verify_booking_qr(p_qr_code);
+    if v_appt_id is null then
+      raise exception 'This code is not valid or has expired. Ask the patient to refresh their screen.';
+    end if;
+  elsif p_mrn is not null and trim(p_mrn) <> '' then
+    select a.id into v_appt_id
+    from appointments a
+    join family_members fm on fm.id = a.member_id
+    where fm.mrn = trim(p_mrn)
+      and a.clinic_id = p_clinic_id
+      and a.date = v_today
+      and a.status in ('accepted', 'no_show', 'checked_in', 'called', 'in_consultation')
+    order by (a.status = 'accepted') desc, a.slot_time
+    limit 1;
+    if v_appt_id is null then
+      raise exception 'No appointment found for patient ID "%" today at this clinic.', trim(p_mrn);
+    end if;
+  else
+    raise exception 'Scan a QR code or enter a patient ID.';
+  end if;
+
+  if not exists (select 1 from appointments a where a.id = v_appt_id and a.clinic_id = p_clinic_id) then
+    raise exception 'This booking is not at your clinic.';
+  end if;
+
+  return query
+  select
+    a.id, fm.id, fm.name, fm.photo_path, fm.mrn, fm.dob, fm.gender,
+    a.status, (a.checked_in_at is not null), a.token_number,
+    a.sequence_no, a.estimated_time, a.slot_time, d.name,
+    a.payment_status, p.amount
+  from appointments a
+  join family_members fm on fm.id = a.member_id
+  join doctors d on d.id = a.doctor_id
+  left join payments p on p.appointment_id = a.id
+  where a.id = v_appt_id;
+end;
+$$;
+
+-- ============================================================================
+-- 36. SLOT-BASED BOOKING: CAPACITY & AVAILABILITY
+-- ============================================================================
+-- Until now a "slot" was never a real thing in the database - DoctorPage and
+-- WalkInForm compute the day's slot TIMES on the client (see computeSlots()
+-- in time.ts) and get_taken_slots() just says which of those exact times
+-- already has ANY active booking. That is a capacity of exactly 1, silently,
+-- with no server-side atomicity: two patients whose inserts land in the same
+-- moment can both succeed at the same slot_time, because nothing ever locks
+-- or re-checks between "is it free" and "take it".
+--
+-- This migration makes a slot a real capacity concept and closes that race,
+-- for BOTH advance bookings and same-day walk-ins booked ahead:
+--   * Each weekly availability window (doctor_availability) now carries a
+--     slot_capacity - how many patients ONE of its computed time slots can
+--     hold. Defaults to 1, so every existing clinic behaves exactly as
+--     before until someone raises it.
+--   * A slot is full when the number of active (not cancelled/rejected)
+--     bookings at that exact (doctor, date, slot_time) reaches its capacity.
+--   * Taking the last seat in a slot is enforced atomically on the server,
+--     the same way section 33.2's clinic_day_locks makes the daily-cap check
+--     race-proof: a per-slot lock row is taken BEFORE counting, so the
+--     second of two simultaneous inserts for the last seat waits, then
+--     counts a slot that is now full and is refused.
+--   * The existing daily cap (section 33, "Part 44" in the product spec)
+--     is untouched and still only applies in appointment_only mode - a day
+--     is full when THAT cap is reached OR every one of the doctor's slots
+--     for the day is full, whichever comes first. The second half of that
+--     is simply what happens once every computed slot_time has hit its own
+--     capacity: get_taken_slots() (redeclared below) reports all of them
+--     taken, and the picker has nothing left to offer.
+--
+-- Deliberately NOT a stored, independently-maintained booked_count column -
+-- see clinic_day_locks' own comment (section 33.2) for why a cached tally
+-- that has to be kept in sync by hand (insert here, decrement there, don't
+-- forget the reject path...) drifts the moment anyone misses a spot, and a
+-- capacity limit that quietly drifts is worse than none. A slot's booked
+-- count is always taken live from `appointments`, exactly like the daily
+-- cap already is; doctor_slot_locks is the lock, not the ledger.
+--
+-- See TESTING.md "Test 17".
+
+-- ----------------------------------------------------------------------------
+-- 36.1 Capacity per slot
+-- ----------------------------------------------------------------------------
+-- How many patients ONE computed slot in this window can hold. Distinct from
+-- max_patients_per_day, which decides how many slots the window is divided
+-- into in the first place (see computeSlots() in time.ts) - that number times
+-- this one is the window's true total capacity for the day.
+alter table doctor_availability add column if not exists slot_capacity int not null default 1;
+alter table doctor_availability drop constraint if exists doctor_availability_slot_capacity_check;
+alter table doctor_availability add constraint doctor_availability_slot_capacity_check
+  check (slot_capacity > 0);
+
+-- ----------------------------------------------------------------------------
+-- 36.2 The per-slot lock
+-- ----------------------------------------------------------------------------
+-- One row per (doctor, day, slot_time), used purely as a mutex - same shape
+-- and purpose as clinic_day_locks (section 33.2), one level more specific.
+-- Two patients racing for the last seat in one slot both try to take this
+-- row; the second waits for the first to commit, then re-counts a slot that
+-- is now full. Not a stored seat count - see the migration header above.
+create table if not exists doctor_slot_locks (
+  doctor_id uuid not null references doctors (id) on delete cascade,
+  date date not null,
+  slot_time time not null,
+  updated_at timestamptz not null default now(),
+  primary key (doctor_id, date, slot_time)
+);
+
+alter table doctor_slot_locks enable row level security;
+-- No policies: reached only from the security-definer functions below.
+
+-- ----------------------------------------------------------------------------
+-- 36.3 Resolving a slot's capacity
+-- ----------------------------------------------------------------------------
+-- Which weekly window a given (doctor, date, slot_time) falls in, and that
+-- window's slot_capacity. Falls back to 1 for a slot_time that doesn't land
+-- inside any current window (e.g. a walk-in's "right now" timestamp, or a
+-- window since removed) - the same conservative default the column itself
+-- uses, so an unmatched slot is never silently treated as unlimited.
+create or replace function public.slot_capacity_for(p_doctor_id uuid, p_date date, p_slot_time time)
+returns int
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (
+      select da.slot_capacity
+      from doctor_availability da
+      where da.doctor_id = p_doctor_id
+        and da.weekday = extract(dow from p_date)::smallint
+        and da.start_time <= p_slot_time
+        and p_slot_time < da.end_time
+      order by da.start_time
+      limit 1
+    ),
+    1
+  );
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 36.4 Enforced atomically on insert
+-- ----------------------------------------------------------------------------
+-- Named to sort right after on_appointment_aa_booking_policy (section 33.4)
+-- and before every other BEFORE INSERT trigger on this table, so a booking
+-- that's about to be refused for a full slot doesn't burn a subscription
+-- booking, an encounter number, or an auto-confirm - same reasoning as why
+-- the daily-cap gate sorts first.
+--
+-- Only genuine scheduled slot bookings claim a seat: patient_type = 'walk_in'
+-- is a patient standing at the desk right now, whose slot_time is just the
+-- clock at check-in (see createAndAcceptAppointment() in WalkInForm.tsx) -
+-- not a claim on one of the doctor's bookable times, so it never contends
+-- for slot capacity. A future visit booked in that same walk-in flow IS
+-- patient_type = 'scheduled' and goes through exactly like a patient
+-- self-booking one.
+create or replace function public.enforce_slot_capacity()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_capacity int;
+  v_booked int;
+begin
+  if new.patient_type <> 'scheduled' then
+    return new;
+  end if;
+
+  -- Take the slot lock BEFORE counting - see 36.2.
+  insert into doctor_slot_locks (doctor_id, date, slot_time)
+  values (new.doctor_id, new.date, new.slot_time)
+  on conflict (doctor_id, date, slot_time) do update set updated_at = now();
+
+  v_capacity := public.slot_capacity_for(new.doctor_id, new.date, new.slot_time);
+
+  select count(*) into v_booked
+  from appointments
+  where doctor_id = new.doctor_id
+    and date = new.date
+    and slot_time = new.slot_time
+    and status not in ('cancelled', 'rejected');
+
+  if v_booked >= v_capacity then
+    raise exception 'SLOT_FULL: % on % is full (% of % taken) - pick another slot.',
+      to_char(new.slot_time, 'HH12:MI AM'), to_char(new.date, 'DD Mon YYYY'), v_booked, v_capacity;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_appointment_ab_slot_capacity on appointments;
+create trigger on_appointment_ab_slot_capacity
+  before insert on appointments
+  for each row execute function public.enforce_slot_capacity();
+
+-- ----------------------------------------------------------------------------
+-- 36.5 get_taken_slots(), made capacity-aware
+-- ----------------------------------------------------------------------------
+-- Re-declared: a slot_time now reports as taken only once its ACTIVE booking
+-- count reaches its capacity, not the instant it has one booking. For every
+-- clinic still on the default slot_capacity = 1 this returns exactly what it
+-- always did. Every existing caller (SlotPicker, WalkInForm's future-slot
+-- picker, queue.ts's findNextBestSlot/findNextNSlots used by the waitlist and
+-- RejectAppointmentForm's "next available slot" suggestion) treats this as
+-- "times to exclude from the picker", so all of them gain capacity-aware
+-- behaviour with no caller-side change.
+create or replace function public.get_taken_slots(p_doctor_id uuid, p_date date)
+returns table (slot_time time)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select a.slot_time
+  from appointments a
+  where a.doctor_id = p_doctor_id
+    and a.date = p_date
+    and a.status not in ('rejected', 'cancelled')
+  group by a.slot_time
+  having count(*) >= public.slot_capacity_for(p_doctor_id, p_date, a.slot_time);
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 36.6 Index
+-- ----------------------------------------------------------------------------
+-- Both the trigger's live count and get_taken_slots() filter/group on
+-- exactly this shape.
+create index if not exists appointments_doctor_date_slot_idx
+  on appointments (doctor_id, date, slot_time)
+  where status not in ('cancelled', 'rejected');
+
+-- ============================================================================
+-- 37. SAME-DAY BOOKING FOR APPOINTMENT-ONLY CLINICS
+-- ============================================================================
+-- Section 33 ("Part 44" in the product spec) gave an appointment_only clinic
+-- a hard rule: no same-day booking, no walk-ins, from anyone. That's still
+-- the default. This migration lets a clinic running that mode OPT IN to
+-- same-day booking on top of it, without touching allow_walkins clinics at
+-- all - they already accept same-day bookings and walk-ins today, unchanged.
+--
+-- Three new clinic settings, all off by default so no existing clinic's
+-- behaviour changes until it turns them on:
+--   * same_day_booking_enabled  - the switch itself.
+--   * same_day_cutoff_minutes   - how close to a slot same-day booking still
+--                                  works. A scheduled slot inside this window
+--                                  (or already passed) is refused - a walk-in
+--                                  is exempt, since its "slot" is just the
+--                                  clock at the desk, not a future promise.
+--   * auto_checkin_verified_same_day - see below.
+--
+-- A same-day booking still goes through every existing gate once its date is
+-- allowed at all: the daily cap and per-day lock (section 33.3/33.4) and, for
+-- a genuine scheduled slot, the slot capacity check (section 36.4, "Prompt 1"
+-- - is this slot still free). Nothing about those is touched here.
+--
+-- Token timing - the reason this is its own migration and not a one-line
+-- relaxation of the date check:
+--   * A walk-in registered at the desk is, as it always has been, standing
+--     right there - WalkInForm already checks that patient in immediately
+--     and draws their token the moment it accepts the booking (see
+--     WalkInForm.tsx / check_in_appointment()). Lifting the walk-in block
+--     below for a same-day-enabled clinic is all that's needed; nothing else
+--     changes for that path.
+--   * A same-day booking made through the PATIENT'S OWN APP, while their
+--     device can verifiably place them at the clinic (the same geofence
+--     idea section 28 already uses for self check-in), is treated the same
+--     way - checked in immediately, token drawn right away. See 37.3.
+--   * A same-day booking made remotely - from home, for a slot later today,
+--     with no location fix or one outside the clinic's radius - gets NONE of
+--     that. It is accepted exactly like an advance booking and collects its
+--     token only when the patient actually arrives and checks in, through
+--     the ordinary check_in_appointment() path. This is the whole point: a
+--     token is never held by someone who is not, in fact, there.
+--
+-- See TESTING.md "Test 18".
+
+-- ----------------------------------------------------------------------------
+-- 37.1 Clinic settings
+-- ----------------------------------------------------------------------------
+alter table clinics add column if not exists same_day_booking_enabled boolean not null default false;
+
+alter table clinics add column if not exists same_day_cutoff_minutes int not null default 30;
+alter table clinics drop constraint if exists clinics_same_day_cutoff_minutes_check;
+alter table clinics add constraint clinics_same_day_cutoff_minutes_check
+  check (same_day_cutoff_minutes >= 0);
+
+-- Off by default, same reasoning as self_checkin_enabled (section 28.3): this
+-- changes who can walk away with a live token, which is the clinic's call.
+alter table clinics add column if not exists auto_checkin_verified_same_day boolean not null default false;
+
+-- A separate radius from self_checkin_radius_m (section 28.3) rather than
+-- reusing it - a clinic may want self check-in off (or a tighter/looser
+-- radius for it) while still trusting this narrower, booking-time check, or
+-- vice versa. Same default as that column's.
+alter table clinics add column if not exists same_day_checkin_radius_m int not null default 150;
+alter table clinics drop constraint if exists clinics_same_day_checkin_radius_m_check;
+alter table clinics add constraint clinics_same_day_checkin_radius_m_check
+  check (same_day_checkin_radius_m > 0);
+
+-- ----------------------------------------------------------------------------
+-- 37.2 Appointment columns: the booking-time location fix
+-- ----------------------------------------------------------------------------
+-- Optional, set only by a same-day booking made from the patient's own app
+-- that could get a fix - never by a walk-in (the desk already knows they're
+-- present) and never by an advance booking (irrelevant until the day of).
+-- Kept as real columns rather than passed-and-discarded, both so 37.3 below
+-- can read them from NEW inside the same INSERT and so there's a record of
+-- what the auto-check-in decision (or non-decision) was actually based on.
+alter table appointments add column if not exists booking_lat double precision;
+alter table appointments add column if not exists booking_lng double precision;
+
+-- ----------------------------------------------------------------------------
+-- 37.3 The policy, extended - same trigger function, same trigger name
+-- ----------------------------------------------------------------------------
+-- Re-declared rather than layered as a second trigger: the date/patient-type
+-- gate is one contiguous decision, and splitting it across two triggers would
+-- mean re-deriving "is this clinic even in appointment_only mode" twice and
+-- risking the two disagreeing about what "today" is. Everything from section
+-- 33.4 is preserved for a clinic that leaves same_day_booking_enabled off -
+-- same messages, same order, same behaviour (see TESTING.md "Test 14",
+-- untouched by this migration).
+create or replace function public.enforce_booking_policy()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c clinics;
+  v_today date;
+  v_now_local timestamp;
+  v_same_day boolean;
+  v_taken int;
+  v_full boolean;
+begin
+  select * into c from clinics where id = new.clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+
+  -- Everything below is this mode's contract. Other clinics are untouched.
+  if c.mode <> 'appointment_only' then
+    return new;
+  end if;
+
+  v_now_local := now() at time zone coalesce(c.timezone, 'Asia/Kolkata');
+  v_today := v_now_local::date;
+  v_same_day := (new.date = v_today);
+
+  if new.date < v_today then
+    raise exception 'This clinic takes advance bookings only - the earliest you can book is %.',
+      to_char(case when c.same_day_booking_enabled then v_today else v_today + 1 end, 'DD Mon YYYY');
+  end if;
+
+  if v_same_day then
+    if not c.same_day_booking_enabled then
+      raise exception 'This clinic takes advance bookings only - the earliest you can book is %.',
+        to_char(v_today + 1, 'DD Mon YYYY');
+    end if;
+
+    -- A walk-in's "slot" is just the clock at the desk (see migration 36's
+    -- enforce_slot_capacity, which never counts a walk-in against slot
+    -- capacity either) - not a claim on a future time - so the cutoff, which
+    -- exists to stop a SPECIFIC slot being grabbed moments before it starts,
+    -- only applies to a genuine scheduled booking.
+    if new.patient_type = 'scheduled'
+       and (new.date + new.slot_time)::timestamp < v_now_local + make_interval(mins => c.same_day_cutoff_minutes)
+    then
+      raise exception 'SAME_DAY_CUTOFF: the % slot has already passed or is too soon - same-day booking closes % minutes before a slot starts.',
+        to_char(new.slot_time, 'HH12:MI AM'), c.same_day_cutoff_minutes;
+    end if;
+    -- Walk-ins fall through from here exactly like any other same-day
+    -- booking - the daily cap below still applies to them.
+  else
+    if new.patient_type = 'walk_in' then
+      raise exception 'This clinic is appointment-only - walk-ins are not accepted.';
+    end if;
+
+    if new.date > v_today + c.booking_horizon_days then
+      raise exception 'This clinic accepts bookings up to % day(s) ahead - the latest you can book is %.',
+        c.booking_horizon_days, to_char(v_today + c.booking_horizon_days, 'DD Mon YYYY');
+    end if;
+  end if;
+
+  -- Take the day's lock BEFORE counting. Two patients going for the last seat
+  -- serialise here: the second one waits, then counts a day that is now full.
+  insert into clinic_day_locks (clinic_id, date)
+  values (new.clinic_id, new.date)
+  on conflict (clinic_id, date) do update set updated_at = now();
+
+  select seats_taken, is_full into v_taken, v_full
+  from public.day_availability(new.clinic_id, new.date);
+
+  if coalesce(v_full, false) then
+    raise exception 'FULL_DAY: % is fully booked (% of % seats taken).',
+      to_char(new.date, 'DD Mon YYYY'), v_taken, c.daily_cap;
+  end if;
+
+  -- Inside the cap, so there is nothing to approve: the only question this
+  -- clinic asks of a booking is whether a seat exists.
+  if new.status = 'booked' then
+    new.status := 'accepted';
+  end if;
+
+  return new;
+end;
+$$;
+
+-- Trigger itself is unchanged (still named/sorted to fire first) - only the
+-- function body above changed, so no drop/create needed here.
+
+-- ----------------------------------------------------------------------------
+-- 37.4 Confirmed-present same-day bookings get their token immediately
+-- ----------------------------------------------------------------------------
+-- AFTER INSERT, not folded into 37.3's BEFORE INSERT trigger, and deliberately
+-- calling check_in_appointment() rather than re-implementing any part of it:
+-- the row needs a real id first, and this way the arrival-window rule, the
+-- token counter and the effective_order_time stamp are exactly the same code
+-- every other check-in path uses (sections 27/31) - not a second copy that
+-- could drift from it.
+--
+-- Wrapped in its own sub-transaction (the BEGIN/EXCEPTION block) so a
+-- check-in that check_in_appointment() would refuse anyway - most likely
+-- because the slot is still more than 60 minutes out - never fails the
+-- booking itself. The patient walks away with a valid accepted appointment
+-- either way; they just collect their token at the door instead of this
+-- instant, like any other same-day booking made without a location fix.
+create or replace function public.auto_checkin_verified_same_day()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c clinics;
+  v_now_local timestamp;
+begin
+  -- Only a genuine scheduled same-day booking is in scope. A walk-in is
+  -- already checked in by the time its row exists (WalkInForm calls
+  -- check_in_appointment() itself right after accepting it); an advance
+  -- booking for a future date has nothing to verify yet.
+  if new.patient_type <> 'scheduled' or new.status <> 'accepted' then
+    return new;
+  end if;
+
+  select * into c from clinics where id = new.clinic_id;
+  if c.id is null
+     or c.mode <> 'appointment_only'
+     or not c.same_day_booking_enabled
+     or not c.auto_checkin_verified_same_day
+  then
+    return new;
+  end if;
+
+  v_now_local := now() at time zone coalesce(c.timezone, 'Asia/Kolkata');
+  if new.date <> v_now_local::date then
+    return new;
+  end if;
+
+  -- No location fix to check against, or the clinic hasn't set its own
+  -- location yet - either way, presence is simply unverified, which is the
+  -- same as "not confirmed present". Falls through to a normal check-in
+  -- later, same as a booking made from home.
+  if new.booking_lat is null or new.booking_lng is null or c.lat is null or c.lng is null then
+    return new;
+  end if;
+
+  if public.distance_metres(new.booking_lat, new.booking_lng, c.lat, c.lng) > c.same_day_checkin_radius_m then
+    return new;
+  end if;
+
+  begin
+    -- 'patient_scan' - the same method self_check_in() (section 28.6) uses
+    -- for its own location-verified path; this is that same idea, just
+    -- confirmed at booking time instead of a separate scan afterwards.
+    perform public.check_in_appointment(new.id, 'patient_scan', false);
+  exception when others then
+    null;
+  end;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_appointment_auto_checkin_same_day on appointments;
+create trigger on_appointment_auto_checkin_same_day
+  after insert on appointments
+  for each row execute function public.auto_checkin_verified_same_day();
+
+-- ============================================================================
+-- 38. WALK-IN REGISTRATION: ONLY INTO A FREE SLOT
+-- ============================================================================
+-- Until now a walk-in was never actually checked against availability at
+-- all: enforce_slot_capacity() (section 36.4) explicitly skipped
+-- patient_type = 'walk_in', and the daily cap (section 33) only ever applied
+-- in appointment_only mode. A clinic's front desk could always add "one
+-- more" walk-in, no matter how full the doctor's slot grid or the day's cap
+-- already was - deliberately, at the time (see section 36.4's own comment:
+-- a walk-in's slot_time was just the clock at check-in, "not a claim on one
+-- of the doctor's bookable times").
+--
+-- This migration reverses that: registering a walk-in now has to claim a
+-- REAL open slot from the doctor's grid, at ANY clinic, in ANY mode -
+-- exactly like an advance booking - and is refused when nothing is free,
+-- the same "day full" / "slot full" way an advance booking already is:
+--   * The daily cap (day_availability(), section 33.3) now also gates a
+--     WALK-IN at an allow_walkins clinic, not just every booking at an
+--     appointment_only one. An advance/scheduled booking at an
+--     allow_walkins clinic is untouched - still unlimited, exactly as
+--     before. Only the walk-in-at-the-desk path gained a ceiling.
+--   * Slot capacity (enforce_slot_capacity(), section 36.4) now applies to a
+--     walk-in's booking too - the client picks the current-or-next open
+--     slot from the doctor's real grid (see findWalkInSlot() in
+--     src/lib/queue.ts) instead of stamping the literal clock, and the
+--     existing per-slot lock (doctor_slot_locks) makes the last-seat race
+--     just as safe for a walk-in as it already was for a scheduled booking.
+--   * The waitlist notification (section 33.5) is no longer appointment-only
+--     - ANY clinic's waitlist entries now hear about a freed seat, since a
+--     walk-in can now genuinely be turned away with "join the waitlist" as
+--     the offer, not just an appointment_only patient.
+--
+-- Everything else about a walk-in is unchanged: found by phone or MRN (MRN
+-- lookup is new below - phone lookup already existed, section 25), a new
+-- patient still gets an MRN exactly as before (section 18, "Part 40" in the
+-- product spec), and the moment the booking is accepted the desk still
+-- checks them in immediately and draws their token right there
+-- (WalkInForm.tsx's checkInNow - untouched, section 27).
+--
+-- Supersedes TESTING.md "Test 17" section F's old guarantee ("walk-ins
+-- never contend for slot capacity") - see "Test 19" for the new behaviour.
+
+-- ----------------------------------------------------------------------------
+-- 38.1 Slot capacity now applies to a walk-in too
+-- ----------------------------------------------------------------------------
+-- Identical to section 36.4 except the patient_type exemption is gone. A
+-- walk-in's slot_time is no longer the raw clock (see WalkInForm.tsx) - it's
+-- a real computed slot from the doctor's grid, so counting it here means
+-- exactly what it means for a scheduled booking: this exact slot_time's
+-- active bookings have reached its capacity.
+create or replace function public.enforce_slot_capacity()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_capacity int;
+  v_booked int;
+begin
+  -- Take the slot lock BEFORE counting - see 36.2.
+  insert into doctor_slot_locks (doctor_id, date, slot_time)
+  values (new.doctor_id, new.date, new.slot_time)
+  on conflict (doctor_id, date, slot_time) do update set updated_at = now();
+
+  v_capacity := public.slot_capacity_for(new.doctor_id, new.date, new.slot_time);
+
+  select count(*) into v_booked
+  from appointments
+  where doctor_id = new.doctor_id
+    and date = new.date
+    and slot_time = new.slot_time
+    and status not in ('cancelled', 'rejected');
+
+  if v_booked >= v_capacity then
+    raise exception 'SLOT_FULL: % on % is full (% of % taken) - pick another slot.',
+      to_char(new.slot_time, 'HH12:MI AM'), to_char(new.date, 'DD Mon YYYY'), v_booked, v_capacity;
+  end if;
+
+  return new;
+end;
+$$;
+
+-- Trigger itself is unchanged (still named/sorted the same) - only the
+-- function body above changed, so no drop/create needed here.
+
+-- ----------------------------------------------------------------------------
+-- 38.2 The daily cap now also gates a walk-in, at any clinic
+-- ----------------------------------------------------------------------------
+-- Identical to section 37.3 except the daily-cap block's guard widens from
+-- "appointment_only mode" to "appointment_only mode, OR this is a walk-in
+-- anywhere". Everything about appointment_only mode's own contract (the
+-- date-range gate, same-day cutoff, auto-accept) is completely unchanged -
+-- it still only runs when c.mode = 'appointment_only', so an allow_walkins
+-- clinic's SCHEDULED/advance bookings stay exactly as unlimited as before.
+create or replace function public.enforce_booking_policy()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c clinics;
+  v_today date;
+  v_now_local timestamp;
+  v_same_day boolean;
+  v_taken int;
+  v_full boolean;
+begin
+  select * into c from clinics where id = new.clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+
+  v_now_local := now() at time zone coalesce(c.timezone, 'Asia/Kolkata');
+  v_today := v_now_local::date;
+
+  if c.mode = 'appointment_only' then
+    v_same_day := (new.date = v_today);
+
+    if new.date < v_today then
+      raise exception 'This clinic takes advance bookings only - the earliest you can book is %.',
+        to_char(case when c.same_day_booking_enabled then v_today else v_today + 1 end, 'DD Mon YYYY');
+    end if;
+
+    if v_same_day then
+      if not c.same_day_booking_enabled then
+        raise exception 'This clinic takes advance bookings only - the earliest you can book is %.',
+          to_char(v_today + 1, 'DD Mon YYYY');
+      end if;
+
+      if new.patient_type = 'scheduled'
+         and (new.date + new.slot_time)::timestamp < v_now_local + make_interval(mins => c.same_day_cutoff_minutes)
+      then
+        raise exception 'SAME_DAY_CUTOFF: the % slot has already passed or is too soon - same-day booking closes % minutes before a slot starts.',
+          to_char(new.slot_time, 'HH12:MI AM'), c.same_day_cutoff_minutes;
+      end if;
+    else
+      if new.patient_type = 'walk_in' then
+        raise exception 'This clinic is appointment-only - walk-ins are not accepted.';
+      end if;
+
+      if new.date > v_today + c.booking_horizon_days then
+        raise exception 'This clinic accepts bookings up to % day(s) ahead - the latest you can book is %.',
+          c.booking_horizon_days, to_char(v_today + c.booking_horizon_days, 'DD Mon YYYY');
+      end if;
+    end if;
+  end if;
+
+  -- The daily cap: always enforced in appointment_only mode (as before, any
+  -- booking), and now ALSO for a walk-in at any clinic - see this
+  -- migration's header. A scheduled/advance booking at an allow_walkins
+  -- clinic never reaches this block, so stays uncapped exactly as before;
+  -- it still counts toward the total the way it always has, for whichever
+  -- OTHER booking (a walk-in) does check the cap.
+  if c.mode = 'appointment_only' or new.patient_type = 'walk_in' then
+    -- Take the day's lock BEFORE counting - see 33.2.
+    insert into clinic_day_locks (clinic_id, date)
+    values (new.clinic_id, new.date)
+    on conflict (clinic_id, date) do update set updated_at = now();
+
+    select seats_taken, is_full into v_taken, v_full
+    from public.day_availability(new.clinic_id, new.date);
+
+    if coalesce(v_full, false) then
+      raise exception 'FULL_DAY: % is fully booked (% of % seats taken).',
+        to_char(new.date, 'DD Mon YYYY'), v_taken, c.daily_cap;
+    end if;
+  end if;
+
+  -- Inside the cap, so there is nothing to approve - but only appointment_only
+  -- mode auto-accepts. A walk-in at an allow_walkins clinic still goes
+  -- through the desk's explicit accept step, exactly as before.
+  if c.mode = 'appointment_only' and new.status = 'booked' then
+    new.status := 'accepted';
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 38.3 The waitlist is no longer appointment-only
+-- ----------------------------------------------------------------------------
+-- Identical to section 33.5's version except the mode gate is gone - a
+-- walk-in can now genuinely be turned away from ANY clinic with "join the
+-- waitlist" as the offer (see WalkInForm.tsx), so that clinic's waitlist
+-- needs to actually fire when a seat frees up, the same way an
+-- appointment_only clinic's always has.
+create or replace function public.notify_waitlist_on_free_seat()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  w waitlist;
+  v_clinic clinics;
+begin
+  if new.status not in ('cancelled', 'rejected') or old.status = new.status then
+    return new;
+  end if;
+
+  select * into v_clinic from clinics where id = new.clinic_id;
+  if v_clinic.id is null then
+    return new;
+  end if;
+
+  select * into w
+  from waitlist
+  where clinic_id = new.clinic_id and date = new.date and status = 'waiting'
+  order by created_at
+  limit 1;
+
+  if w.id is null then
+    return new;
+  end if;
+
+  update waitlist set status = 'offered', offered_at = now() where id = w.id;
+
+  insert into notifications (user_id, type, message)
+  select f.account_id, 'waitlist_seat',
+         'A seat has opened up at ' || v_clinic.name || ' on '
+           || to_char(new.date, 'DD Mon YYYY') || '. Book now - it is first come, first served.'
+  from family_members f
+  where f.id = w.member_id;
+
+  return new;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 38.4 Finding an existing patient by MRN, for the walk-in desk
+-- ----------------------------------------------------------------------------
+-- Mirrors find_family_member_by_phone() (section 25) exactly, for the other
+-- half of "find the patient by phone / MRN" - a receptionist who already
+-- knows the patient's medical record number (from a card, a past visit
+-- slip) shouldn't have to fall back to a phone-number guess. Unlike the
+-- phone lookup, this is NOT "create if not found" from the caller's side -
+-- an MRN is supposed to name one specific existing patient, so the desk
+-- form treats "not found" as an error to fix (typo?) rather than a cue to
+-- register a new one under a number that was never actually theirs.
+create or replace function public.find_family_member_by_mrn(p_mrn text)
+returns table (id uuid, mrn text, name text, phone text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select fm.id, fm.mrn, fm.name, fm.phone
+  from family_members fm
+  where fm.mrn = trim(p_mrn)
+    and (public.is_clinic() or public.is_admin());
+$$;
