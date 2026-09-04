@@ -11,10 +11,10 @@ This app has no backend of its own — it talks to a Supabase project. Cloning t
 
 ```
 git clone https://github.com/nkricky31-del/sanjeevnios.git
-cd sanjeevnios/sanjeevnios-web
+cd sanjeevnios
 ```
 
-The GitHub repo is named `sanjeevnios`, but the actual web app lives in its `sanjeevnios-web/` subfolder — `cd` into that for everything below. There's also a `sanjeevnios/` Expo/React Native folder from an earlier prototype in the same repo — ignore it, it's not the active app.
+The GitHub repo is named `sanjeevnios` and the web app lives directly at its root — `package.json`, `src/`, `supabase/` etc. are all right there after cloning, no subfolder to `cd` into.
 
 ## 3. Install dependencies
 
