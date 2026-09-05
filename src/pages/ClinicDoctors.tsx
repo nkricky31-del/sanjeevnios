@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
 
 import AddDoctorForm from '../components/AddDoctorForm';
+import ClinicOnboardingScreen from '../components/ClinicOnboardingScreen';
 import DoctorAvailabilityForm from '../components/DoctorAvailabilityForm';
 import DoctorOnboardingScreen from '../components/DoctorOnboardingScreen';
-import DocumentChecklist from '../components/DocumentChecklist';
 import Card from '../components/ui/Card';
 import StatusPill from '../components/ui/StatusPill';
 import { supabase } from '../lib/supabaseClient';
-import type { Doctor, DoctorStatus } from '../lib/types';
+import type { Clinic, Doctor, DoctorStatus } from '../lib/types';
 
 interface Props {
-  clinicId: string;
+  clinic: Clinic;
+  onClinicSaved: (patch: Partial<Clinic>) => void;
 }
 
 const STATUS_TONE: Record<DoctorStatus, 'live' | 'warning' | 'neutral'> = {
@@ -27,12 +28,11 @@ const STATUS_LABEL: Record<DoctorStatus, string> = {
   rejected: 'Rejected',
 };
 
-export default function ClinicDoctors({ clinicId }: Props) {
+export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [expandedDoctorId, setExpandedDoctorId] = useState<string | null>(null);
-  const [showClinicDocs, setShowClinicDocs] = useState(false);
   const [onboardingDoctor, setOnboardingDoctor] = useState<{ id: string; name: string } | null>(null);
 
   const loadDoctors = async () => {
@@ -43,7 +43,7 @@ export default function ClinicDoctors({ clinicId }: Props) {
     const { data } = await supabase
       .from('doctors')
       .select('*')
-      .eq('clinic_id', clinicId)
+      .eq('clinic_id', clinic.id)
       .order('created_at', { ascending: true });
     setDoctors(data ?? []);
     setLoading(false);
@@ -52,7 +52,7 @@ export default function ClinicDoctors({ clinicId }: Props) {
   useEffect(() => {
     loadDoctors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clinicId]);
+  }, [clinic.id]);
 
   if (onboardingDoctor) {
     return (
@@ -69,17 +69,7 @@ export default function ClinicDoctors({ clinicId }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-slate-900">Clinic documents</h2>
-        <button onClick={() => setShowClinicDocs((s) => !s)} className="text-sm font-semibold text-brand-600">
-          {showClinicDocs ? 'Hide' : 'Show'}
-        </button>
-      </div>
-      {showClinicDocs && (
-        <div className="mt-2">
-          <DocumentChecklist ownerType="clinic" ownerId={clinicId} />
-        </div>
-      )}
+      <ClinicOnboardingScreen clinic={clinic} onClinicSaved={onClinicSaved} />
 
       <div className="mt-6 flex items-center justify-between">
         <h2 className="text-lg font-bold text-slate-900">Doctors</h2>
@@ -90,7 +80,7 @@ export default function ClinicDoctors({ clinicId }: Props) {
 
       {showAddForm && (
         <AddDoctorForm
-          clinicId={clinicId}
+          clinicId={clinic.id}
           onAdded={(doctorId) => {
             setShowAddForm(false);
             loadDoctors();

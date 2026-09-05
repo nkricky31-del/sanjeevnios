@@ -116,6 +116,7 @@ export default function DoctorPage() {
         {selectedDate && selectedSlot && (
           <BookingForm
             doctorId={doctor.id}
+            doctorName={doctor.name}
             clinicId={doctor.clinic_id}
             date={selectedDate}
             slotTime={selectedSlot}

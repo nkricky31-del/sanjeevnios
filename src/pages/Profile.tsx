@@ -28,8 +28,9 @@ import IconTile from '../components/ui/IconTile';
 import ScreenHeader from '../components/ui/ScreenHeader';
 import SectionTitle from '../components/ui/SectionTitle';
 import { useAuth } from '../lib/AuthContext';
+import { livePhoneDigits, normalizePhone } from '../lib/phone';
 import { supabase } from '../lib/supabaseClient';
-import type { FamilyMember } from '../lib/types';
+import type { FamilyMember, Gender } from '../lib/types';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
 const RELATION_LABEL: Record<string, string> = {
@@ -54,6 +55,21 @@ export default function Profile() {
   const [conditionsFor, setConditionsFor] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [stats, setStats] = useState({ appointments: 0, records: 0, labReports: 0, spent: 0 });
+
+  // Section 44 - the fields collected at onboarding, editable here afterward.
+  // Seeded from the 'self' family member once it loads (see the effect
+  // below), not from onboarding's own state - this screen is a completely
+  // separate, later visit.
+  const [dob, setDob] = useState('');
+  const [gender, setGender] = useState<Gender | ''>('');
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [pincode, setPincode] = useState('');
+  const [emergencyName, setEmergencyName] = useState('');
+  const [emergencyPhoneDigits, setEmergencyPhoneDigits] = useState('');
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [detailsSaved, setDetailsSaved] = useState(false);
 
   const loadMembers = async () => {
     setLoadingMembers(true);
@@ -93,6 +109,18 @@ export default function Profile() {
     setName(profile?.name ?? '');
   }, [profile?.name]);
 
+  const selfMember = members.find((m) => m.relation === 'self') ?? members[0];
+
+  useEffect(() => {
+    setDob(selfMember?.dob ?? '');
+    setGender((selfMember?.gender as Gender) ?? '');
+    setAddress(selfMember?.address ?? '');
+    setCity(selfMember?.city ?? '');
+    setPincode(selfMember?.pincode ?? '');
+    setEmergencyName(selfMember?.emergency_contact_name ?? '');
+    setEmergencyPhoneDigits(selfMember?.emergency_contact_phone ? selfMember.emergency_contact_phone.replace(/^91/, '') : '');
+  }, [selfMember?.id]);
+
   if (!session || !profile) return null;
 
   const saveName = async () => {
@@ -100,6 +128,48 @@ export default function Profile() {
     await supabase.from('profiles').update({ name: name.trim() || null }).eq('id', session.user.id);
     setSavingName(false);
     await refreshProfile();
+  };
+
+  // Section 44's onboarding fields, editable here afterward. Requires a
+  // 'self' member to already exist - true for anyone who reaches this screen
+  // post-onboarding, but a pre-migration-44 account with no family members
+  // at all would need to add one under "My Family" first (same message
+  // Medical Information already shows for that case).
+  const saveDetails = async () => {
+    setDetailsError(null);
+    setDetailsSaved(false);
+    if (!selfMember) {
+      setDetailsError('Add yourself under "My Family" first.');
+      return;
+    }
+    if (pincode && !/^\d{6}$/.test(pincode)) {
+      setDetailsError('Pincode must be 6 digits.');
+      return;
+    }
+    if (emergencyPhoneDigits && emergencyPhoneDigits.length !== 10) {
+      setDetailsError('Emergency contact phone must be 10 digits.');
+      return;
+    }
+    setSavingDetails(true);
+    const { error } = await supabase
+      .from('family_members')
+      .update({
+        dob: dob || null,
+        gender: gender || null,
+        address: address.trim() || null,
+        city: city.trim() || null,
+        pincode: pincode.trim() || null,
+        emergency_contact_name: emergencyName.trim() || null,
+        emergency_contact_phone: emergencyPhoneDigits ? normalizePhone(emergencyPhoneDigits) : null,
+      })
+      .eq('id', selfMember.id);
+    setSavingDetails(false);
+    if (error) {
+      setDetailsError(error.message);
+      return;
+    }
+    setDetailsSaved(true);
+    loadMembers();
   };
 
   const signOut = () => supabase.auth.signOut();
@@ -115,8 +185,6 @@ export default function Profile() {
       </div>
     );
   }
-
-  const selfMember = members.find((m) => m.relation === 'self') ?? members[0];
 
   return (
     <div>
@@ -195,6 +263,103 @@ export default function Profile() {
                     {selfMember.mrn}
                   </button>
                 </>
+              )}
+
+              {selfMember ? (
+                <div className="mt-4 space-y-3 border-t border-slate-200 pt-4">
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <label className="text-xs font-bold text-slate-700">Date of birth</label>
+                      <input
+                        type="date"
+                        value={dob}
+                        onChange={(e) => setDob(e.target.value)}
+                        max={new Date().toISOString().slice(0, 10)}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs font-bold text-slate-700">Sex</label>
+                      <select
+                        value={gender}
+                        onChange={(e) => setGender(e.target.value as Gender)}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                      >
+                        <option value="">—</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700">Address</label>
+                    <input
+                      type="text"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <label className="text-xs font-bold text-slate-700">City</label>
+                      <input
+                        type="text"
+                        value={city}
+                        onChange={(e) => setCity(e.target.value)}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <label className="text-xs font-bold text-slate-700">Pincode</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={pincode}
+                        onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700">Emergency contact name</label>
+                    <input
+                      type="text"
+                      value={emergencyName}
+                      onChange={(e) => setEmergencyName(e.target.value)}
+                      className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700">Emergency contact phone</label>
+                    <div className="mt-1 flex items-center rounded-2xl border border-slate-200 bg-white focus-within:ring-2 focus-within:ring-brand-500">
+                      <span className="pl-3 text-sm text-slate-500">+91</span>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={10}
+                        value={emergencyPhoneDigits}
+                        onChange={(e) => setEmergencyPhoneDigits(livePhoneDigits(e.target.value))}
+                        className="w-full rounded-lg px-2 py-2 text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {detailsError && <p className="text-sm text-red-600">{detailsError}</p>}
+                  {detailsSaved && !detailsError && <p className="text-xs font-medium text-emerald-600">Saved.</p>}
+                  <Button onClick={saveDetails} disabled={savingDetails}>
+                    {savingDetails ? 'Saving...' : 'Save details'}
+                  </Button>
+                </div>
+              ) : (
+                <p className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-500">
+                  Add yourself under "My Family" first.
+                </p>
               )}
             </div>
           )}

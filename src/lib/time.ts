@@ -20,6 +20,28 @@ export function formatTimeLabel(t: string): string {
   return `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
 }
 
+// Rolls a "HH:MM:SS" time back by some number of minutes, wrapping around
+// midnight.
+export function minutesBefore(t: string, minutes: number): string {
+  const wrapped = ((timeToMinutes(t) - minutes) % 1440 + 1440) % 1440;
+  return minutesToTime(wrapped);
+}
+
+// The system-wide check-in window (schema.sql's check_in_appointment():
+// check-in opens 60 minutes before the slot, hardcoded there) - the ceiling
+// a clinic's reporting-time buffer is clamped to, so "when to report" can
+// never land before check-in is even possible. See migration_40_reporting_time.sql.
+export const CHECK_IN_WINDOW_MINUTES = 60;
+
+// A booked slot's reporting time under a clinic's report_before_minutes
+// setting, clamped to CHECK_IN_WINDOW_MINUTES. This is also computed
+// server-side (get_checkin_options()) for display - this copy is for call
+// sites that only have the clinic's raw setting on hand (e.g. the clinic's
+// own accept action) and can't afford an extra round trip.
+export function reportingTimeFor(slotTime: string, reportBeforeMinutes: number): string {
+  return minutesBefore(slotTime, Math.min(reportBeforeMinutes, CHECK_IN_WINDOW_MINUTES));
+}
+
 // Turns a doctor's weekly availability windows into the actual bookable slot
 // times patients pick from: each window's [start_time, end_time) range is
 // divided into exactly max_patients_per_day evenly-spaced slots. A window

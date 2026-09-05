@@ -17,7 +17,7 @@ interface Stats {
 }
 
 const EMPTY_STATS: Stats = {
-  clinicsByStatus: { pending: 0, approved: 0, rejected: 0 },
+  clinicsByStatus: { draft: 0, pending: 0, approved: 0, rejected: 0 },
   doctorCount: 0,
   patientCount: 0,
   appointmentsToday: 0,
@@ -42,7 +42,7 @@ export default function AdminDashboard() {
         supabase.from('payments').select('amount').eq('status', 'captured').eq('method', 'online'),
       ]);
 
-    const clinicsByStatus: Record<ClinicStatus, number> = { pending: 0, approved: 0, rejected: 0 };
+    const clinicsByStatus: Record<ClinicStatus, number> = { draft: 0, pending: 0, approved: 0, rejected: 0 };
     for (const c of clinicStatuses ?? []) {
       const status = c.status as ClinicStatus;
       clinicsByStatus[status] = (clinicsByStatus[status] ?? 0) + 1;

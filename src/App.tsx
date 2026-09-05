@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
 
 import PatientDeclarationGate from './components/PatientDeclarationGate';
+import PatientOnboardingGate from './components/PatientOnboardingGate';
 import EncounterDetail from './components/EncounterDetail';
 import NotificationsList from './components/NotificationsList';
 import BottomTabBar from './components/ui/BottomTabBar';
@@ -145,24 +146,26 @@ export default function App() {
   }
 
   return (
-    <PatientDeclarationGate>
-      <div className="min-h-screen bg-canvas pb-24">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/search" element={<Search />} />
-          <Route path="/doctors/:doctorId" element={<DoctorPage />} />
-          <Route path="/bookings" element={<MyBookings />} />
-          <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
-          <Route path="/bookings/:appointmentId/pass" element={<BookingPass />} />
-          <Route path="/records" element={<Records />} />
-          <Route path="/payments" element={<Payments />} />
-          {/* Kept so old links/bookmarks to the timeline still land somewhere. */}
-          <Route path="/timeline" element={<Records />} />
-          <Route path="/profile" element={<Profile />} />
-        </Routes>
-        <PlatformFooterNote />
-        <BottomTabBar />
-      </div>
-    </PatientDeclarationGate>
+    <PatientOnboardingGate>
+      <PatientDeclarationGate>
+        <div className="min-h-screen bg-canvas pb-24">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/search" element={<Search />} />
+            <Route path="/doctors/:doctorId" element={<DoctorPage />} />
+            <Route path="/bookings" element={<MyBookings />} />
+            <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
+            <Route path="/bookings/:appointmentId/pass" element={<BookingPass />} />
+            <Route path="/records" element={<Records />} />
+            <Route path="/payments" element={<Payments />} />
+            {/* Kept so old links/bookmarks to the timeline still land somewhere. */}
+            <Route path="/timeline" element={<Records />} />
+            <Route path="/profile" element={<Profile />} />
+          </Routes>
+          <PlatformFooterNote />
+          <BottomTabBar />
+        </div>
+      </PatientDeclarationGate>
+    </PatientOnboardingGate>
   );
 }

@@ -6220,3 +6220,1456 @@ as $$
   where fm.mrn = trim(p_mrn)
     and (public.is_clinic() or public.is_admin());
 $$;
+
+-- ============================================================================
+-- 39. TWO-STEP CONFIRMATION: PATIENT NOTIFICATIONS
+-- ============================================================================
+-- A booking is a REQUEST until the clinic accepts it. Until now the two
+-- halves of that were only half-wired:
+--   * BookingForm.tsx already inserted a payments row with status = 'hold'
+--     for an online payment (or 'pending' for COD) the moment a booking was
+--     created - but nothing ever told the patient that had happened, and
+--     nothing ever moved that hold to 'captured'. handle_appointment_status_
+--     change() used to do the capture on accept (see its very first version,
+--     section 5), but section 30.4 removed that step on the theory that
+--     appointments.payment_status already said 'paid_online' from booking
+--     time, so "there was nothing left to flip." That left the payments
+--     ledger - the thing payouts.ts and AdminPayments.tsx actually sum over -
+--     permanently stuck on 'hold' for every online booking, captured or not.
+--   * Rejecting a booking already auto-refunded a real hold via the same
+--     trigger, but the message shown to the patient (RejectAppointmentForm.tsx)
+--     never said so, and the refund step also fired for a COD payment that
+--     was still sitting at 'pending' - i.e. never actually collected - which
+--     would misrepresent an uncollected desk payment as one that was taken
+--     back.
+--
+-- This migration:
+--   1. Restores capture-on-accept, but ONLY on the payments ledger (status:
+--      'hold' -> 'captured') - appointments.payment_status is left exactly
+--      as section 30.4 set it, since same-day auto-checkin, fast-checkin and
+--      the extended reschedule window (sections 32, 37) all key off it
+--      staying 'paid_online' from the moment of booking and none of that
+--      changes here.
+--   2. Narrows the auto-refund-on-reject/cancel step to real money movements
+--      only (hold/captured), leaving an untouched COD 'pending' row alone.
+--   3. Adds a `channel` column to notifications (in_app / whatsapp / sms) -
+--      the SAME table every existing notice already uses, just able to now
+--      record which wire a message actually went out on.
+--   4. Adds a partial unique index + a log_notification() RPC that upserts
+--      against it, so the three one-shot lifecycle notices this flow sends
+--      (booking_received, appointment_confirmed, appointment_rejected) can
+--      never be duplicated - by a double-tap on Accept/Reject, a retried
+--      request, or two clinic staff acting on the same booking at once -
+--      while every other existing notification type (reminders, check-in,
+--      queue alerts) is untouched and keeps inserting normally.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 39.1 Capture on accept, refund only real holds
+-- ----------------------------------------------------------------------------
+create or replace function public.handle_appointment_status_change()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status = 'accepted' and old.status is distinct from 'accepted' then
+    update payments set status = 'captured'
+    where appointment_id = new.id and status = 'hold';
+  end if;
+
+  if new.status in ('rejected', 'cancelled') and old.status is distinct from new.status then
+    if new.payment_status = 'paid_online' then
+      new.payment_status := 'refunded';
+    end if;
+    -- 'pending' (an uncollected COD payment) is deliberately excluded here -
+    -- see this migration's header.
+    update payments set status = 'refunded'
+    where appointment_id = new.id and status in ('hold', 'captured');
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 39.2 notifications.channel - which wire a message went out on
+-- ----------------------------------------------------------------------------
+alter table notifications add column if not exists channel text not null default 'in_app';
+alter table notifications drop constraint if exists notifications_channel_check;
+alter table notifications add constraint notifications_channel_check
+  check (channel in ('in_app', 'whatsapp', 'sms'));
+
+-- ----------------------------------------------------------------------------
+-- 39.3 De-duplication for the three one-shot lifecycle notices
+-- ----------------------------------------------------------------------------
+-- Only these three types are covered - a reminder or queue alert can (and
+-- should) still fire more than once per appointment.
+create unique index if not exists notifications_lifecycle_dedup_idx
+  on notifications (appointment_id, type, channel)
+  where appointment_id is not null
+    and type in ('booking_received', 'appointment_confirmed', 'appointment_rejected');
+
+-- security definer so a clinic can log a notice addressed to the patient
+-- (same ownership chain notifications_insert already allows), and so the
+-- caller - clinic or patient - never needs SELECT access to someone else's
+-- notifications row just to learn whether its own insert was new or a
+-- duplicate skipped by the index above.
+create or replace function public.log_notification(
+  p_user_id uuid,
+  p_appointment_id uuid,
+  p_type text,
+  p_channel text,
+  p_message text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_rows int;
+begin
+  if not (
+    public.is_admin()
+    or p_user_id = auth.uid()
+    or (
+      p_appointment_id is not null
+      and exists (
+        select 1 from appointments a
+        where a.id = p_appointment_id and public.is_own_clinic(a.clinic_id)
+      )
+    )
+  ) then
+    raise exception 'Not allowed to notify this user.';
+  end if;
+
+  insert into notifications (user_id, appointment_id, type, channel, message)
+  values (p_user_id, p_appointment_id, p_type, p_channel, p_message)
+  on conflict (appointment_id, type, channel)
+    where appointment_id is not null
+      and type in ('booking_received', 'appointment_confirmed', 'appointment_rejected')
+  do nothing;
+
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
+end;
+$$;
+
+-- ============================================================================
+-- 40. REPORTING TIME
+-- ============================================================================
+-- Every accepted appointment now carries a reporting time - when the patient
+-- should aim to reach the clinic, distinct from the slot time itself. It is
+-- guidance only: the token is still assigned at check-in, in arrival order
+-- (check_in_appointment(), section 27), and served in fair order (section
+-- 31). Arriving at the reporting time does not by itself create a token, and
+-- nothing here changes when check-in is allowed to happen.
+--
+--   1. clinics.report_before_minutes - a per-clinic setting, default 30.
+--   2. get_checkin_options() (section 32.4) now also returns reporting_time,
+--      computed as slot_time - least(report_before_minutes, 60). The clamp
+--      to 60 keeps the reporting time from ever falling before check-in
+--      even opens (check_in_appointment() refuses check-in earlier than
+--      slot_time - 60 minutes, hardcoded there - see this migration's
+--      header). A clinic that sets report_before_minutes above 60 still
+--      sees its own setting reflected honestly wherever it's edited; only
+--      the derived reporting time is capped.
+--   3. notifications' one-shot dedup (migration 39) is widened to cover a
+--      fourth type, reporting_time_reminder - the single "reporting time is
+--      approaching" nudge (src/pages/BookingStatus.tsx), so it can never be
+--      sent more than once per appointment either.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 40.1 The clinic setting
+-- ----------------------------------------------------------------------------
+alter table clinics add column if not exists report_before_minutes int not null default 30;
+alter table clinics drop constraint if exists clinics_report_before_minutes_check;
+alter table clinics add constraint clinics_report_before_minutes_check
+  check (report_before_minutes > 0);
+
+-- ----------------------------------------------------------------------------
+-- 40.2 get_checkin_options() - hand back the derived, clamped reporting time
+-- ----------------------------------------------------------------------------
+-- A new OUT column changes the function's row type, which create-or-replace
+-- refuses outright ("cannot change return type of existing function") - drop
+-- it first. Safe here: nothing else in the database calls this function (it
+-- has no triggers depending on it, and callers below are only ever the app,
+-- which re-resolves the function by name on its next call).
+drop function if exists public.get_checkin_options(uuid);
+create function public.get_checkin_options(p_appointment_id uuid)
+returns table (
+  can_self_check_in boolean,
+  requires_location boolean,
+  paid_online boolean,
+  reschedule_window_hours int,
+  reporting_time time
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  a appointments;
+  c clinics;
+  v_paid boolean;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_mrn(a.member_id) or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your booking.';
+  end if;
+
+  select * into c from clinics where id = a.clinic_id;
+  v_paid := (a.payment_status = 'paid_online');
+
+  return query select
+    (c.self_checkin_enabled or (c.fast_checkin_paid_online and v_paid)),
+    c.self_checkin_require_location,
+    v_paid,
+    case when v_paid then c.reschedule_window_hours_paid_online else c.reschedule_window_hours end,
+    a.slot_time - make_interval(mins => least(c.report_before_minutes, 60));
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 40.3 Widen the lifecycle dedup to cover the reporting-time reminder too
+-- ----------------------------------------------------------------------------
+drop index if exists notifications_lifecycle_dedup_idx;
+create unique index notifications_lifecycle_dedup_idx
+  on notifications (appointment_id, type, channel)
+  where appointment_id is not null
+    and type in (
+      'booking_received', 'appointment_confirmed', 'appointment_rejected', 'reporting_time_reminder'
+    );
+
+create or replace function public.log_notification(
+  p_user_id uuid,
+  p_appointment_id uuid,
+  p_type text,
+  p_channel text,
+  p_message text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_rows int;
+begin
+  if not (
+    public.is_admin()
+    or p_user_id = auth.uid()
+    or (
+      p_appointment_id is not null
+      and exists (
+        select 1 from appointments a
+        where a.id = p_appointment_id and public.is_own_clinic(a.clinic_id)
+      )
+    )
+  ) then
+    raise exception 'Not allowed to notify this user.';
+  end if;
+
+  insert into notifications (user_id, appointment_id, type, channel, message)
+  values (p_user_id, p_appointment_id, p_type, p_channel, p_message)
+  on conflict (appointment_id, type, channel)
+    where appointment_id is not null
+      and type in (
+        'booking_received', 'appointment_confirmed', 'appointment_rejected', 'reporting_time_reminder'
+      )
+  do nothing;
+
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
+end;
+$$;
+
+-- ============================================================================
+-- 41. PATIENT PAYMENT AT CHECKOUT - COUPONS + REAL RAZORPAY (authorize/capture)
+-- ============================================================================
+-- Two things land together because they touch the exact same money path:
+--
+-- COUPONS
+--   * coupons - the catalog. Never directly readable by the app (RLS locks
+--     it to admin) - a patient can only ever learn whether a code works
+--     through reserve_coupon() below, which is the literal "validate on the
+--     server, never in the app" requirement.
+--   * coupon_redemptions - a reserve -> confirm/release ledger, exactly
+--     mirroring the hold -> captured/refunded lifecycle payments already has:
+--       - reserve_coupon() inserts a 'reserved' row the moment the patient
+--         taps Apply, appointment_id still null (no booking exists yet).
+--       - create_payment_with_coupon() links appointment_id once the
+--         booking is actually created, and independently RE-DERIVES the
+--         discount from the doctor's real fee - the reservation's own
+--         figure (computed from whatever gross the client claimed at Apply
+--         time) is a preview only, never trusted for the real charge.
+--       - handle_appointment_status_change() confirms it on accept
+--         (payment captured) or releases it on reject/cancel, same trigger
+--         that already drives the payment hold's own capture/refund.
+--       - An unlinked reservation (appointment_id still null) simply stops
+--         counting toward "already used" / the global cap after 15 minutes
+--         - the "abandoned" case releases itself with no cron job needed.
+--
+-- RAZORPAY (authorize now, capture on Accept, per Part 46's hold model)
+--   * payments gains gross_amount / coupon_code / discount_amount /
+--     net_amount / funded_by / razorpay_order_id / razorpay_payment_id.
+--     `amount` keeps meaning exactly what it always has (the real
+--     transactional figure - equal to net_amount) so payouts.ts and
+--     AdminPayments.tsx keep working unmodified.
+--   * The actual "hold" is a Razorpay order created with payment_capture: 0
+--     (authorize-only) - see supabase/functions/razorpay-create-order. The
+--     "capture" is a real Razorpay API call the clinic's Accept action makes
+--     (supabase/functions/razorpay-capture-payment) BEFORE this trigger ever
+--     flips payments.status locally - see ClinicQueue.tsx's acceptAppointment.
+--   * Reject needs no Razorpay API call at all: an authorized-but-never-
+--     captured payment auto-releases on Razorpay's side within days on its
+--     own, which is functionally a refund from the patient's perspective -
+--     the existing local "flip payments.status to refunded" bookkeeping
+--     already reflects that correctly without a network call.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 41.1 Coupons catalog + redemption ledger
+-- ----------------------------------------------------------------------------
+create table if not exists coupons (
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique,
+  discount_type text not null check (discount_type in ('flat', 'percent')),
+  discount_value numeric not null check (discount_value > 0),
+  -- Caps a percent discount's rupee value; meaningless (and ignored) for a
+  -- flat discount.
+  max_discount_amount numeric check (max_discount_amount is null or max_discount_amount > 0),
+  min_order_amount numeric not null default 0,
+  -- Total number of successful uses this code will ever grant; null = unlimited.
+  max_redemptions int check (max_redemptions is null or max_redemptions > 0),
+  one_per_patient boolean not null default true,
+  -- Who eats the discount - see payouts.ts: 'platform' leaves the clinic's
+  -- payout on the full gross fee (the platform's own margin absorbs it);
+  -- 'clinic' reduces what the clinic is owed by the discount amount.
+  funded_by text not null default 'platform' check (funded_by in ('platform', 'clinic')),
+  active boolean not null default true,
+  expires_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists coupon_redemptions (
+  id uuid primary key default gen_random_uuid(),
+  coupon_id uuid not null references coupons (id) on delete cascade,
+  -- Null from the moment reserve_coupon() creates this row (Apply time) until
+  -- create_payment_with_coupon() links it to the real booking.
+  appointment_id uuid references appointments (id) on delete cascade,
+  patient_account_id uuid not null references profiles (id) on delete cascade,
+  discount_amount numeric not null,
+  status text not null default 'reserved' check (status in ('reserved', 'confirmed', 'released')),
+  reserved_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists coupon_redemptions_coupon_patient_idx
+  on coupon_redemptions (coupon_id, patient_account_id, status);
+
+alter table coupons enable row level security;
+alter table coupon_redemptions enable row level security;
+
+-- coupons: nobody reads this from the app directly - see this migration's
+-- header. Only admin manages the catalog (via SQL for now, same as several
+-- other clinic-level settings in this project).
+drop policy if exists "coupons_select" on coupons;
+create policy "coupons_select" on coupons for select using (public.is_admin());
+drop policy if exists "coupons_write" on coupons;
+create policy "coupons_write" on coupons for all using (public.is_admin());
+
+-- coupon_redemptions: same ownership chain as payments - the patient who
+-- holds it, the clinic once it's linked to one of their appointments, admin.
+-- No insert/update/delete policy at all: every write goes through a
+-- security-definer function below (or the trigger), which is deliberate -
+-- a coupon's discount must never be something the client can just insert.
+drop policy if exists "coupon_redemptions_select" on coupon_redemptions;
+create policy "coupon_redemptions_select" on coupon_redemptions for select
+  using (
+    public.is_admin()
+    or patient_account_id = auth.uid()
+    or (
+      appointment_id is not null
+      and exists (
+        select 1 from appointments a
+        where a.id = coupon_redemptions.appointment_id and public.is_own_clinic(a.clinic_id)
+      )
+    )
+  );
+
+-- ----------------------------------------------------------------------------
+-- 41.2 payments - the extra accounting columns
+-- ----------------------------------------------------------------------------
+alter table payments add column if not exists gross_amount numeric;
+alter table payments add column if not exists coupon_code text;
+alter table payments add column if not exists discount_amount numeric not null default 0;
+alter table payments add column if not exists net_amount numeric;
+alter table payments add column if not exists funded_by text check (funded_by is null or funded_by in ('platform', 'clinic'));
+alter table payments add column if not exists razorpay_order_id text;
+alter table payments add column if not exists razorpay_payment_id text;
+
+-- ----------------------------------------------------------------------------
+-- 41.3 reserve_coupon() - the Apply button. Validates AND reserves in one
+-- atomic step (the spec's "reserve the coupon use when applied").
+-- ----------------------------------------------------------------------------
+create or replace function public.reserve_coupon(p_code text, p_gross_amount numeric)
+returns table (valid boolean, reason text, discount_amount numeric, net_amount numeric, redemption_id uuid)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_coupon coupons;
+  v_uid uuid := auth.uid();
+  v_discount numeric;
+  v_confirmed_count int;
+  v_live_count int;
+  v_global_live_count int;
+  v_redemption_id uuid;
+begin
+  if v_uid is null then
+    return query select false, 'You must be signed in to apply a coupon.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+
+  select * into v_coupon from coupons where code = upper(trim(p_code));
+  if v_coupon.id is null or not v_coupon.active then
+    return query select false, 'This code is not valid.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+  if v_coupon.expires_at is not null and v_coupon.expires_at < now() then
+    return query select false, 'This code has expired.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+  if p_gross_amount < v_coupon.min_order_amount then
+    return query select false,
+      format('This code needs a minimum order of Rs.%s.', v_coupon.min_order_amount)::text,
+      0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+
+  if v_coupon.one_per_patient then
+    select count(*) into v_confirmed_count
+    from coupon_redemptions
+    where coupon_id = v_coupon.id and patient_account_id = v_uid and status = 'confirmed';
+    if v_confirmed_count > 0 then
+      return query select false, 'You have already used this code.'::text, 0::numeric, p_gross_amount, null::uuid;
+      return;
+    end if;
+
+    -- A still-live reservation (linked to a real booking, or unlinked but
+    -- inside the 15-minute abandonment window) blocks a second Apply of the
+    -- same code while the first is still in flight.
+    select count(*) into v_live_count
+    from coupon_redemptions
+    where coupon_id = v_coupon.id and patient_account_id = v_uid and status = 'reserved'
+      and (appointment_id is not null or reserved_at > now() - interval '15 minutes');
+    if v_live_count > 0 then
+      return query select false, 'This code is already applied to a booking you have in progress.'::text, 0::numeric, p_gross_amount, null::uuid;
+      return;
+    end if;
+  end if;
+
+  if v_coupon.max_redemptions is not null then
+    select count(*) into v_global_live_count
+    from coupon_redemptions
+    where coupon_id = v_coupon.id
+      and (
+        status = 'confirmed'
+        or (status = 'reserved' and (appointment_id is not null or reserved_at > now() - interval '15 minutes'))
+      );
+    if v_global_live_count >= v_coupon.max_redemptions then
+      return query select false, 'This code has already been fully used.'::text, 0::numeric, p_gross_amount, null::uuid;
+      return;
+    end if;
+  end if;
+
+  v_discount := case v_coupon.discount_type
+    when 'flat' then v_coupon.discount_value
+    else round(p_gross_amount * v_coupon.discount_value / 100.0, 2)
+  end;
+  if v_coupon.max_discount_amount is not null then
+    v_discount := least(v_discount, v_coupon.max_discount_amount);
+  end if;
+  v_discount := least(v_discount, p_gross_amount - 1); -- never discount to zero or negative
+
+  insert into coupon_redemptions (coupon_id, patient_account_id, discount_amount, status)
+  values (v_coupon.id, v_uid, v_discount, 'reserved')
+  returning id into v_redemption_id;
+
+  return query select true, null::text, v_discount, (p_gross_amount - v_discount), v_redemption_id;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 41.4 release_coupon_redemption() - "Remove" in the UI, and BookingForm's
+-- own cleanup path when a reservation was made but the booking never went
+-- through (slot filled, payment insert failed, Razorpay checkout abandoned).
+-- ----------------------------------------------------------------------------
+create or replace function public.release_coupon_redemption(p_redemption_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update coupon_redemptions
+  set status = 'released'
+  where id = p_redemption_id and patient_account_id = auth.uid() and status = 'reserved';
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 41.5 create_payment_with_coupon() - the actual charge. Replaces
+-- BookingForm.tsx's old plain `insert into payments`: this is where the
+-- gross amount is looked up server-side (the doctor's real consultation_fee
+-- - never trusted from the client) and the coupon math is independently
+-- re-run against it, so nothing a client claimed at Apply time is ever
+-- trusted for the real total.
+-- ----------------------------------------------------------------------------
+create or replace function public.create_payment_with_coupon(
+  p_appointment_id uuid,
+  p_method text,
+  p_redemption_id uuid default null
+)
+returns table (payment_id uuid, gross_amount numeric, discount_amount numeric, net_amount numeric)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  a appointments;
+  v_fee numeric;
+  v_convenience numeric;
+  v_gross numeric;
+  v_discount numeric := 0;
+  v_net numeric;
+  v_redemption coupon_redemptions;
+  v_coupon coupons;
+  v_funded_by text;
+  v_coupon_code text;
+  v_payment_id uuid;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_member(a.member_id) or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your booking.';
+  end if;
+  if exists (select 1 from payments where appointment_id = p_appointment_id) then
+    raise exception 'A payment already exists for this appointment.';
+  end if;
+  if p_method not in ('online', 'cod') then
+    raise exception 'Invalid payment method.';
+  end if;
+
+  select consultation_fee into v_fee from doctors where id = a.doctor_id;
+  -- Flat platform convenience fee, online payments only (there is no
+  -- gateway to charge a fee for on a cash-at-clinic booking). Kept as a
+  -- literal here rather than a table so it stays a single, obvious number -
+  -- see src/lib/billing.ts's PLATFORM_CONVENIENCE_FEE, which this must match.
+  v_convenience := case when p_method = 'online' then 10 else 0 end;
+  v_gross := v_fee + v_convenience;
+
+  if p_redemption_id is not null then
+    select * into v_redemption from coupon_redemptions where id = p_redemption_id;
+    if v_redemption.id is null or v_redemption.patient_account_id <> auth.uid() or v_redemption.status <> 'reserved' then
+      raise exception 'This coupon is no longer applied - please re-apply it.';
+    end if;
+    if v_redemption.reserved_at < now() - interval '15 minutes' then
+      raise exception 'Your coupon reservation expired - please re-apply it.';
+    end if;
+
+    select * into v_coupon from coupons where id = v_redemption.coupon_id;
+    -- Defense in depth: re-check the facts that could have changed, or been
+    -- misrepresented by the client's gross_amount, since reserve_coupon() ran.
+    if not v_coupon.active or (v_coupon.expires_at is not null and v_coupon.expires_at < now()) then
+      raise exception 'This coupon is no longer valid.';
+    end if;
+    if v_gross < v_coupon.min_order_amount then
+      raise exception 'This coupon needs a minimum order of Rs.%.', v_coupon.min_order_amount;
+    end if;
+
+    v_discount := case v_coupon.discount_type
+      when 'flat' then v_coupon.discount_value
+      else round(v_gross * v_coupon.discount_value / 100.0, 2)
+    end;
+    if v_coupon.max_discount_amount is not null then
+      v_discount := least(v_discount, v_coupon.max_discount_amount);
+    end if;
+    v_discount := least(v_discount, v_gross - 1);
+    v_coupon_code := v_coupon.code;
+    v_funded_by := v_coupon.funded_by;
+
+    update coupon_redemptions
+    set appointment_id = p_appointment_id, discount_amount = v_discount
+    where id = p_redemption_id;
+  end if;
+
+  v_net := v_gross - v_discount;
+
+  insert into payments (appointment_id, amount, method, status, gross_amount, coupon_code, discount_amount, net_amount, funded_by)
+  values (
+    p_appointment_id,
+    v_net,
+    p_method,
+    case when p_method = 'online' then 'hold' else 'pending' end,
+    v_gross,
+    v_coupon_code,
+    v_discount,
+    v_net,
+    v_funded_by
+  )
+  returning id into v_payment_id;
+
+  return query select v_payment_id, v_gross, v_discount, v_net;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 41.6 Confirm/release the coupon redemption on the same status change that
+-- already captures/refunds the payment.
+-- ----------------------------------------------------------------------------
+create or replace function public.handle_appointment_status_change()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status = 'accepted' and old.status is distinct from 'accepted' then
+    update payments set status = 'captured' where appointment_id = new.id and status = 'hold';
+    update coupon_redemptions set status = 'confirmed' where appointment_id = new.id and status = 'reserved';
+  end if;
+
+  if new.status in ('rejected', 'cancelled') and old.status is distinct from new.status then
+    if new.payment_status = 'paid_online' then
+      new.payment_status := 'refunded';
+    end if;
+    update payments set status = 'refunded' where appointment_id = new.id and status in ('hold', 'captured');
+    update coupon_redemptions set status = 'released' where appointment_id = new.id and status = 'reserved';
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ============================================================================
+-- 42. COUPON ENGINE - DATA + VALIDATION
+-- ============================================================================
+-- Evolves the coupons/coupon_redemptions tables and reserve_coupon() from
+-- migration 41 into the richer shape asked for here, in place - not a
+-- second, parallel coupon system. Existing rows (including any coupon
+-- already created and used while testing migration 41/42) carry forward:
+-- column renames preserve data, and times_used is backfilled from the real
+-- redemption history rather than starting back at zero.
+--
+--   * coupons gains: description, valid_from (valid_to is the renamed
+--     expires_at), per_user_limit (replaces the one_per_patient boolean -
+--     a real number now, not just yes/no), total_limit (renamed from
+--     max_redemptions) + a maintained times_used counter, applies_to (only
+--     'app_booking' is ever produced by this app today - see
+--     validate_and_price()'s own comment on why it's still checked), and
+--     clinic_id (null = valid at every clinic; set = restricted to one).
+--   * coupon_redemptions.patient_account_id is renamed to patient_id -
+--     still profiles(id), the ACCOUNT holder, not a specific family member.
+--     Tying a limit to the account rather than to whichever dependent is
+--     being booked for is deliberate: otherwise "one per patient" could be
+--     defeated just by adding another family member under the same login.
+--   * validate_and_price(code, patient_id, clinic_id, gross_amount) replaces
+--     reserve_coupon() as the ONE entry point: validates AND reserves in the
+--     same atomic step, returning a machine-readable reason_code (plus a
+--     human `reason`) instead of only a sentence. It takes an explicit
+--     patient_id/clinic_id (rather than assuming auth.uid()) so a clinic can
+--     apply a coupon on a patient's behalf later (e.g. a desk-assisted
+--     booking), while still requiring the caller be that patient, an admin,
+--     or that clinic.
+--   * Concurrency: a `select ... for update` locks the coupon's own row for
+--     the duration of the check-and-reserve, serializing every reservation
+--     attempt against THAT coupon - the only mechanism that works for an
+--     arbitrary per_user_limit/total_limit (a unique index can only ever
+--     enforce "at most one", not "at most N"), so it's the one used here.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 42.1 coupons: rename to the new shape, add the new columns
+-- ----------------------------------------------------------------------------
+alter table coupons rename column discount_type to type;
+alter table coupons rename column discount_value to value;
+alter table coupons rename column max_discount_amount to max_discount;
+alter table coupons rename column min_order_amount to min_amount;
+alter table coupons rename column expires_at to valid_to;
+alter table coupons rename column max_redemptions to total_limit;
+
+alter table coupons add column if not exists description text;
+alter table coupons add column if not exists valid_from timestamptz;
+alter table coupons add column if not exists per_user_limit int;
+alter table coupons add column if not exists times_used int not null default 0;
+alter table coupons add column if not exists applies_to text not null default 'app_booking';
+alter table coupons add column if not exists clinic_id uuid references clinics (id) on delete cascade;
+
+-- one_per_patient boolean -> per_user_limit int (null = unlimited per user,
+-- matching total_limit's own "null = unlimited" convention).
+update coupons set per_user_limit = 1 where one_per_patient and per_user_limit is null;
+alter table coupons drop column if exists one_per_patient;
+
+-- Switching times_used from "count the rows every time" to a maintained
+-- counter must not silently forget usage that already happened.
+update coupons c
+set times_used = coalesce(
+  (select count(*) from coupon_redemptions r where r.coupon_id = c.id and r.status in ('reserved', 'confirmed')),
+  0
+);
+
+alter table coupons drop constraint if exists coupons_code_uppercase_check;
+alter table coupons add constraint coupons_code_uppercase_check check (code = upper(code));
+
+alter table coupons drop constraint if exists coupons_percent_max_check;
+alter table coupons add constraint coupons_percent_max_check check (type <> 'percent' or value <= 100);
+
+alter table coupons drop constraint if exists coupons_per_user_limit_check;
+alter table coupons add constraint coupons_per_user_limit_check check (per_user_limit is null or per_user_limit > 0);
+
+-- Only value this app ever produces today - see validate_and_price()'s note
+-- on why this is still worth enforcing even with a single allowed value.
+alter table coupons drop constraint if exists coupons_applies_to_check;
+alter table coupons add constraint coupons_applies_to_check check (applies_to in ('app_booking'));
+
+-- ----------------------------------------------------------------------------
+-- 42.2 coupon_redemptions: patient_account_id -> patient_id
+-- ----------------------------------------------------------------------------
+alter table coupon_redemptions rename column patient_account_id to patient_id;
+
+drop policy if exists "coupon_redemptions_select" on coupon_redemptions;
+create policy "coupon_redemptions_select" on coupon_redemptions for select
+  using (
+    public.is_admin()
+    or patient_id = auth.uid()
+    or (
+      appointment_id is not null
+      and exists (
+        select 1 from appointments a
+        where a.id = coupon_redemptions.appointment_id and public.is_own_clinic(a.clinic_id)
+      )
+    )
+  );
+
+-- ----------------------------------------------------------------------------
+-- 42.3 validate_and_price() - replaces reserve_coupon()
+-- ----------------------------------------------------------------------------
+drop function if exists public.reserve_coupon(text, numeric);
+
+create or replace function public.validate_and_price(
+  p_code text,
+  p_patient_id uuid,
+  p_clinic_id uuid,
+  p_gross_amount numeric
+)
+returns table (
+  valid boolean,
+  reason_code text,
+  reason text,
+  discount_amount numeric,
+  net_amount numeric,
+  redemption_id uuid
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_coupon coupons;
+  v_discount numeric;
+  v_per_user_count int;
+  v_redemption_id uuid;
+begin
+  if not (auth.uid() = p_patient_id or public.is_admin() or public.is_own_clinic(p_clinic_id)) then
+    return query select false, 'NOT_AUTHORIZED'::text, 'You are not allowed to apply a coupon for this patient.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+
+  -- The row lock - see this migration's header for why it's the right tool
+  -- here. Held until this function's transaction commits (the caller's own
+  -- RPC call), so two fast taps of Apply can never both pass every check
+  -- below before either has actually recorded its reservation.
+  select * into v_coupon from coupons where code = upper(trim(p_code)) for update;
+
+  if v_coupon.id is null then
+    return query select false, 'NOT_FOUND'::text, 'This code is not valid.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+  if not v_coupon.active then
+    return query select false, 'INACTIVE'::text, 'This code is not active.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+  -- 'app_booking' is the only value this app has ever produced, but the
+  -- column exists precisely so a future non-booking use of a coupon can't
+  -- accidentally be accepted here just because nothing checked it.
+  if v_coupon.applies_to <> 'app_booking' then
+    return query select false, 'NOT_APPLICABLE'::text, 'This code cannot be used for a booking.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+  if v_coupon.clinic_id is not null and v_coupon.clinic_id <> p_clinic_id then
+    return query select false, 'WRONG_CLINIC'::text, 'This code is not valid at this clinic.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+  if v_coupon.valid_from is not null and now() < v_coupon.valid_from then
+    return query select false, 'NOT_STARTED'::text, 'This code is not active yet.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+  if v_coupon.valid_to is not null and now() > v_coupon.valid_to then
+    return query select false, 'EXPIRED'::text, 'This code has expired.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+  if p_gross_amount < v_coupon.min_amount then
+    return query select false, 'MIN_AMOUNT_NOT_MET'::text,
+      format('This code needs a minimum order of Rs.%s.', v_coupon.min_amount)::text,
+      0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+
+  if v_coupon.per_user_limit is not null then
+    select count(*) into v_per_user_count
+    from coupon_redemptions
+    where coupon_id = v_coupon.id and patient_id = p_patient_id and status in ('reserved', 'confirmed');
+    if v_per_user_count >= v_coupon.per_user_limit then
+      return query select false, 'PER_USER_LIMIT_REACHED'::text, 'You have already used this code.'::text, 0::numeric, p_gross_amount, null::uuid;
+      return;
+    end if;
+  end if;
+
+  if v_coupon.total_limit is not null and v_coupon.times_used >= v_coupon.total_limit then
+    return query select false, 'TOTAL_LIMIT_REACHED'::text, 'This code has already been fully used.'::text, 0::numeric, p_gross_amount, null::uuid;
+    return;
+  end if;
+
+  v_discount := case v_coupon.type
+    when 'flat' then v_coupon.value
+    else round(p_gross_amount * v_coupon.value / 100.0)
+  end;
+  if v_coupon.type = 'percent' and v_coupon.max_discount is not null then
+    v_discount := least(v_discount, v_coupon.max_discount);
+  end if;
+  v_discount := least(v_discount, p_gross_amount - 1); -- never discount to zero or negative
+
+  insert into coupon_redemptions (coupon_id, patient_id, discount_amount, status)
+  values (v_coupon.id, p_patient_id, v_discount, 'reserved')
+  returning id into v_redemption_id;
+
+  update coupons set times_used = times_used + 1 where id = v_coupon.id;
+
+  return query select true, null::text, null::text, v_discount, (p_gross_amount - v_discount), v_redemption_id;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 42.4 release_coupon_redemption() - now also gives the slot back
+-- ----------------------------------------------------------------------------
+create or replace function public.release_coupon_redemption(p_redemption_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_coupon_id uuid;
+begin
+  update coupon_redemptions
+  set status = 'released'
+  where id = p_redemption_id and patient_id = auth.uid() and status = 'reserved'
+  returning coupon_id into v_coupon_id;
+
+  if v_coupon_id is not null then
+    update coupons set times_used = greatest(times_used - 1, 0) where id = v_coupon_id;
+  end if;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 42.5 create_payment_with_coupon() - renamed columns, whole-rupee rounding
+-- ----------------------------------------------------------------------------
+create or replace function public.create_payment_with_coupon(
+  p_appointment_id uuid,
+  p_method text,
+  p_redemption_id uuid default null
+)
+returns table (payment_id uuid, gross_amount numeric, discount_amount numeric, net_amount numeric)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  a appointments;
+  v_fee numeric;
+  v_convenience numeric;
+  v_gross numeric;
+  v_discount numeric := 0;
+  v_net numeric;
+  v_redemption coupon_redemptions;
+  v_coupon coupons;
+  v_funded_by text;
+  v_coupon_code text;
+  v_payment_id uuid;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_member(a.member_id) or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your booking.';
+  end if;
+  if exists (select 1 from payments where appointment_id = p_appointment_id) then
+    raise exception 'A payment already exists for this appointment.';
+  end if;
+  if p_method not in ('online', 'cod') then
+    raise exception 'Invalid payment method.';
+  end if;
+
+  select consultation_fee into v_fee from doctors where id = a.doctor_id;
+  v_convenience := case when p_method = 'online' then 10 else 0 end;
+  v_gross := v_fee + v_convenience;
+
+  if p_redemption_id is not null then
+    select * into v_redemption from coupon_redemptions where id = p_redemption_id;
+    if v_redemption.id is null or v_redemption.patient_id <> auth.uid() or v_redemption.status <> 'reserved' then
+      raise exception 'This coupon is no longer applied - please re-apply it.';
+    end if;
+    if v_redemption.reserved_at < now() - interval '15 minutes' then
+      raise exception 'Your coupon reservation expired - please re-apply it.';
+    end if;
+
+    select * into v_coupon from coupons where id = v_redemption.coupon_id;
+    if not v_coupon.active or (v_coupon.valid_to is not null and v_coupon.valid_to < now()) then
+      raise exception 'This coupon is no longer valid.';
+    end if;
+    if v_gross < v_coupon.min_amount then
+      raise exception 'This coupon needs a minimum order of Rs.%.', v_coupon.min_amount;
+    end if;
+
+    v_discount := case v_coupon.type
+      when 'flat' then v_coupon.value
+      else round(v_gross * v_coupon.value / 100.0)
+    end;
+    if v_coupon.type = 'percent' and v_coupon.max_discount is not null then
+      v_discount := least(v_discount, v_coupon.max_discount);
+    end if;
+    v_discount := least(v_discount, v_gross - 1);
+    v_coupon_code := v_coupon.code;
+    v_funded_by := v_coupon.funded_by;
+
+    update coupon_redemptions
+    set appointment_id = p_appointment_id, discount_amount = v_discount
+    where id = p_redemption_id;
+  end if;
+
+  v_net := v_gross - v_discount;
+
+  insert into payments (appointment_id, amount, method, status, gross_amount, coupon_code, discount_amount, net_amount, funded_by)
+  values (
+    p_appointment_id,
+    v_net,
+    p_method,
+    case when p_method = 'online' then 'hold' else 'pending' end,
+    v_gross,
+    v_coupon_code,
+    v_discount,
+    v_net,
+    v_funded_by
+  )
+  returning id into v_payment_id;
+
+  return query select v_payment_id, v_gross, v_discount, v_net;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 42.6 handle_appointment_status_change() - give the slot back on release too
+-- ----------------------------------------------------------------------------
+create or replace function public.handle_appointment_status_change()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status = 'accepted' and old.status is distinct from 'accepted' then
+    update payments set status = 'captured' where appointment_id = new.id and status = 'hold';
+    update coupon_redemptions set status = 'confirmed' where appointment_id = new.id and status = 'reserved';
+  end if;
+
+  if new.status in ('rejected', 'cancelled') and old.status is distinct from new.status then
+    if new.payment_status = 'paid_online' then
+      new.payment_status := 'refunded';
+    end if;
+    update payments set status = 'refunded' where appointment_id = new.id and status in ('hold', 'captured');
+
+    with released as (
+      update coupon_redemptions set status = 'released'
+      where appointment_id = new.id and status = 'reserved'
+      returning coupon_id
+    )
+    update coupons set times_used = greatest(times_used - 1, 0)
+    where id in (select coupon_id from released);
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ============================================================================
+-- 43. CLINIC-TO-ADMIN BILLING - how the platform earns
+-- ============================================================================
+-- Two revenue lines, both settled through Razorpay, both trusting only
+-- signed webhooks for anything that actually changes billing state:
+--
+--   1. SUBSCRIPTIONS - a clinic pays a recurring monthly fee to stay listed.
+--      plans (name/monthly_price/booking_limit/per_booking_commission)
+--      replaces the hardcoded TIERS constant in src/lib/subscription.ts as
+--      the source of truth for booking limits - enforce_clinic_booking_limit()
+--      below now reads plans.booking_limit instead of a hardcoded 50. The
+--      existing `subscriptions` table (already one row per clinic, already
+--      carrying a period) is where "subscribe on the clinic" naturally
+--      lands - not a new table - it gains plan_id, razorpay_subscription_id,
+--      current_period_end and billing_status.
+--      A Razorpay subscription is created with a fixed retry schedule on
+--      Razorpay's own side; subscription.pending (a charge failed, Razorpay
+--      is retrying) marks billing_status = 'past_due' immediately, and only
+--      subscription.halted (Razorpay has exhausted every retry) sets
+--      clinics.is_active = false - i.e. Razorpay's own retry window IS the
+--      "short grace period" the spec asks for; no cron job invents a second
+--      one. subscription.charged (any successful charge, first or renewal)
+--      always reactivates and records an invoice.
+--   2. COMMISSION - a per-booking cut of the appointment's own net_amount,
+--      recorded once an appointment is marked completed, for later
+--      settlement (this only RECORDS the fee - it does not attempt to
+--      auto-collect it via a second Razorpay charge).
+--
+-- IMPORTANT FIX bundled in here: handle_appointment_status_change() has been
+-- missing `security definer` since migration 39 first started writing to
+-- coupon_redemptions from inside it. A plain clinic/patient action has no
+-- RLS write access to coupon_redemptions (by design - see migration 41's
+-- header), so every one of those writes has been silently matching zero
+-- rows this whole time instead of erroring. Section 43.7 repairs the one
+-- reservation this has already left stranded; section 43.6 fixes the
+-- function itself so it stops happening (and is a matching risk for the
+-- new commission_ledger write this migration adds to the same trigger).
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 43.1 plans
+-- ----------------------------------------------------------------------------
+create table if not exists plans (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  monthly_price numeric not null check (monthly_price >= 0),
+  -- null = unlimited bookings/month.
+  booking_limit int check (booking_limit is null or booking_limit > 0),
+  -- Fraction of an appointment's net_amount taken as platform commission
+  -- once it's completed - 0 to 1 (e.g. 0.02 = 2%). Optional: 0 is valid and
+  -- is the default.
+  per_booking_commission numeric not null default 0 check (per_booking_commission >= 0 and per_booking_commission <= 1),
+  -- Set once a matching Razorpay Plan exists (created lazily, on first
+  -- subscribe - see razorpay-create-subscription) - null until then.
+  razorpay_plan_id text,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+alter table plans enable row level security;
+drop policy if exists "plans_select" on plans;
+create policy "plans_select" on plans for select using (active or public.is_admin());
+drop policy if exists "plans_write" on plans;
+create policy "plans_write" on plans for all using (public.is_admin());
+
+-- Basic mirrors the old 'free' tier exactly (50 bookings/month, no cost) so
+-- every existing clinic's behaviour is unchanged the moment this runs.
+-- Standard/Premium mirror old 'pro'/'premium' (unlimited) with example
+-- prices/commissions an admin can edit directly in the table (or via SQL -
+-- there's no plans-admin CRUD screen yet, matching how several other
+-- clinic-level settings in this project start out SQL-managed).
+insert into plans (name, monthly_price, booking_limit, per_booking_commission)
+values
+  ('Basic', 0, 50, 0),
+  ('Standard', 999, null, 0),
+  ('Premium', 2499, null, 0.02)
+on conflict (name) do nothing;
+
+-- ----------------------------------------------------------------------------
+-- 43.2 subscriptions - extended, not replaced
+-- ----------------------------------------------------------------------------
+alter table subscriptions add column if not exists plan_id uuid references plans (id);
+alter table subscriptions add column if not exists razorpay_subscription_id text;
+-- Distinct from the existing period_start/period_end (date - the monthly
+-- USAGE-count reset window, lazily rolled by enforce_clinic_booking_limit()).
+-- This is the actual Razorpay BILLING cycle's end, a real instant in time.
+alter table subscriptions add column if not exists current_period_end timestamptz;
+alter table subscriptions add column if not exists billing_status text not null default 'active';
+alter table subscriptions drop constraint if exists subscriptions_billing_status_check;
+alter table subscriptions add constraint subscriptions_billing_status_check
+  check (billing_status in ('active', 'past_due'));
+alter table subscriptions add column if not exists past_due_since timestamptz;
+
+update subscriptions set plan_id = (select id from plans where name = 'Basic') where tier = 'free' and plan_id is null;
+update subscriptions set plan_id = (select id from plans where name = 'Standard') where tier = 'pro' and plan_id is null;
+update subscriptions set plan_id = (select id from plans where name = 'Premium') where tier = 'premium' and plan_id is null;
+
+-- ----------------------------------------------------------------------------
+-- 43.3 invoices - one row per billing cycle attempt (paid or failed)
+-- ----------------------------------------------------------------------------
+create table if not exists invoices (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references clinics (id) on delete cascade,
+  period_start timestamptz not null,
+  period_end timestamptz not null,
+  amount numeric not null,
+  status text not null check (status in ('paid', 'failed')),
+  razorpay_invoice_id text,
+  razorpay_payment_id text,
+  created_at timestamptz not null default now()
+);
+
+alter table invoices enable row level security;
+drop policy if exists "invoices_select" on invoices;
+create policy "invoices_select" on invoices for select
+  using (public.is_admin() or public.is_own_clinic(clinic_id));
+-- No insert/update policy for plain users at all - only razorpay-webhook
+-- (service role, bypasses RLS as table owner) ever writes an invoice.
+
+-- ----------------------------------------------------------------------------
+-- 43.4 commission_ledger - one row per completed appointment, for later
+-- settlement (this records the fee; it does not collect it automatically).
+-- ----------------------------------------------------------------------------
+create table if not exists commission_ledger (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references clinics (id) on delete cascade,
+  appointment_id uuid not null references appointments (id) on delete cascade,
+  net_amount numeric not null,
+  commission_rate numeric not null,
+  platform_fee numeric not null,
+  created_at timestamptz not null default now()
+);
+alter table commission_ledger add constraint commission_ledger_appointment_id_unique unique (appointment_id);
+
+alter table commission_ledger enable row level security;
+drop policy if exists "commission_ledger_select" on commission_ledger;
+create policy "commission_ledger_select" on commission_ledger for select using (public.is_admin());
+-- No write policy for plain users - only handle_appointment_status_change()
+-- (security definer as of 43.6) ever inserts a row.
+
+-- ----------------------------------------------------------------------------
+-- 43.5 enforce_clinic_booking_limit() - reads plans.booking_limit now,
+-- instead of a hardcoded "50 if tier = free".
+-- ----------------------------------------------------------------------------
+create or replace function public.enforce_clinic_booking_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  clinic_is_active boolean;
+  sub subscriptions;
+  limit_val int;
+begin
+  select is_active into clinic_is_active from clinics where id = new.clinic_id;
+  if clinic_is_active is false then
+    raise exception 'This clinic isn''t currently accepting bookings.';
+  end if;
+
+  select * into sub from subscriptions where clinic_id = new.clinic_id;
+
+  if sub.id is null then
+    insert into subscriptions (clinic_id, tier, bookings_used, period_start, period_end, plan_id)
+    values (new.clinic_id, 'free', 0, current_date, (current_date + interval '1 month')::date, (select id from plans where name = 'Basic'))
+    returning * into sub;
+  elsif sub.period_end is null or sub.period_end < current_date then
+    update subscriptions
+    set bookings_used = 0, period_start = current_date, period_end = (current_date + interval '1 month')::date
+    where id = sub.id
+    returning * into sub;
+  end if;
+
+  select booking_limit into limit_val from plans where id = sub.plan_id;
+
+  if limit_val is not null and sub.bookings_used >= limit_val then
+    raise exception 'This clinic has reached its booking limit for this period. Please try again later or contact the clinic.';
+  end if;
+
+  update subscriptions set bookings_used = bookings_used + 1 where id = sub.id;
+
+  return new;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 43.6 handle_appointment_status_change() - the security definer fix, plus
+-- commission recording on completed.
+-- ----------------------------------------------------------------------------
+create or replace function public.handle_appointment_status_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'accepted' and old.status is distinct from 'accepted' then
+    update payments set status = 'captured' where appointment_id = new.id and status = 'hold';
+    update coupon_redemptions set status = 'confirmed' where appointment_id = new.id and status = 'reserved';
+  end if;
+
+  if new.status in ('rejected', 'cancelled') and old.status is distinct from new.status then
+    if new.payment_status = 'paid_online' then
+      new.payment_status := 'refunded';
+    end if;
+    update payments set status = 'refunded' where appointment_id = new.id and status in ('hold', 'captured');
+
+    with released as (
+      update coupon_redemptions set status = 'released'
+      where appointment_id = new.id and status = 'reserved'
+      returning coupon_id
+    )
+    update coupons set times_used = greatest(times_used - 1, 0)
+    where id in (select coupon_id from released);
+  end if;
+
+  if new.status = 'completed' and old.status is distinct from 'completed' then
+    insert into commission_ledger (clinic_id, appointment_id, net_amount, commission_rate, platform_fee)
+    select
+      new.clinic_id,
+      new.id,
+      coalesce(p.net_amount, p.amount, 0),
+      coalesce(pl.per_booking_commission, 0),
+      coalesce(p.net_amount, p.amount, 0) * coalesce(pl.per_booking_commission, 0)
+    from payments p
+    left join subscriptions s on s.clinic_id = new.clinic_id
+    left join plans pl on pl.id = s.plan_id
+    where p.appointment_id = new.id
+      and coalesce(p.net_amount, p.amount, 0) * coalesce(pl.per_booking_commission, 0) > 0
+    on conflict (appointment_id) do nothing;
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 43.7 One-time repair for the dormant bug described in this migration's
+-- header - fixes any reservation the missing security definer left stranded.
+-- ----------------------------------------------------------------------------
+update coupon_redemptions cr
+set status = 'confirmed'
+from appointments a
+where a.id = cr.appointment_id
+  and cr.status = 'reserved'
+  and a.status = 'accepted';
+
+with stuck as (
+  update coupon_redemptions cr
+  set status = 'released'
+  from appointments a
+  where a.id = cr.appointment_id
+    and cr.status = 'reserved'
+    and a.status in ('rejected', 'cancelled')
+  returning cr.coupon_id
+)
+update coupons c
+set times_used = greatest(times_used - 1, 0)
+where id in (select coupon_id from stuck);
+
+-- ============================================================================
+-- 44. PATIENT ONBOARDING PROFILE
+-- ============================================================================
+-- Runs once, right after a new phone sign-up, before any other patient
+-- screen - see PatientOnboardingGate.tsx, which wraps the whole patient app
+-- in App.tsx OUTSIDE PatientDeclarationGate (the existing platform
+-- declaration + DPDP consent gate). The onboarding form itself records the
+-- platform declaration acceptance as part of its own submit (reusing
+-- usePatientDeclarationStatus() - the same hook/table PatientDeclarationGate
+-- already reads), so by the time a new patient reaches that gate, only the
+-- DPDP consent (untouched, not mentioned in this spec) is left to show, if
+-- anything.
+--
+--   * profiles.onboarding_complete - the gate flag. Backfilled to true for
+--     every existing patient who already has at least one family member (a
+--     brand new column defaulting to false would otherwise force every
+--     current user back through onboarding on their next login).
+--   * family_members gains address/pincode/emergency_contact_name/
+--     emergency_contact_phone - the fields the spec requires that didn't
+--     already exist (name, dob, gender, email, blood_group, city, photo_path
+--     all already did, from earlier migrations).
+-- No new RLS is needed: profiles_update already lets a patient write their
+-- own row, and family_insert/family_update already let them write their own
+-- family_members rows - the same policies FamilyMemberForm.tsx and the
+-- Profile screen's "Personal Details" panel already rely on.
+-- ============================================================================
+
+alter table profiles add column if not exists onboarding_complete boolean not null default false;
+
+update profiles set onboarding_complete = true
+where role = 'patient'
+  and onboarding_complete = false
+  and exists (select 1 from family_members where account_id = profiles.id);
+
+-- Never gated for a clinic/admin account - App.tsx only ever renders
+-- PatientOnboardingGate for the patient branch, but this keeps the column
+-- honest for anyone who queries it directly (e.g. the admin console).
+update profiles set onboarding_complete = true where role in ('clinic', 'admin') and onboarding_complete = false;
+
+alter table family_members add column if not exists address text;
+alter table family_members add column if not exists pincode text;
+alter table family_members add column if not exists emergency_contact_name text;
+alter table family_members add column if not exists emergency_contact_phone text;
+
+-- ============================================================================
+-- 45. CLINIC REGISTRATION WITH UPLOADS
+-- ============================================================================
+-- Wires the existing documents/agreement infrastructure (sections 14, and
+-- the doctor-onboarding-gate added alongside section 15's map location work)
+-- into the CLINIC's own registration, exactly mirroring the pattern a doctor
+-- already goes through - not a new, parallel system:
+--
+--   * clinics.status gains 'draft', the same way doctors.status did:
+--     register_clinic() now creates a clinic as 'draft' (invisible to
+--     admin/search, same as 'pending' already was to patients) instead of
+--     immediately 'pending'. A clinic reaches the admin's queue only once it
+--     explicitly submits - see ClinicOnboardingScreen.tsx - mirroring
+--     DoctorOnboardingScreen.tsx exactly. Existing clinics are untouched:
+--     they're already 'pending' or later, never retroactively 'draft'.
+--   * enforce_clinic_submission_requirements() is the hard version of that
+--     gate (draft -> pending blocked unless every required clinic document
+--     has an on-file, non-rejected upload), exactly mirroring
+--     enforce_doctor_submission_requirements() - a client-side check can be
+--     bypassed by calling the API directly, this can't.
+--   * clinics.contact_phone - the "contact" field the registration form now
+--     also collects, alongside name/reg_no/address (map location was
+--     already collected separately via ClinicLocationPicker.tsx - section
+--     15 - now surfaced as part of the same onboarding flow instead of a
+--     disconnected dashboard tab).
+--   * Two new clinic document types (clinic_address_proof, clinic_license)
+--     and one new doctor one (doctor_photo) in src/lib/documentTypes.ts -
+--     AdminDocumentReview.tsx and DocumentChecklist.tsx need zero changes
+--     for this, since both already render entirely from that list.
+--
+-- Deliberately NOT combined into one gate: a clinic's own submission and
+-- each doctor's submission stay independent, exactly as they already were
+-- for doctors-vs-each-other (each doctor already has its own draft/pending
+-- lifecycle, reviewed independently by admin) - "the agreement" the spec's
+-- combined sentence refers to is the per-doctor one (consents.doctor_id),
+-- since a clinic itself signs nothing. Testing this therefore means
+-- submitting the clinic AND its doctor as two related but separate steps -
+-- see TESTING.md.
+-- ============================================================================
+
+alter table clinics add column if not exists contact_phone text;
+
+alter table clinics alter column status set default 'draft';
+alter table clinics drop constraint if exists clinics_status_check;
+alter table clinics add constraint clinics_status_check
+  check (status in ('draft', 'pending', 'approved', 'rejected'));
+
+-- Mirrors doctors_update's own fix exactly: the owning clinic may only move
+-- itself between draft and pending - approved/rejected stays admin-only.
+drop policy if exists "clinics_update" on clinics;
+create policy "clinics_update" on clinics for update
+  using (owner_id = auth.uid() or public.is_admin())
+  with check (
+    public.is_admin()
+    or (owner_id = auth.uid() and status in ('draft', 'pending'))
+  );
+
+-- The required-doc-type list here must be kept in sync with the `required:
+-- true` entries for ownerType 'clinic' in src/lib/documentTypes.ts.
+create or replace function public.enforce_clinic_submission_requirements()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  missing_required int;
+begin
+  if new.status = 'pending' and old.status = 'draft' then
+    select count(*) into missing_required
+    from unnest(array[
+      'clinic_registration_certificate',
+      'clinic_address_proof',
+      'clinic_license'
+    ]) as t(required_type)
+    where not exists (
+      select 1 from (
+        select distinct on (doc_type) doc_type, status
+        from documents
+        where owner_type = 'clinic' and owner_id = new.id
+        order by doc_type, created_at desc
+      ) latest
+      where latest.doc_type = t.required_type and latest.status <> 'rejected'
+    );
+
+    if missing_required > 0 then
+      raise exception 'All required documents must be uploaded before submitting this clinic for review.';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_clinic_submit_check on clinics;
+create trigger on_clinic_submit_check
+  before update on clinics
+  for each row
+  execute function public.enforce_clinic_submission_requirements();
+
+-- register_clinic() now starts a clinic at 'draft' (not 'pending') and takes
+-- a contact phone number. p_contact_phone is optional at the RPC level (the
+-- registration FORM enforces it as required, same "DB permissive, UI
+-- enforces required" split already used for name/address elsewhere in this
+-- function).
+--
+-- A trailing parameter with a default is allowed by CREATE OR REPLACE, but
+-- Postgres still treats the old 3-argument signature as a DIFFERENT
+-- overload rather than something this replaces - both would otherwise stay
+-- callable side by side, and the stale 3-arg one still creates a clinic as
+-- 'pending' with no contact_phone, silently defeating this whole migration
+-- for any caller that happens to invoke it. Drop it explicitly first.
+drop function if exists public.register_clinic(text, text, text);
+
+create or replace function public.register_clinic(p_name text, p_reg_no text, p_address text, p_contact_phone text default null)
+returns clinics
+language plpgsql
+as $$
+declare
+  new_clinic clinics;
+begin
+  if auth.uid() is null then
+    raise exception 'You must be signed in to register a clinic.';
+  end if;
+
+  if trim(coalesce(p_name, '')) = '' then
+    raise exception 'Clinic name is required.';
+  end if;
+
+  if exists (select 1 from clinics where owner_id = auth.uid()) then
+    raise exception 'This account already has a registered clinic.';
+  end if;
+
+  update profiles set role = 'clinic' where id = auth.uid() and role = 'patient';
+
+  insert into clinics (owner_id, name, reg_no, address, contact_phone, status, is_active)
+  values (
+    auth.uid(),
+    trim(p_name),
+    nullif(trim(coalesce(p_reg_no, '')), ''),
+    nullif(trim(coalesce(p_address, '')), ''),
+    nullif(trim(coalesce(p_contact_phone, '')), ''),
+    'draft',
+    true
+  )
+  returning * into new_clinic;
+
+  return new_clinic;
+end;
+$$;

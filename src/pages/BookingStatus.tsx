@@ -25,6 +25,7 @@ import StatusPill from '../components/ui/StatusPill';
 import VerifiedBadge from '../components/VerifiedBadge';
 import VisitDetails from '../components/VisitDetails';
 import { getCheckInOptions, type CheckInOptions } from '../lib/checkIn';
+import { notifyPatient, reportingTimeReminderMessage, REPORTING_REMINDER_LEAD_MINUTES } from '../lib/notify';
 import { bookingReference, computeNowServing, countAhead } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { estimateSlotMinutes, formatTimeLabel } from '../lib/time';
@@ -65,7 +66,7 @@ const WATCHED_STATUSES: AppointmentStatus[] = [
 ];
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
-  booked: 'Pending clinic approval',
+  booked: 'Booking received - waiting for clinic approval',
   accepted: 'Confirmed — check in when you arrive',
   checked_in: 'Checked in — waiting',
   called: "You're being called now",
@@ -258,6 +259,55 @@ export default function BookingStatus() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aheadOfMe, booking?.id, slotMinutes]);
 
+  // The one-shot "reporting time is approaching" nudge (section 40). Unlike
+  // the queue reminders above, this fires from a plain clock, not a change in
+  // someone else's queue position, so it needs its own timer rather than
+  // riding the realtime broadcast - there's nothing else that would wake this
+  // effect up as the minutes tick down. reportingTimeAlertedRef stops it from
+  // re-firing every tick within this one page view; log_notification()'s
+  // dedup index (migration 40) is what actually guarantees it's sent at most
+  // once ever, across reloads and tabs too.
+  const reportingTimeAlerted = useRef(false);
+  // Resets the guard when the route lands on a DIFFERENT booking without a
+  // full remount (React Router keeps the component instance across a param
+  // change) - otherwise having already alerted for one appointment would
+  // silently suppress the check for the next one viewed in the same tab.
+  useEffect(() => {
+    reportingTimeAlerted.current = false;
+  }, [booking?.id]);
+  useEffect(() => {
+    if (!booking || booking.status !== 'accepted' || !options?.reportingTime) return;
+
+    const check = async () => {
+      if (reportingTimeAlerted.current) return;
+      const minutesUntil =
+        (new Date(`${booking.date}T${options.reportingTime}`).getTime() - Date.now()) / 60000;
+      // Fires once the reporting time is within REPORTING_REMINDER_LEAD_MINUTES
+      // out, and stays willing to fire for a while after it's passed too (a
+      // late page load shouldn't just silently skip the one nudge this
+      // appointment ever gets) - but not forever, so a booking from days ago
+      // never suddenly reminds anyone of anything.
+      if (minutesUntil <= REPORTING_REMINDER_LEAD_MINUTES && minutesUntil >= -180) {
+        reportingTimeAlerted.current = true;
+        const { data: userData } = await supabase.auth.getUser();
+        const uid = userData.user?.id;
+        if (!uid) return;
+        await notifyPatient({
+          userId: uid,
+          appointmentId: booking.id,
+          type: 'reporting_time_reminder',
+          message: reportingTimeReminderMessage(options.reportingTime, booking.slot_time),
+        });
+        checkLatestNotification();
+      }
+    };
+
+    check();
+    const id = setInterval(check, 60000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking?.status, booking?.date, booking?.id, booking?.slot_time, options?.reportingTime]);
+
   if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
 
@@ -422,6 +472,12 @@ export default function BookingStatus() {
             which is what the patient holds up at the desk. */}
         {awaitingArrival && (
           <div className="mt-3 rounded-3xl border border-brand-100 bg-white p-5 text-center">
+            {options?.reportingTime && (
+              <p className="mb-3 rounded-2xl bg-brand-50 px-4 py-2.5 text-sm font-bold text-brand-700">
+                Reporting time {formatTimeLabel(options.reportingTime)}{' '}
+                <span className="font-normal text-brand-400">|</span> Slot {formatTimeLabel(booking.slot_time)}
+              </p>
+            )}
             {booking.sequence_no != null ? (
               <>
                 <p className="text-sm font-semibold text-slate-500">Your number for the day</p>

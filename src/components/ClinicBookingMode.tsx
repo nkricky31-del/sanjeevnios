@@ -34,6 +34,10 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
   // - meaningless outside that mode, so the inputs below only enable there.
   const [sameDayEnabled, setSameDayEnabled] = useState(clinic.same_day_booking_enabled ?? false);
   const [sameDayCutoff, setSameDayCutoff] = useState(String(clinic.same_day_cutoff_minutes ?? 30));
+  // Section 40 - unlike the fields above, this applies in BOTH modes, so
+  // it's never disabled by the appointmentOnly gate the rest of this form
+  // uses.
+  const [reportBefore, setReportBefore] = useState(String(clinic.report_before_minutes ?? 30));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -61,6 +65,7 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
     const horizonNum = Number(horizon);
     const capNum = Number(cap);
     const cutoffNum = Number(sameDayCutoff);
+    const reportBeforeNum = Number(reportBefore);
     if (!Number.isInteger(horizonNum) || horizonNum < 1 || horizonNum > 90) {
       setError('Booking horizon must be between 1 and 90 days.');
       return;
@@ -73,6 +78,10 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
       setError('Same-day cutoff must be 0 or more minutes.');
       return;
     }
+    if (!Number.isInteger(reportBeforeNum) || reportBeforeNum < 1) {
+      setError('Reporting time buffer must be at least 1 minute.');
+      return;
+    }
 
     setSaving(true);
     const patch = {
@@ -81,6 +90,7 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
       daily_cap: capNum,
       same_day_booking_enabled: sameDayEnabled,
       same_day_cutoff_minutes: cutoffNum,
+      report_before_minutes: reportBeforeNum,
     };
     const { error: saveError } = await supabase.from('clinics').update(patch).eq('id', clinic.id);
     setSaving(false);
@@ -153,6 +163,25 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
             />
             <p className="mt-1 text-[11px] text-slate-400">Across the whole clinic.</p>
           </div>
+        </div>
+
+        {/* Reporting time (section 40) - applies to every accepted booking in
+            either mode, so unlike the fields above it's never disabled. */}
+        <div className="mt-4 rounded-2xl border border-slate-100 p-3">
+          <label className="text-xs font-bold text-slate-700">Reporting time (minutes before slot)</label>
+          <input
+            type="number"
+            min={1}
+            value={reportBefore}
+            onChange={(e) => setReportBefore(e.target.value)}
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          />
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+            How long before their slot an accepted patient is told to arrive by. Shown on their booking as
+            "Reporting time" and sent once as a reminder as it approaches. Capped at 60 minutes either way - that's
+            when check-in itself opens, so reporting any earlier than that would ask patients to arrive before
+            they're even able to check in.
+          </p>
         </div>
 
         {/* Same-day booking on top of appointment_only mode - schema.sql

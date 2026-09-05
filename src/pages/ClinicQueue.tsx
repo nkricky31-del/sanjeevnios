@@ -2,6 +2,7 @@ import { CheckCircle2, ChevronRight, Monitor, ScanLine, UserRound } from 'lucide
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import ClinicBilling from '../components/ClinicBilling';
 import ClinicBookingMode from '../components/ClinicBookingMode';
 import ClinicCheckIn from '../components/ClinicCheckIn';
 import ClinicHolidays from '../components/ClinicHolidays';
@@ -24,7 +25,9 @@ import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
 import { useAuth } from '../lib/AuthContext';
 import { ageFromDob, todayISO } from '../lib/date';
+import { appointmentConfirmedMessage, notifyPatient } from '../lib/notify';
 import { bookingReference } from '../lib/queue';
+import { captureRazorpayPayment } from '../lib/razorpay';
 import { supabase } from '../lib/supabaseClient';
 import { TIERS, usageStatus } from '../lib/subscription';
 import { formatTimeLabel } from '../lib/time';
@@ -120,12 +123,14 @@ const STATUS_LABEL: Record<AppointmentStatus, string> = {
 };
 
 const CLINIC_STATUS_TONE: Record<ClinicStatus, 'live' | 'warning' | 'neutral'> = {
+  draft: 'neutral',
   pending: 'warning',
   approved: 'live',
   rejected: 'neutral',
 };
 
 const CLINIC_STATUS_LABEL: Record<ClinicStatus, string> = {
+  draft: 'Onboarding in progress',
   pending: 'Pending admin approval',
   approved: 'Approved',
   rejected: 'Rejected',
@@ -159,7 +164,7 @@ export default function ClinicQueue() {
   // realtime broadcast is slow or the socket has dropped.
   const [queueVersion, setQueueVersion] = useState(0);
   const [view, setView] = useState<
-    'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking'
+    'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing'
   >('today');
 
   const loadClinicAndDoctors = async () => {
@@ -251,31 +256,60 @@ export default function ClinicQueue() {
   // The token is drawn at the door, in arrival order (see
   // check_in_appointment() in schema.sql section 27), so the notice tells the
   // patient what to expect rather than quoting a number that doesn't exist yet.
+  //
+  // For an online Razorpay booking, the REAL capture (an actual API call
+  // that moves money) happens first - see razorpay-capture-payment's own
+  // header comment for why. Only once that succeeds (or reports nothing to
+  // capture - COD, or no verified payment at all) does the status flip
+  // happen, so the local database can never show "accepted" while Razorpay
+  // disagrees about the money.
+  //
+  // The .eq('status', 'booked') guard makes this idempotent against a
+  // double-tap or two clinic staff acting on the same row at once: only the
+  // click that actually flips 'booked' -> 'accepted' gets a row back, so a
+  // second click just refreshes the (by-then-stale) list below instead of
+  // re-notifying the patient (and re-capturing nothing, since
+  // razorpay-capture-payment itself is a no-op once payments.status is no
+  // longer 'hold'). handle_appointment_status_change() (migrations 39/41)
+  // flips the local payments row to captured and confirms any coupon
+  // redemption as part of this same status update.
   const acceptAppointment = async (a: QueueAppointment) => {
     setActionError(null);
-    const { error } = await supabase.from('appointments').update({ status: 'accepted' }).eq('id', a.id);
+
+    const capture = await captureRazorpayPayment(a.id);
+    if (!capture.captured) {
+      setActionError(capture.error ?? 'Could not capture this payment - the appointment was not accepted.');
+      return;
+    }
+
+    const { data: updated, error } = await supabase
+      .from('appointments')
+      .update({ status: 'accepted' })
+      .eq('id', a.id)
+      .eq('status', 'booked')
+      .select('payment_status')
+      .maybeSingle();
     if (error) {
       setActionError(error.message);
       return;
     }
-    const { data: updated } = await supabase
-      .from('appointments')
-      .select('payment_status')
-      .eq('id', a.id)
-      .single();
+    if (!updated) {
+      loadAppointments();
+      return;
+    }
 
     if (a.family_members?.account_id) {
-      // Note the wording: paid online means nothing to collect - it does NOT
-      // mean they're in the queue. They still check in like everybody else.
-      const paymentNote =
-        updated?.payment_status === 'paid_online'
-          ? "You've already paid online, so there's nothing to pay at the desk."
-          : 'Payment is due at the desk when you arrive.';
-      await supabase.from('notifications').insert({
-        user_id: a.family_members.account_id,
-        appointment_id: a.id,
-        type: 'appointment_accepted',
-        message: `Your appointment on ${a.date} at ${formatTimeLabel(a.slot_time)} is confirmed (booking ref ${bookingReference(a.id)}). You'll get your token number when you arrive and check in at the clinic. ${paymentNote}`,
+      const paidOnline = updated.payment_status === 'paid_online';
+      await notifyPatient({
+        userId: a.family_members.account_id,
+        appointmentId: a.id,
+        type: 'appointment_confirmed',
+        message: appointmentConfirmedMessage(
+          a.slot_time,
+          bookingReference(a.id),
+          paidOnline,
+          clinic?.report_before_minutes ?? 30
+        ),
       });
     }
 
@@ -448,8 +482,13 @@ export default function ClinicQueue() {
         {clinic.status !== 'approved' && (
           <div className="mb-4 rounded-2xl bg-amber-50 p-3.5 text-sm text-amber-800">
             <p>
-              Your clinic is {clinic.status === 'pending' ? 'awaiting admin approval' : 'rejected'} — it won't
-              appear in patient search or accept bookings yet. You can still add doctors and set their
+              Your clinic is{' '}
+              {clinic.status === 'draft'
+                ? 'still being set up - finish and submit your documents under the Doctors tab'
+                : clinic.status === 'pending'
+                  ? 'awaiting admin approval'
+                  : 'rejected'}{' '}
+              — it won't appear in patient search or accept bookings yet. You can still add doctors and set their
               availability now.
             </p>
             {clinic.status === 'rejected' && clinic.reject_reason && (
@@ -491,6 +530,7 @@ export default function ClinicQueue() {
             { value: 'rx', label: 'Rx pending' },
             { value: 'doctors', label: 'Doctors' },
             { value: 'booking', label: 'Booking mode' },
+            { value: 'billing', label: 'Billing' },
             { value: 'location', label: 'Location' },
             { value: 'patients', label: 'Patients' },
           ]}
@@ -601,6 +641,12 @@ export default function ClinicQueue() {
           </div>
         )}
 
+        {view === 'billing' && (
+          <div className="mt-4">
+            <ClinicBilling clinicId={clinic.id} />
+          </div>
+        )}
+
         {view === 'publish' && (
           <div className="mt-4">
             <PublishDaySchedule
@@ -618,7 +664,10 @@ export default function ClinicQueue() {
 
         {view === 'doctors' && (
           <div className="mt-4">
-            <ClinicDoctors clinicId={clinic.id} />
+            <ClinicDoctors
+              clinic={clinic}
+              onClinicSaved={(patch) => setClinic((prev) => (prev ? { ...prev, ...patch } : prev))}
+            />
           </div>
         )}
 
@@ -735,6 +784,7 @@ export default function ClinicQueue() {
                               doctorId={doctorId}
                               date={a.date}
                               patientAccountId={a.family_members.account_id}
+                              paymentStatus={a.payment_status}
                               onRejected={() => {
                                 setRejectOpenFor(null);
                                 loadAppointments();

@@ -6,6 +6,10 @@ export interface Profile {
   name: string | null;
   phone: string | null;
   suspended: boolean;
+  // Section 44 - gates the whole patient app (see PatientOnboardingGate.tsx)
+  // until the first-login profile form is saved. Backfilled to true for
+  // every pre-existing patient at migration time.
+  onboarding_complete: boolean;
   created_at: string;
 }
 
@@ -29,6 +33,11 @@ export interface FamilyMember {
   email: string | null;
   blood_group: string | null;
   city: string | null;
+  // Section 44 - required at onboarding, editable later from Profile.
+  address: string | null;
+  pincode: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
   has_known_conditions: HasKnownConditions;
   known_conditions_other: string | null;
   conditions_updated_at: string | null;
@@ -63,7 +72,9 @@ export interface Encounter {
   created_at: string;
 }
 
-export type ClinicStatus = 'pending' | 'approved' | 'rejected';
+// 'draft' (section 45) - registered, but not yet submitted for admin review.
+// Invisible to admin/search exactly like 'pending' already was to patients.
+export type ClinicStatus = 'draft' | 'pending' | 'approved' | 'rejected';
 
 // How a clinic takes patients: 'allow_walkins' is the default everything-as-
 // before mode; 'appointment_only' is advance-booking with a daily cap and no
@@ -76,6 +87,24 @@ export type ClinicMode = 'allow_walkins' | 'appointment_only';
 export type DoctorStatus = 'draft' | 'pending' | 'approved' | 'rejected';
 export type SubscriptionTier = 'free' | 'pro' | 'premium';
 
+// Section 43 - replaces the hardcoded TIERS constant as the real source of
+// truth for a clinic's booking limit and commission rate. `tier` (the older
+// free/pro/premium label) is left in place for backward compatibility with
+// AdminSubscriptions.tsx's manual override, but plan_id/plans.booking_limit
+// is what enforce_clinic_booking_limit() actually reads now.
+export interface Plan {
+  id: string;
+  name: string;
+  monthly_price: number;
+  booking_limit: number | null;
+  per_booking_commission: number;
+  razorpay_plan_id: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export type BillingStatus = 'active' | 'past_due';
+
 export interface Subscription {
   id: string;
   clinic_id: string;
@@ -83,6 +112,35 @@ export interface Subscription {
   bookings_used: number;
   period_start: string | null;
   period_end: string | null;
+  plan_id: string | null;
+  razorpay_subscription_id: string | null;
+  // The real Razorpay billing cycle's end - distinct from period_end above,
+  // which is only the monthly usage-count reset window.
+  current_period_end: string | null;
+  billing_status: BillingStatus;
+  past_due_since: string | null;
+}
+
+export interface Invoice {
+  id: string;
+  clinic_id: string;
+  period_start: string;
+  period_end: string;
+  amount: number;
+  status: 'paid' | 'failed';
+  razorpay_invoice_id: string | null;
+  razorpay_payment_id: string | null;
+  created_at: string;
+}
+
+export interface CommissionLedgerEntry {
+  id: string;
+  clinic_id: string;
+  appointment_id: string;
+  net_amount: number;
+  commission_rate: number;
+  platform_fee: number;
+  created_at: string;
 }
 
 export interface Clinic {
@@ -91,6 +149,7 @@ export interface Clinic {
   name: string;
   reg_no: string | null;
   address: string | null;
+  contact_phone: string | null;
   status: ClinicStatus;
   reject_reason: string | null;
   registration_doc_path: string | null;
@@ -130,6 +189,10 @@ export interface Clinic {
   // starts, and how many minutes it advances per patient.
   publish_start_time: string;
   avg_minutes_per_patient: number;
+  // How many minutes before the slot an accepted patient should aim to
+  // report - clamped to the 60-minute check-in window wherever it's actually
+  // used (see lib/time.ts's reportingTimeFor). Section 40.
+  report_before_minutes: number;
   created_at: string;
 }
 
@@ -170,15 +233,37 @@ export const PAYMENT_STATUS_LABEL: Record<AppointmentPaymentStatus, string> = {
   refunded: 'Refunded',
 };
 
+// Who funds a coupon's discount - see payouts.ts. Null when no coupon was used.
+export type CouponFundedBy = 'platform' | 'clinic';
+
 export interface Payment {
   id: string;
   appointment_id: string;
+  // The real transactional figure - always equal to net_amount. Kept as its
+  // own column (rather than renamed) so every pre-existing reader of
+  // `amount` (payouts.ts, Payments.tsx, AdminPayments.tsx) keeps working
+  // unchanged. See migration_41_coupons_and_razorpay.sql.
   amount: number;
   method: PaymentMethod;
   status: PaymentRowStatus;
   payout_status: PayoutStatus;
+  // The doctor's fee plus the platform convenience fee (online only),
+  // before any coupon discount. Null on a payment row created before
+  // section 41.
+  gross_amount: number | null;
+  coupon_code: string | null;
+  discount_amount: number;
+  net_amount: number | null;
+  funded_by: CouponFundedBy | null;
+  razorpay_order_id: string | null;
+  razorpay_payment_id: string | null;
   created_at: string;
 }
+
+// Which wire a notification actually went out on. 'in_app' always exists for
+// every notice; 'whatsapp'/'sms' rows only exist when that leg was actually
+// sent - see notify.ts and migration_39_two_step_confirmation_notifications.sql.
+export type NotificationChannel = 'in_app' | 'whatsapp' | 'sms';
 
 export interface Notification {
   id: string;
@@ -188,6 +273,54 @@ export interface Notification {
   read: boolean;
   at: string;
   appointment_id: string | null;
+  channel: NotificationChannel;
+}
+
+// The coupons table itself is never read directly by the patient-facing app
+// (see migration_41/42's headers - only validate_and_price() can tell a
+// patient anything about a code) - this type is for the admin screen
+// (AdminCoupons.tsx), which IS allowed to read/write it directly.
+export type CouponType = 'flat' | 'percent';
+// Only value this app produces today - see validate_and_price()'s own note
+// on why it's still checked rather than assumed.
+export type CouponAppliesTo = 'app_booking';
+
+export interface Coupon {
+  id: string;
+  code: string;
+  description: string | null;
+  type: CouponType;
+  value: number;
+  // Percent-type only; ignored (and should be null) for a flat coupon.
+  max_discount: number | null;
+  min_amount: number;
+  valid_from: string | null;
+  valid_to: string | null;
+  // null = unlimited for either.
+  per_user_limit: number | null;
+  total_limit: number | null;
+  times_used: number;
+  funded_by: CouponFundedBy;
+  applies_to: CouponAppliesTo;
+  // null = valid at every clinic.
+  clinic_id: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export type CouponRedemptionStatus = 'reserved' | 'confirmed' | 'released';
+
+export interface CouponRedemption {
+  id: string;
+  coupon_id: string;
+  appointment_id: string | null;
+  // The ACCOUNT holder (profiles.id), not a specific family member - see
+  // migration_42's header for why per_user_limit is scoped this way.
+  patient_id: string;
+  discount_amount: number;
+  status: CouponRedemptionStatus;
+  reserved_at: string;
+  created_at: string;
 }
 
 export interface AuditLogEntry {

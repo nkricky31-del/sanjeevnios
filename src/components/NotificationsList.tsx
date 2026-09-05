@@ -21,10 +21,15 @@ export default function NotificationsList() {
   const load = async () => {
     if (!session) return;
     setLoading(true);
+    // A lifecycle notice that also went out over WhatsApp/SMS logs a second
+    // row for that channel (see notify.ts) purely as a delivery record - this
+    // screen only ever shows the in-app copy, so the same message never
+    // appears to double up here.
     const { data } = await supabase
       .from('notifications')
       .select('*')
       .eq('user_id', session.user.id)
+      .eq('channel', 'in_app')
       .order('at', { ascending: false });
     setRows((data ?? []) as Notification[]);
     setLoading(false);

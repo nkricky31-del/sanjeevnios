@@ -195,13 +195,18 @@ export function getCurrentCoords(timeoutMs = 8000): Promise<{ lat: number; lng: 
 
 // What the patient's pass screen needs to know to explain the right thing:
 // can they check themselves in at all, does it need location, did they pay
-// online, and how close to the appointment may they still reschedule. All
-// four are convenience facts - none of them affects queue order.
+// online, how close to the appointment may they still reschedule, and when
+// they should aim to report. All five are convenience/guidance facts - none
+// of them affects queue order or when a token is actually assigned (that's
+// still check-in, in arrival order - section 40).
 export interface CheckInOptions {
   canSelfCheckIn: boolean;
   requiresLocation: boolean;
   paidOnline: boolean;
   rescheduleWindowHours: number;
+  // "HH:MM:SS", already clamped to the check-in window server-side - see
+  // get_checkin_options() in migration_40_reporting_time.sql.
+  reportingTime: string;
 }
 
 export async function getCheckInOptions(appointmentId: string): Promise<CheckInOptions | null> {
@@ -212,6 +217,7 @@ export async function getCheckInOptions(appointmentId: string): Promise<CheckInO
     requires_location: boolean;
     paid_online: boolean;
     reschedule_window_hours: number;
+    reporting_time: string;
   }[])[0];
   if (!row) return null;
   return {
@@ -219,6 +225,7 @@ export async function getCheckInOptions(appointmentId: string): Promise<CheckInO
     requiresLocation: row.requires_location,
     paidOnline: row.paid_online,
     rescheduleWindowHours: row.reschedule_window_hours,
+    reportingTime: row.reporting_time,
   };
 }
 

@@ -16,6 +16,12 @@ interface PaymentRow {
   method: 'online' | 'cod';
   status: 'pending' | 'hold' | 'captured' | 'refunded';
   payout_status: 'pending' | 'paid';
+  gross_amount: number | null;
+  coupon_code: string | null;
+  discount_amount: number;
+  funded_by: 'platform' | 'clinic' | null;
+  razorpay_order_id: string | null;
+  razorpay_payment_id: string | null;
   created_at: string;
   appointments: {
     clinic_id: string;
@@ -155,6 +161,14 @@ export default function AdminPayments() {
               {p.appointments?.date} at {p.appointments?.slot_time?.slice(0, 5)} · {p.method} · payout:{' '}
               {p.payout_status}
             </p>
+            {p.coupon_code && (
+              <p className="text-xs text-emerald-600">
+                Coupon {p.coupon_code}: ₹{p.gross_amount ?? p.amount} → ₹{p.amount} (-₹{p.discount_amount})
+              </p>
+            )}
+            {p.razorpay_payment_id && (
+              <p className="truncate font-mono text-[11px] text-slate-400">rzp: {p.razorpay_payment_id}</p>
+            )}
             {p.status === 'captured' && (
               <>
                 <Button

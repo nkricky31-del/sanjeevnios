@@ -71,6 +71,14 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     description: 'Appointment letter, or a clinic letter confirming this doctor practises here.',
   },
   {
+    key: 'doctor_photo',
+    label: 'Photo',
+    ownerType: 'doctor',
+    required: true,
+    requiredForVerification: true,
+    description: 'A clear, recent photo of the doctor - shown on their profile once approved.',
+  },
+  {
     key: 'written_consent',
     label: 'Agreement signed (written consent)',
     ownerType: 'doctor',
@@ -83,11 +91,31 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     key: 'clinic_registration_certificate',
     label: 'Clinic registration certificate',
     ownerType: 'clinic',
-    required: false,
+    // Section 45 - part of the clinic's own submission gate now (a "not
+    // applicable" claim still satisfies it, same mechanism the doctor gate
+    // already treats as "not missing" - see enforce_clinic_submission_requirements()).
+    required: true,
     requiredForVerification: true,
     allowNotApplicable: true,
     description:
       'Clinical Establishments Act registration certificate. Mark "Not applicable" if your state doesn\'t require one, with a note explaining why.',
+  },
+  {
+    key: 'clinic_address_proof',
+    label: 'Address / ID proof',
+    ownerType: 'clinic',
+    required: true,
+    requiredForVerification: true,
+    description: 'A utility bill, rent agreement, or property document confirming the clinic\'s address.',
+  },
+  {
+    key: 'clinic_license',
+    label: 'Practice license',
+    ownerType: 'clinic',
+    required: true,
+    requiredForVerification: true,
+    allowNotApplicable: true,
+    description: 'Any additional license your local law requires to operate this clinic, if applicable.',
   },
   {
     key: 'map_location',

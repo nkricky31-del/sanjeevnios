@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import AdminAuditLog from '../components/AdminAuditLog';
+import AdminBilling from '../components/AdminBilling';
 import AdminConditions from '../components/AdminConditions';
+import AdminCoupons from '../components/AdminCoupons';
 import AdminDashboard from '../components/AdminDashboard';
 import AdminDocumentReview from '../components/AdminDocumentReview';
 import AdminFraud from '../components/AdminFraud';
@@ -71,7 +73,16 @@ export default function AdminConsole() {
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
   const [view, setView] = useState<
-    'dashboard' | 'verification' | 'subscriptions' | 'payments' | 'fraud' | 'audit' | 'patients' | 'conditions'
+    | 'dashboard'
+    | 'verification'
+    | 'subscriptions'
+    | 'payments'
+    | 'coupons'
+    | 'billing'
+    | 'fraud'
+    | 'audit'
+    | 'patients'
+    | 'conditions'
   >('dashboard');
   const [clinics, setClinics] = useState<PendingClinic[]>([]);
   const [doctors, setDoctors] = useState<PendingDoctor[]>([]);
@@ -224,6 +235,8 @@ export default function AdminConsole() {
     { value: 'verification', label: 'Verification' },
     { value: 'subscriptions', label: 'Subscriptions' },
     { value: 'payments', label: 'Payments' },
+    { value: 'coupons', label: 'Coupons' },
+    { value: 'billing', label: 'Billing' },
     { value: 'fraud', label: 'Fraud' },
     { value: 'audit', label: 'Audit log' },
     { value: 'patients', label: 'Patients' },
@@ -256,6 +269,18 @@ export default function AdminConsole() {
         {view === 'payments' && (
           <div className="mt-4">
             <AdminPayments />
+          </div>
+        )}
+
+        {view === 'coupons' && (
+          <div className="mt-4">
+            <AdminCoupons />
+          </div>
+        )}
+
+        {view === 'billing' && (
+          <div className="mt-4">
+            <AdminBilling />
           </div>
         )}
 

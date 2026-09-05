@@ -1248,3 +1248,409 @@ select payment_status from appointments where id = '<the new appointment id>';
 select method, status from payments where appointment_id = '<the new appointment id>';
 ```
 `payment_status = 'paid_online'`, and the payment row is `method = 'online'`, `status = 'captured'` - recorded immediately, the same shape a patient's own paid-online booking ends up in, just captured on the spot rather than held.
+
+## Test 20 — Two-step confirmation: patient notifications
+
+### Setup
+
+1. Run `supabase/migration_39_two_step_confirmation_notifications.sql`.
+2. You need **two logins** open at once (two browsers, or one normal + one private/incognito window):
+   - **Login A - patient**: any patient account with at least one family member on their profile.
+   - **Login B - clinic**: the clinic that owns the doctor Login A will book.
+3. (Optional) The WhatsApp/SMS leg only fires if `MSG91_AUTH_KEY`, `MSG91_WHATSAPP_SENDER` and `MSG91_WHATSAPP_TEMPLATE_NAME` are set as secrets on the deployed `send-patient-message` function (`npx supabase functions deploy send-patient-message` first). Skipping this is fine for everything below - the in-app notice never depends on it, and the function reports `{ sent: false, skipped: true }` on its own when unconfigured.
+
+### A. Booking received - a hold, not a charge
+
+1. As **Login A**, book an appointment with **Pay online** selected.
+2. You're taken straight to the booking's detail screen. It shows **"Booking received - waiting for clinic approval"** with the booking reference visible.
+3. Open the bell icon → Notifications. The newest entry reads *"We've received your booking request for [doctor] on [date]. Payment is on hold. You'll be confirmed once the clinic approves."*
+4. Confirm the hold, not a charge, actually landed:
+   ```sql
+   select status, method from payments where appointment_id = '<the new appointment id>';
+   ```
+   `status = 'hold'`, `method = 'online'`.
+5. Repeat with **Cash at clinic** instead - the notice instead reads *"...Payment (₹[fee]) is due at the clinic...."*, and the payments row is `status = 'pending'`.
+
+### B. Appointment confirmed - only after Accept, never before
+
+1. As **Login B**, open **Bookings → Pending approval** and find the booking from A.3. Do **not** act on it yet - go check **Login A**'s notifications again: still only the "booking received" notice. No "confirmed" message exists yet, because nothing has been accepted.
+2. Press **Accept**.
+3. As **Login A**, refresh Notifications. A new entry appears: *"Confirmed! Please reach the clinic by [reporting time] (your reporting time) for your [slot time] slot. Show your QR at the desk to check in. Booking ref [XXXXXXXX]. You've already paid online, so there's nothing to pay at the desk."* (reporting time = slot time minus the clinic's `report_before_minutes` setting, 30 by default - see Test 21 for the dedicated reporting-time test).
+4. Confirm the hold was captured, not left dangling:
+   ```sql
+   select status from appointments where id = '<the appointment id>'; -- 'accepted'
+   select status from payments where appointment_id = '<the appointment id>'; -- 'captured'
+   ```
+5. Open the booking on **Login A** (`/bookings/<id>`) - status now shows **"Confirmed — check in when you arrive"**, and the QR pass (`/pass/<id>` or the pass link from the booking screen) renders the check-in code.
+6. Press **Accept** again on the same row in **Login B** (e.g. two browser tabs both open to the same pending list) - the second press is a no-op: no duplicate "confirmed" notice appears, and `select count(*) from notifications where appointment_id = '<id>' and type = 'appointment_confirmed';` still returns exactly `1`.
+
+### C. Rejected - refunded, with a suggested next slot
+
+1. As **Login A**, make a second booking with the same doctor, **Pay online** again.
+2. As **Login B**, find it under **Pending approval**, press **Reject**, type a reason (e.g. "Doctor unavailable"), and confirm.
+3. As **Login A**, refresh Notifications: *"Sorry, the clinic couldn't confirm this slot (Doctor unavailable). Your payment is refunded. Here's the next best slot: [date] at [time]."* (or the "no open slots" line if the doctor's grid is fully booked for the next week).
+4. Confirm the refund actually happened:
+   ```sql
+   select payment_status from appointments where id = '<the rejected appointment id>'; -- 'refunded'
+   select status from payments where appointment_id = '<the rejected appointment id>'; -- 'refunded'
+   ```
+5. Repeat steps 1-4 with **Cash at clinic** instead - the notice says *"...No payment was collected...."* instead of claiming a refund, since nothing was ever charged.
+6. Check the history: `select type, channel, message from notifications where appointment_id = '<id>' order by at;` shows one `in_app` row per lifecycle event (plus a `whatsapp`/`sms` row too, only if you configured the gateway in Setup step 3) - never more than one per (appointment, type, channel).
+
+## Test 21 — Reporting time
+
+### Setup
+
+1. Run `supabase/migration_40_reporting_time.sql`.
+2. Same two logins as Test 20 (**Login A** - patient, **Login B** - the clinic).
+3. Confirm the default: `select report_before_minutes from clinics where id = '<clinic id>';` → `30`. Leave it at the default for parts A-C; part D changes it.
+
+### A. Reporting time shows 30 minutes before the slot, only once accepted
+
+1. As **Login A**, book an appointment for a slot at least a couple of hours from now (so the reminder in part B doesn't fire immediately) - either payment method.
+2. Open the booking (`/bookings/<id>`) while it's still pending: no "Reporting time" line is shown yet - reporting time is only meaningful once the clinic has actually accepted (there's nothing to report to until then).
+3. As **Login B**, **Accept** it.
+4. As **Login A**, reload the booking. The confirmed card now shows, e.g., **"Reporting time 3:30 PM | Slot 4:00 PM"** - exactly 30 minutes earlier than the slot. Confirm the same figure server-side:
+   ```sql
+   select slot_time from appointments where id = '<the appointment id>';
+   -- compare by hand: reporting time = slot_time - 30 minutes
+   ```
+5. Check the "confirmed" notification from Test 20.B again (or send a fresh one) - it quotes the same reporting time in its "Please reach the clinic by..." line.
+
+### B. The one gentle reminder, ~60 minutes before reporting time
+
+Rather than waiting for the clock, move the appointment close enough to trigger the reminder on the next check:
+```sql
+update appointments
+set date = current_date, slot_time = (now() + interval '85 minutes')::time
+where id = '<the accepted appointment id>';
+```
+(slot - 30 min reporting buffer - 60 min lead = the reporting-time reminder should fire almost immediately; adjust the `85 minutes` up or down so `slot_time - 30min` sits within the next 60 minutes.)
+
+1. As **Login A**, open the booking screen and leave it open - the reminder is a client-side timer that checks once immediately and then every 60 seconds while this screen is open (see BookingStatus.tsx).
+2. Within a few seconds, the amber alert banner at the top shows: *"Reminder: please aim to reach the clinic by [time] (your reporting time) for your [slot] slot."*
+3. Confirm it's logged, and only once:
+   ```sql
+   select count(*) from notifications where appointment_id = '<id>' and type = 'reporting_time_reminder';
+   ```
+   Exactly `1`. Reload the page (or open a second tab on the same booking) - the banner may show again from `checkLatestNotification()`'s "read the newest notice" logic, but the count above stays `1`; the reminder itself is never re-sent.
+
+### C. Reporting time is guidance only - the token still comes from check-in
+
+1. Using the same booking, do **not** check in yet. Confirm no token exists: `select token_number from appointments where id = '<id>';` → `null`.
+2. Let (or force, via the `date`/`slot_time` update above) the reporting time pass entirely - nothing happens automatically. No token is assigned, no status changes, and the booking screen still shows "You'll get your token when you check in at the clinic."
+3. As **Login B**, check the patient in (**Today** tab → **Expected** → **Check in**, or scan their QR). Only now does `token_number` get set, in arrival order - exactly as before this feature existed. The reporting time never created, reserved, or predicted that number.
+
+### D. A clinic setting above 60 minutes is clamped
+
+1. As **Login B**, open **Bookings → Booking mode** and set **Reporting time (minutes before slot)** to `90`. Save.
+2. Confirm the raw setting saved as entered: `select report_before_minutes from clinics where id = '<clinic id>';` → `90`.
+3. Accept a fresh booking for this clinic. The patient's card and the "confirmed" notification both show a reporting time only **60 minutes** before the slot, not 90 - `get_checkin_options()` and `reportingTimeFor()` both clamp to the check-in window (which itself opens exactly 60 minutes before the slot, unaffected by this setting). E.g. a 4:00 PM slot shows **"Reporting time 3:00 PM"**, not 2:30 PM. (`get_checkin_options()` is `security definer` and checks the caller's own JWT, so call it from the app - as above - rather than the SQL editor, which has no patient/clinic session to authorize against.)
+
+## Test 22 — Patient payment at checkout: coupons + real Razorpay
+
+Unlike every earlier test in this file, the online-payment half of this one needs a **real (test-mode) Razorpay account** - there is no demo/simulated path for it. COD and the coupon logic itself need nothing extra.
+
+### Setup
+
+1. Run `supabase/migration_41_coupons_and_razorpay.sql`.
+2. Deploy the three new functions and set their secrets:
+   ```
+   npx supabase functions deploy razorpay-create-order
+   npx supabase functions deploy razorpay-verify-payment
+   npx supabase functions deploy razorpay-capture-payment
+   npx supabase secrets set RAZORPAY_KEY_ID=rzp_test_xxxxxxxx RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxx
+   ```
+   Get a **test-mode** key id/secret from the Razorpay dashboard (Settings → API Keys → Generate Test Key) - test mode never moves real money, and Razorpay's test cards work against it (see step 4 below).
+3. Seed one test coupon directly (there's no admin UI for this yet - see migration 41's header):
+   ```sql
+   insert into coupons (code, discount_type, discount_value, min_order_amount, max_redemptions, funded_by)
+   values ('WELCOME50', 'flat', 50, 0, null, 'platform');
+   ```
+4. Two logins: **Login A** (patient), **Login B** (the clinic that owns the doctor you'll book). Note the doctor's `consultation_fee` - the examples below assume ₹200.
+
+### A. Apply a valid coupon and watch the total drop
+
+1. As **Login A**, open a doctor and pick a slot - land on the booking form with **Pay online** selected.
+2. Confirm the starting bill: **Doctor's fee ₹200**, **Platform convenience fee ₹10**, **Total ₹210**.
+3. Type `WELCOME50` into the coupon box and tap **Apply**. The box turns green: **"WELCOME50 applied - You saved ₹50"**, and the bill now shows a **Coupon discount (WELCOME50) -₹50** line with **Total ₹160**.
+4. Confirm the reservation actually landed server-side (not just client state):
+   ```sql
+   select status, discount_amount, appointment_id from coupon_redemptions
+   where patient_account_id = '<login A user id>' order by created_at desc limit 1;
+   ```
+   `status = 'reserved'`, `discount_amount = 50`, `appointment_id` still `null` (no booking exists yet).
+5. Try an invalid code (anything not in the table): **"This code is not valid."** shown in red, nothing reserved.
+6. Switch to **Cash at clinic** - the applied coupon is released and the box resets with *"Payment method changed - please re-apply your code."* (the convenience fee disappears from the bill, so the gross a percent-based coupon would apply to is different - flat ones like this one are unaffected, but the app treats both the same way for simplicity). Switch back to **Pay online** and re-apply `WELCOME50` before continuing.
+
+### B. Pay online - only the discounted amount is held, not the full fee
+
+1. Press **Confirm**. Razorpay Checkout opens quoting **₹160.00** - not ₹210.
+2. Pay with a Razorpay test card ([any of Razorpay's published test cards](https://razorpay.com/docs/payments/payments/test-card-upi-details/) - e.g. card `4111 1111 1111 1111`, any future expiry, any CVV) or test UPI.
+3. On success you land on the booking screen: **"Booking received - waiting for clinic approval"**. Notifications shows: *"...Payment is on hold..."*
+4. Confirm the hold is for the discounted amount, and is a REAL Razorpay authorization, not a local fiction:
+   ```sql
+   select method, status, gross_amount, coupon_code, discount_amount, net_amount, amount, razorpay_order_id, razorpay_payment_id
+   from payments where appointment_id = '<the new appointment id>';
+   ```
+   `gross_amount = 210`, `discount_amount = 50`, `net_amount = amount = 160`, `status = 'hold'`, both `razorpay_order_id` and `razorpay_payment_id` set. In the Razorpay dashboard (Test mode → Payments), the same payment id shows **Authorized**, amount ₹160.00 - not captured yet.
+5. Confirm the coupon reservation followed the booking: `select status, appointment_id from coupon_redemptions where discount_amount = 50 order by created_at desc limit 1;` → `status = 'reserved'`, `appointment_id` now set to the new appointment.
+6. Try applying `WELCOME50` again as the same patient on a second booking attempt: refused with *"You already have this code applied to a booking you have in progress."* (it's `one_per_patient` and this reservation is still live).
+
+### C. Reject Checkout partway through - nothing is left dangling
+
+1. As **Login A**, start a fresh booking, apply `WELCOME50` again (first cancel or let the previous booking resolve so the one-per-patient check clears it), choose **Pay online**, press Confirm - then close the Razorpay modal without paying.
+2. The app shows *"Payment was not completed - this booking has been cancelled. You can try again."*
+3. Confirm the cleanup: `select status from appointments where id = '<that appointment id>';` → `cancelled`; the coupon reservation for it is `released`; no Razorpay authorization exists for an amount you never confirmed (nothing to check in the dashboard - Checkout was dismissed before a payment was even created).
+
+### D. Clinic Accept captures the exact held amount
+
+Using the successfully-paid booking from part B:
+
+1. As **Login B**, open **Bookings → Pending approval** and press **Accept**.
+2. Confirm the real capture happened - in the Razorpay dashboard, that same payment id now shows **Captured**, ₹160.00 (not ₹210). Locally:
+   ```sql
+   select status from payments where appointment_id = '<the appointment id>'; -- 'captured'
+   select status from coupon_redemptions where appointment_id = '<the appointment id>'; -- 'confirmed'
+   select status from appointments where id = '<the appointment id>'; -- 'accepted'
+   ```
+3. As **Login A**, the "confirmed" notification quotes the reporting time and says *"You've already paid online, so there's nothing to pay at the desk."*
+4. Confirm the one-per-patient use is now permanent: try applying `WELCOME50` again as this same patient → *"You have already used this code."* (a `confirmed` redemption, not just a live reservation).
+5. (Optional, mirrors Test 20's reject test) Book once more with `WELCOME50`, pay online, and have **Login B** **Reject** it instead of accepting. Confirm no capture call was needed - the Razorpay dashboard still shows that payment as **Authorized** (it will auto-release on its own within a few days), while locally `payments.status = 'refunded'` and the coupon redemption is `released` and available to reuse.
+
+## Test 23 — Coupon engine: data + validation
+
+Builds on Test 22 - same coupon box, same `validate_and_price()` RPC underneath (migration 42 renamed several coupon columns and replaced `reserve_coupon()` with it, in place). Two coupons are pre-seeded for this test:
+```sql
+-- Percent, capped: 20% off, capped at Rs.30 - so anything above a Rs.150
+-- doctor's fee should show exactly -Rs.30, never the uncapped 20%.
+select code, type, value, max_discount from coupons where code = 'SAVE20';
+-- Already expired - valid_to is a day in the past.
+select code, valid_to from coupons where code = 'EXPIRED10';
+```
+(If they're missing - e.g. on a fresh database - recreate them: `insert into coupons (code, description, type, value, max_discount, funded_by) values ('SAVE20', 'Percent test', 'percent', 20, 30, 'platform');` and `insert into coupons (code, description, type, value, valid_to, funded_by) values ('EXPIRED10', 'Expiry test', 'flat', 10, now() - interval '1 day', 'platform');`.)
+
+### A. A percent coupon respects its cap
+
+1. As a patient, open a booking form for a doctor whose fee is **comfortably above ₹150** (so 20% would exceed the ₹30 cap - e.g. a ₹300 fee, where 20% is ₹60).
+2. Apply `SAVE20`. The discount line shows **exactly -₹30**, not -₹60 - `round(gross * 20 / 100)` computed ₹60, then `least(..., max_discount)` capped it.
+3. Confirm server-side: `select discount_amount from coupon_redemptions where coupon_id = (select id from coupons where code = 'SAVE20') order by created_at desc limit 1;` → `30`.
+4. Try it against a cheap doctor instead (fee low enough that 20% stays under ₹30, e.g. ₹100 → 20% = ₹20): the discount now shows **-₹20** - the cap only ever lowers a discount, never raises one.
+
+### B. A one-per-user coupon is refused on the second try
+
+1. As the same patient, apply `WELCOME50` (still `per_user_limit = 1`, migrated automatically from the old `one_per_patient` flag) and complete a booking with it (any payment method - COD is fastest for this test since there's no Checkout step).
+2. Have the clinic **Accept** it, so the redemption moves from `reserved` to `confirmed`:
+   ```sql
+   select status from coupon_redemptions where coupon_id = (select id from coupons where code = 'WELCOME50') and patient_id = '<this patient's user id>' order by created_at desc limit 1;
+   ```
+   → `confirmed`.
+3. As the same patient, try applying `WELCOME50` again on a new booking. Refused: **"You have already used this code."** Confirm the reason code behind that message: temporarily log `result.reasonCode` in `BookingForm.tsx`'s `applyCoupon`, or check directly -
+   ```sql
+   select * from validate_and_price('WELCOME50', '<this patient's user id>', '<clinic id>', 300);
+   ```
+   (Run this from the app's own session context, not the SQL editor - `validate_and_price` is `security definer` and checks the caller's JWT against `p_patient_id`, so a SQL-editor call with no session fails authorization before it even gets to the limit check. Easiest: call it via `supabase.rpc(...)` in the browser console while logged in as that patient.) → `valid = false`, `reason_code = 'PER_USER_LIMIT_REACHED'`.
+4. Confirm a **different** patient can still use `WELCOME50` - the limit is per-patient, not global (there's no `total_limit` set on this coupon).
+
+### C. An expired coupon is rejected
+
+1. As any patient, apply `EXPIRED10`. Refused: **"This code has expired."**
+2. Confirm the reason code: same approach as B.3 → `reason_code = 'EXPIRED'`.
+3. Extend it and confirm it starts working again: `update coupons set valid_to = now() + interval '1 day' where code = 'EXPIRED10';`, then re-apply - now succeeds with **-₹10**.
+
+### D. Two fast taps can't double-spend a one-time coupon
+
+Hardest to trigger from the UI alone (the Apply button doesn't debounce, but a human can rarely double-click faster than the RPC round-trip) - the reliable way to prove the row lock is doing its job is two concurrent database sessions:
+1. Set a hard ceiling: `update coupons set total_limit = 1, times_used = 0 where code = 'SAVE20';`
+2. Open **two SQL Editor tabs**. In both, begin a transaction and call the function, but don't commit yet:
+   ```sql
+   begin;
+   select * from validate_and_price('SAVE20', '<patient A id>', '<clinic id>', 300);
+   -- pause here in both tabs before committing
+   ```
+   (Run as a role with an active `auth.uid()` - or temporarily relax the authorization check for this test, since the SQL editor has no session; simplest is to test this from two logged-in browser tabs each calling `supabase.rpc('validate_and_price', ...)` for two DIFFERENT patients against the same total_limit-1 coupon, timed to fire within the same second.)
+3. Commit the first - `valid = true`, `times_used` becomes `1`.
+4. Commit the second - `valid = false`, `reason_code = 'TOTAL_LIMIT_REACHED'`, because the row lock on the coupon made the second transaction wait for the first to finish (and update `times_used`) before it was ever allowed to read it. Without the lock, both could have read `times_used = 0` simultaneously and both succeeded - a real double-spend.
+5. Reset for reuse: `update coupons set total_limit = null, times_used = 0 where code = 'SAVE20';`.
+
+### E. Admin screen: create, edit, deactivate, and see redemptions
+
+1. Log in as **admin**, open **Admin → Coupons**.
+2. Press **+ New coupon**, fill in a code/type/value, save. It appears in **All coupons** immediately.
+3. Press **Edit** on it, change the value, save - the list reflects the change.
+4. Press **Deactivate** - the pill flips to **Inactive**. Confirm patients can no longer apply it: `reason_code = 'INACTIVE'`.
+5. Scroll to **Recent redemptions** - every redemption from tests A-C above appears, showing the patient, the discount, the clinic (once linked to a real booking), and **funded by** platform/clinic - exactly the split asked for.
+
+## Test 24 — Clinic-to-admin billing
+
+Real monthly billing cycles obviously can't be waited out in a test, and Razorpay Test Mode doesn't offer a "force the next renewal to fail" button - so this test subscribes a clinic for real (proving the Checkout + create-subscription half works), then drives the renewal success/failure logic directly by sending correctly-signed webhook payloads with `curl` (proving razorpay-webhook's own logic - the part that actually changes billing state - works, deterministically, without waiting on Razorpay's real billing clock).
+
+### Setup
+
+1. Run `supabase/migration_43_clinic_billing.sql` (adds `plans`, extends `subscriptions`, adds `invoices`/`commission_ledger`, and fixes a dormant bug in `handle_appointment_status_change()` - see the migration's own header).
+2. Deploy the two new functions:
+   ```
+   npx supabase functions deploy razorpay-create-subscription
+   npx supabase functions deploy razorpay-webhook --no-verify-jwt
+   ```
+   `--no-verify-jwt` matters here specifically - Razorpay calls this endpoint with no Supabase session at all, so the platform's normal JWT check must be off for this one function (every other edge function in this project keeps it on).
+3. In the **Razorpay Dashboard** (Test Mode) → **Account & Settings → Webhooks** → **Add New Webhook**:
+   - URL: `https://maqnfncrqtdbjqrsibyq.supabase.co/functions/v1/razorpay-webhook`
+   - Active events: `subscription.charged`, `subscription.pending`, `subscription.halted`
+   - Save, then copy the **Webhook Secret** Razorpay generates (this is a different value from your `RAZORPAY_KEY_SECRET` API secret).
+4. `npx supabase secrets set RAZORPAY_WEBHOOK_SECRET=<the secret from step 3>`
+
+### A. Subscribe a clinic
+
+1. Log in as a **clinic**, open **Bookings → Billing**.
+2. It shows **"No plan yet"** and **"Not yet subscribed via Razorpay"**.
+3. Pick a plan (e.g. **Standard - ₹999/month**) and press **Subscribe**. Razorpay Checkout opens in subscription mode.
+4. Complete it with a Razorpay test UPI/card ([Razorpay's published test details](https://razorpay.com/docs/payments/payments/test-card-upi-details/)) - this sets up the recurring mandate; it does not yet activate anything in this app (that's the webhook's job, deliberately - see `razorpay-webhook`'s header comment).
+5. Note the subscription id this created: `select razorpay_subscription_id from subscriptions where clinic_id = '<clinic id>';` → looks like `sub_XXXXXXXXXXXX`. You'll need this exact value for parts B-D below.
+
+### B. Simulate a successful renewal - an invoice appears, the clinic stays live
+
+```bash
+SECRET='<your RAZORPAY_WEBHOOK_SECRET from Setup step 3>'
+URL='https://maqnfncrqtdbjqrsibyq.supabase.co/functions/v1/razorpay-webhook'
+SUB_ID='<the sub_... id from part A.5>'
+NOW=$(date +%s)
+BODY=$(cat <<EOF
+{"event":"subscription.charged","payload":{"subscription":{"entity":{"id":"$SUB_ID","current_start":$NOW,"current_end":$((NOW+2592000))}},"payment":{"entity":{"id":"pay_test_success1","amount":99900,"status":"captured"}}}}
+EOF
+)
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
+curl -s -X POST "$URL" -H "Content-Type: application/json" -H "X-Razorpay-Signature: $SIG" -d "$BODY"
+```
+1. Response: `{"received":true}`.
+2. Confirm an invoice landed: `select amount, status, period_end from invoices where clinic_id = '<clinic id>' order by created_at desc limit 1;` → `amount = 999`, `status = 'paid'`, `period_end` ~30 days out.
+3. Confirm the subscription extended: `select billing_status, current_period_end from subscriptions where clinic_id = '<clinic id>';` → `billing_status = 'active'`.
+4. Confirm the clinic stays (or becomes) visible: `select is_active from clinics where id = '<clinic id>';` → `true`. As a patient, search for this clinic's doctor - it appears normally.
+5. As the clinic, refresh **Billing** - notification shows *"Your subscription payment succeeded. Your clinic stays live through [date]."*
+
+### C. Simulate a failed renewal - past_due, but NOT hidden yet
+
+```bash
+BODY=$(cat <<EOF
+{"event":"subscription.pending","payload":{"subscription":{"entity":{"id":"$SUB_ID","current_start":$NOW,"current_end":$((NOW+2592000))}},"payment":{"entity":{"id":"pay_test_fail1","amount":99900,"status":"failed"}}}}
+EOF
+)
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
+curl -s -X POST "$URL" -H "Content-Type: application/json" -H "X-Razorpay-Signature: $SIG" -d "$BODY"
+```
+1. Confirm: `select billing_status, past_due_since from subscriptions where clinic_id = '<clinic id>';` → `billing_status = 'past_due'`, `past_due_since` set to roughly now.
+2. Confirm a failed invoice was logged: `select status from invoices where clinic_id = '<clinic id>' order by created_at desc limit 1;` → `'failed'`.
+3. **The clinic is still live** - this is the "short grace period" (Razorpay's own retry window): `select is_active from clinics where id = '<clinic id>';` → still `true`. Search still finds it, and it can still accept bookings.
+4. As the clinic, **Billing** shows the red **"Payment past due"** banner. Notification: *"Your subscription renewal payment failed. We'll retry automatically..."*
+
+### D. Simulate retries exhausted - now the clinic is hidden
+
+```bash
+BODY='{"event":"subscription.halted","payload":{"subscription":{"entity":{"id":"'"$SUB_ID"'"}}}}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
+curl -s -X POST "$URL" -H "Content-Type: application/json" -H "X-Razorpay-Signature: $SIG" -d "$BODY"
+```
+1. Confirm: `select is_active from clinics where id = '<clinic id>';` → now `false`.
+2. As a patient, search for this clinic's doctor again - it's **gone** from results (same `search_doctors()` visibility rule as any other deactivated clinic - "Part 30").
+3. Try to book it anyway via a direct link/old bookmark: refused with *"This clinic isn't currently accepting bookings."* (`enforce_clinic_booking_limit()`).
+4. As the clinic, **Billing** still shows **Past due**; notification: *"Your subscription payments have failed repeatedly. Your clinic is now hidden..."*
+
+### E. Pay again - automatic reactivation
+
+Re-run part B's exact `curl` command (a fresh `pay_test_success2` id, current timestamps). Confirm `clinics.is_active` flips back to `true`, `billing_status` back to `active`, the clinic reappears in search, and a new `paid` invoice exists - all from that one signed event, no manual admin action needed.
+
+### F. A badly-signed request is rejected
+
+Repeat any of the `curl` commands above but with `SIG="wrongsignature"` hardcoded instead of the computed one. Response: `400` with *"Signature did not match..."*, and nothing in the database changes - confirms the endpoint doesn't trust an unsigned/mis-signed request, which is the entire point of doing this over a webhook rather than a client callback.
+
+### G. Admin view + commission ledger
+
+1. As **admin**, open **Admin → Billing**. The clinic from above shows its plan, next renewal date, and past-due state matching whatever you last simulated.
+2. **Invoices** lists every paid/failed row from B-E. **Total revenue** at the top reflects the sum of `paid` invoices (plus any commissions, part below).
+3. To see a commission entry: complete a booking at a clinic whose plan has `per_booking_commission > 0` (Premium, 2% by default - `update subscriptions set plan_id = (select id from plans where name = 'Premium') where clinic_id = '<clinic id>';` to force it for this test), then mark that appointment **Completed** (Today tab → call, start, complete visit).
+4. `select * from commission_ledger where appointment_id = '<the appointment id>';` → one row, `platform_fee = net_amount * 0.02`. It also now appears under **Admin → Billing → Commissions**, and **Total revenue** increases by that amount.
+
+## Test 25 — Patient onboarding profile
+
+### Setup
+
+1. Run `supabase/migration_44_patient_onboarding.sql`. Confirm the backfill did its job before testing anything new: `select role, onboarding_complete, count(*) from profiles group by 1, 2;` - every existing **patient** row should already show `onboarding_complete = true` (clinic/admin rows too). If any existing patient shows `false`, something about the backfill's condition (`exists (select 1 from family_members where account_id = profiles.id)`) didn't match their data - worth checking before testing with a fresh number, since otherwise you can't tell "gate works for new users" apart from "gate broke for existing ones."
+2. You'll need a **brand-new phone number** Supabase Auth has never seen before. Easiest: add a fresh **Test OTP number** in Supabase Dashboard → Authentication → Providers → Phone (per this project's own `SETUP.md`) - any not-yet-used number with a fixed test code, so you don't need a real SMS.
+
+### A. A brand-new sign-up is forced through onboarding before anything else
+
+1. Log in with the new test phone number for the first time.
+2. Before any home screen, search bar, or bottom tab bar appears, you land on **"Welcome — let's set up your profile"**. Confirm none of the normal app chrome (bottom tab bar, header) is present - this is the only thing on screen.
+3. Try to route around it: type `/search` or `/bookings` directly into the address bar. You're still shown the onboarding form - `PatientOnboardingGate` wraps every patient route in `App.tsx`, so there's no URL that reaches past it.
+4. Try submitting with fields empty: **Save and continue** refuses with a specific message per missing field (name, DOB, sex, address, city, a valid 6-digit pincode, emergency contact name, a valid 10-digit emergency contact phone) - one at a time, not a generic error.
+5. Fill in all required fields, leave email/blood group blank, leave "Known conditions" at **not answered** (its default), tick the platform declaration checkbox, and press **Save and continue**.
+6. The app now appears - if your test project also has DPDP consent still outstanding for this brand-new account, you'll see that one additional small consent screen next (unaffected by this change - see this migration's own header for why), then the app for real.
+
+### B. What got saved
+
+```sql
+select * from family_members where account_id = '<the new patient's user id>' and relation = 'self';
+select onboarding_complete, name from profiles where id = '<the new patient's user id>';
+select declaration_version from patient_declarations where patient_id = '<the new patient's user id>' and consent_type = 'platform_disclaimer';
+```
+1. The `family_members` row has every field you entered, `mrn` auto-generated, and is the one now shown as "Self" under Profile → My Family.
+2. `profiles.onboarding_complete = true` and `profiles.name` matches the full name you entered (kept in sync automatically).
+3. A `patient_declarations` row exists for `platform_disclaimer` at the current version - the declaration was recorded once, not twice, even though it's shown as part of onboarding rather than the separate gate.
+
+### C. Known conditions, on the same form
+
+1. Repeat with a second fresh test number, this time selecting **"Yes, has known condition(s)"**, ticking a couple of conditions from the list, and adding text under "Other".
+2. After completing onboarding: `select has_known_conditions, known_conditions_other from family_members where id = '<new member id>';` and `select condition_id from patient_conditions where patient_id = '<new member id>';` both reflect exactly what was picked - no separate visit to Profile → Medical Information was needed.
+
+### D. A returning user skips straight to the app
+
+1. Sign out, then log back in with the **same** phone number from test A.
+2. You land directly on the normal home screen - no onboarding form, no delay. `profile.onboarding_complete` is already `true`, so the gate renders its children immediately.
+
+### E. Edit these details later from Profile
+
+1. As that same patient, open **Profile → Personal Details**.
+2. Below the name/phone/MRN section, the same fields from onboarding appear pre-filled (DOB, sex, address, city, pincode, emergency contact name + phone) - change one (e.g. address) and press **Save details**.
+3. Confirm: `select address from family_members where id = '<member id>';` reflects the new value. Known conditions remain separately editable under **Medical Information**, exactly as before this feature existed.
+
+### F. A pre-existing patient never sees the new gate
+
+Using an account that was already using the app **before** this migration ran (one of the ones confirmed `onboarding_complete = true` in Setup step 1): log in. Straight to the app, no onboarding form - confirms the backfill correctly distinguished "already a real user" from "brand new."
+
+## Test 26 — Clinic registration with uploads
+
+The clinic's own submission (draft → pending) and each doctor's submission (draft → pending) are deliberately two independent gates - a clinic is never forced to fully onboard a doctor before it can submit itself, and vice versa (see migration 45's header for why). This test exercises both, since the spec's "register a clinic with one doctor... submit" walkthrough touches both gates.
+
+### Setup
+
+1. Run `supabase/migration_45_clinic_registration_uploads.sql`.
+2. Confirm the stale function overload this migration itself warns about didn't get left behind: `select pg_get_function_arguments(oid) from pg_proc where proname = 'register_clinic';` → exactly **one** row, the 4-argument version. (If you see two, the `drop function` line at the top of this migration didn't run - re-run the migration.)
+3. Confirm existing clinics are untouched: `select status, count(*) from clinics group by 1;` - none should have flipped to `draft` retroactively (only a clinic registered *after* this migration ever starts there).
+
+### A. Register a clinic - starts as a draft, not already pending
+
+1. Log in as a patient, choose **Register your clinic**, fill in name / registration number / address / a 10-digit contact phone, submit.
+2. You land on the clinic dashboard. The top banner reads **"...still being set up - finish and submit your documents..."** - not "awaiting admin approval": `select status from clinics where owner_id = '<your user id>';` → `'draft'`.
+3. Confirm it does **not** appear in the admin queue yet: as **admin**, open **Verification** - this clinic is absent (the pending-clinics query is `status = 'pending'`, and this one is still `draft`).
+
+### B. Try to submit with a missing document - blocked
+
+1. On the clinic dashboard, open the **Doctors** tab. **Clinic onboarding** shows at the top: map location picker, then the document checklist with three required items (**Clinic registration certificate**, **Address / ID proof**, **Practice license** - `*` marks each as required) - all showing **"Not uploaded"** - and no **Submit clinic for review** button is even usable yet.
+2. Upload just the registration certificate (any small PDF/JPG/PNG). The amber checklist above the submit button still lists the other two as missing, and the button stays disabled.
+3. Try bypassing the UI - call the update directly as the clinic owner: `update clinics set status = 'pending' where id = '<clinic id>';`. Refused: *"All required documents must be uploaded before submitting this clinic for review."* - `enforce_clinic_submission_requirements()` (the DB trigger) is what actually can't be bypassed, not just the disabled button.
+4. Try an oversized or wrong-type file (e.g. a `.txt` file, or anything over 10MB) against any checklist item: refused client-side with *"File must be a JPG, PNG, or PDF."* / *"File must be under 10MB."* before it ever reaches storage.
+
+### C. Upload the rest, submit, and it reaches the admin queue
+
+1. Upload the remaining two required documents (or mark **Practice license** "Not applicable" with a note, if your test clinic doesn't have one - registration certificate already supports that too).
+2. The checklist now shows all three as **Pending review**, the warning list disappears, and **Submit clinic for review** becomes enabled. Press it.
+3. Status flips to **Submitted for review**: `select status from clinics where id = '<clinic id>';` → `'pending'`.
+4. As **admin**, open **Verification** - the clinic now appears in the pending queue with its documents visible for review (`AdminDocumentReview.tsx` renders the two new clinic doc types automatically - it's driven entirely by `src/lib/documentTypes.ts`, no admin-screen changes were needed for them).
+5. Confirm nothing is live yet: `select is_active from clinics where id = '<clinic id>';` is `true` (a clinic can still receive this while pending, unrelated to admin approval - see schema.sql section 30's own comment on why `is_active` is a separate lock), but `select is_currently_verified('clinic', '<clinic id>');` → `false`, and no **Verified** badge shows anywhere the clinic appears - it only shows once admin actually approves.
+
+### D. Add a doctor - their own, separate submission
+
+1. Still on the **Doctors** tab, press **+ Add doctor**, fill in name/registration number, save.
+2. You land on that doctor's own onboarding screen. Sign the agreement (**1. Written consent**), then upload all four required documents including the new **Photo** item (**2. Documents**) - government ID, medical registration certificate, degree certificate, doctor–clinic association proof, and photo.
+3. Press **Submit for review**. `select status from doctors where id = '<doctor id>';` → `'pending'`.
+4. As **admin**, the **Verification** queue now shows both the clinic (from part C) and this doctor as separate pending items - approving one has no effect on the other, confirming the two gates are genuinely independent.
