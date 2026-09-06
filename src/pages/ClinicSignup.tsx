@@ -20,19 +20,19 @@ interface QuickStartClinic {
 // The clinic's QUICK-START registration (schema.sql section 48). Phone+OTP
 // has already happened by the time this renders - the same login screen
 // every patient uses (Login.tsx) - so this is deliberately the lightest
-// possible next step: name, registration number, one certificate. Submitting
-// creates the clinic directly at status='pending' (register_clinic_quick_start(),
-// skipping the old 'draft' stage entirely) and drops it straight into the
-// admin's review queue - the confirmation screen below is what "under
-// verification" looks like.
+// possible FIRST step: name, registration number, one certificate. Submitting
+// creates the clinic at status='draft' (register_clinic_quick_start()) - the
+// confirmation screen below tells the clinic what's still needed before it
+// can actually be sent for review.
 //
-// Map location, doctors, and the two remaining verification documents
-// (clinic_address_proof, clinic_license) are all still there to add
-// afterwards from the dashboard's Doctors tab (ClinicOnboardingScreen.tsx) -
-// that screen already renders regardless of clinics.status, it's just that
-// its own "Submit for review" button (which only makes sense for a 'draft'
-// clinic) never appears for a clinic that came in this way, since it's
-// already 'pending'.
+// Section 55 tightened this: a clinic can no longer reach the admin's queue
+// with zero doctors, so quick-start can no longer skip straight to
+// 'pending' either - map location, the two remaining verification documents
+// (clinic_address_proof, clinic_license), and at least one fully-onboarded
+// doctor all still have to be added from the dashboard's Doctors tab
+// (ClinicDoctors.tsx / ClinicOnboardingScreen.tsx) before its own "Send for
+// verification" button - which only appears for a 'draft' clinic - will
+// even enable, let alone succeed server-side.
 //
 // Embedded bare (no page header) by both App.tsx (right after a "Register
 // your clinic" login) and ClinicQueue.tsx (defensive fallback for a
@@ -109,15 +109,15 @@ export default function ClinicSignup({ onRegistered }: Props) {
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
           <CheckCircle2 size={28} />
         </div>
-        <h1 className="mt-3 text-lg font-bold text-slate-900">Under verification</h1>
+        <h1 className="mt-3 text-lg font-bold text-slate-900">Almost there</h1>
         <p className="mt-1 text-sm text-slate-500">
-          <strong>{registered.name}</strong> is registered and in the admin's review queue. This usually takes a
-          business day or two.
+          <strong>{registered.name}</strong> is registered as a draft. Finish setup from the Doctors tab before it can
+          be sent for review.
         </p>
         <div className="mt-4 text-left">
           <InfoBanner>
-            You can carry on setting up while you wait — add your exact map location, your doctors, and the rest of
-            your verification documents from the Doctors tab. {registered.name} stays hidden from patient search and
+            Still needed: your exact map location, the rest of your verification documents, and at least one doctor
+            with all of their required documents submitted. {registered.name} stays hidden from patient search and
             can't accept bookings until an admin approves it.
           </InfoBanner>
         </div>
@@ -167,9 +167,10 @@ export default function ClinicSignup({ onRegistered }: Props) {
         </div>
 
         <InfoBanner>
-          This gets your clinic straight into the admin's review queue. Your exact map location, doctors, and the
-          rest of your verification documents can all be added afterwards from the dashboard. It stays hidden from
-          patient search — and can't accept bookings — until an admin approves it.
+          This registers your clinic as a draft. You'll still need to add your exact map location, at least one
+          doctor with their required documents, and the rest of your verification documents from the dashboard before
+          it can be sent for review. It stays hidden from patient search — and can't accept bookings — until an admin
+          approves it.
         </InfoBanner>
 
         {error && <p className="text-sm text-red-600">{error}</p>}

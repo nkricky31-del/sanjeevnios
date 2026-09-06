@@ -10,7 +10,46 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <title>SanjeevniOS</title>
+
+    <!--
+      SEO basics for the public marketing site (sanjeevnios.in). These are
+      STATIC, not set from React - this app is a client-rendered SPA with no
+      server-side rendering, and social-media link-preview scrapers (and most
+      search crawlers' initial fetch) read the raw HTML without running any
+      JS. src/marketing/lib/useDocumentMeta.ts additionally updates
+      document.title per marketing page for the browser tab while navigating,
+      but that's a UX nicety on top of this, not a substitute for it - it
+      can't be seen by a scraper. Replace the placeholder canonical URL and
+      absolute og/twitter image URLs with the real production domain before
+      launch (relative /og-image.png works for the app itself, but social
+      platforms fetch og:image from an absolute URL).
+    -->
+    <title>SanjeevniOS — Clinic bookings, queues & records</title>
+    <meta
+      name="description"
+      content="SanjeevniOS connects patients and clinics: book appointments, manage live queues, and keep every visit and prescription in one verified, DPDP-compliant platform."
+    />
+    <link rel="canonical" href="https://sanjeevnios.in/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SanjeevniOS" />
+    <meta property="og:url" content="https://sanjeevnios.in/" />
+    <meta property="og:title" content="SanjeevniOS — Clinic bookings, queues & records" />
+    <meta
+      property="og:description"
+      content="SanjeevniOS connects patients and clinics: book appointments, manage live queues, and keep every visit and prescription in one verified, DPDP-compliant platform."
+    />
+    <meta property="og:image" content="https://sanjeevnios.in/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SanjeevniOS — Clinic bookings, queues & records" />
+    <meta
+      name="twitter:description"
+      content="SanjeevniOS connects patients and clinics: book appointments, manage live queues, and keep every visit and prescription in one verified, DPDP-compliant platform."
+    />
+    <meta name="twitter:image" content="https://sanjeevnios.in/og-image.png" />
   </head>
   <body>
     <div id="root"></div>

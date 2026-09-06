@@ -175,29 +175,29 @@ export default function Home() {
                   {next.clinics.address ? `, ${next.clinics.address}` : ''}
                 </p>
               )}
-              {/* Booking is per member (schema.sql section 47) - this one
-                  member having an appointment never means the account is
-                  "done booking" for the day, so "Book appointment" always
-                  stays alongside it rather than being replaced by it. */}
-              <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="mt-3 grid grid-cols-2 gap-2">
                 <Button variant="outline" onClick={() => navigate('/search')}>
                   Reschedule
                 </Button>
                 <Button variant="outline" onClick={() => navigate(`/bookings/${next.id}`)}>
                   View Details
                 </Button>
-                <Button onClick={() => navigate('/search')}>Book</Button>
               </div>
             </div>
           ) : (
             <div className="px-4 pb-4 pt-3">
               <p className="text-sm text-slate-500">No upcoming appointments.</p>
-              <Button className="mt-3" full onClick={() => navigate('/search')}>
-                Book an appointment
-              </Button>
             </div>
           )}
         </Card>
+
+        {/* Booking is per member (schema.sql section 47) - this one member
+            having an appointment never means the account is "done booking"
+            for the day, so this stays a separate action from the card
+            above rather than living inside it. */}
+        <Button className="mt-3" full onClick={() => navigate('/search')}>
+          Book Appointment
+        </Button>
 
         {/* Quick actions */}
         <SectionTitle className="mt-6">Quick Actions</SectionTitle>

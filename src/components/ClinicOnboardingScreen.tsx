@@ -1,17 +1,18 @@
 import { CheckCircle2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
 
-import { requiredDocTypesFor } from '../lib/documentTypes';
-import { supabase } from '../lib/supabaseClient';
-import type { Clinic, ClinicStatus, DocumentRow } from '../lib/types';
+import type { Clinic, ClinicStatus } from '../lib/types';
 import ClinicLocationPicker from './ClinicLocationPicker';
 import DocumentChecklist from './DocumentChecklist';
-import Button from './ui/Button';
 import StatusPill from './ui/StatusPill';
 
 interface Props {
   clinic: Clinic;
   onClinicSaved: (patch: Partial<Clinic>) => void;
+  // Fired whenever a clinic document is uploaded/re-uploaded - the parent
+  // (ClinicDoctors.tsx) owns the combined "ready to submit" checklist now
+  // (clinic docs + map location + at least one doctor), so it needs to know
+  // when to recompute it.
+  onDocumentsChanged?: () => void;
 }
 
 const STATUS_TONE: Record<ClinicStatus, 'live' | 'warning' | 'neutral'> = {
@@ -28,54 +29,13 @@ const STATUS_LABEL: Record<ClinicStatus, string> = {
   rejected: 'Rejected',
 };
 
-const REQUIRED_DOC_TYPES = requiredDocTypesFor('clinic');
-
-// Mirrors DoctorOnboardingScreen.tsx exactly, one level up: the clinic's own
-// map location + document checklist, gated behind the same
-// draft -> pending "Submit for review" rule enforce_clinic_submission_requirements()
-// (schema.sql section 45) enforces server-side. Rendered from ClinicDoctors.tsx,
-// which is where a clinic already manages everything else about its own
-// onboarding (adding doctors, their own onboarding screens).
-export default function ClinicOnboardingScreen({ clinic, onClinicSaved }: Props) {
-  const [documents, setDocuments] = useState<DocumentRow[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const load = async () => {
-    const { data } = await supabase.from('documents').select('*').eq('owner_type', 'clinic').eq('owner_id', clinic.id);
-    setDocuments((data ?? []) as DocumentRow[]);
-  };
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clinic.id]);
-
-  // Mirrors enforce_clinic_submission_requirements() in schema.sql: latest
-  // upload per required doc_type must exist and not be rejected. This is
-  // just the UX pre-check - the trigger is what actually can't be bypassed.
-  const latestByType = new Map<string, DocumentRow>();
-  for (const d of [...documents].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
-    latestByType.set(d.doc_type, d);
-  }
-  const missingRequired = REQUIRED_DOC_TYPES.filter((t) => {
-    const latest = latestByType.get(t.key);
-    return !latest || latest.status === 'rejected';
-  });
-  const canSubmit = missingRequired.length === 0;
-
-  const submitForReview = async () => {
-    setSubmitError(null);
-    setSubmitting(true);
-    const { error } = await supabase.from('clinics').update({ status: 'pending' }).eq('id', clinic.id);
-    setSubmitting(false);
-    if (error) {
-      setSubmitError(error.message);
-      return;
-    }
-    onClinicSaved({ status: 'pending' });
-  };
-
+// Mirrors DoctorOnboardingScreen.tsx one level up: the clinic's own map
+// location + document checklist. Purely presentational - the "is this
+// clinic ready to submit" gate and the "Send for verification" button now
+// live in the parent (ClinicDoctors.tsx), section 55, since that gate also
+// depends on the Doctors block rendered below this component on the same
+// page.
+export default function ClinicOnboardingScreen({ clinic, onClinicSaved, onDocumentsChanged }: Props) {
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -100,30 +60,17 @@ export default function ClinicOnboardingScreen({ clinic, onClinicSaved }: Props)
           initialLat={clinic.lat}
           initialLng={clinic.lng}
           initialAddress={clinic.formatted_address}
-          onSaved={(lat, lng, formattedAddress) => onClinicSaved({ lat, lng, formatted_address: formattedAddress })}
+          initialCity={clinic.city}
+          onSaved={(lat, lng, formattedAddress, city) =>
+            onClinicSaved({ lat, lng, formatted_address: formattedAddress, city })
+          }
         />
       </div>
 
       <div className="mt-5">
         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">2. Documents</p>
-        <DocumentChecklist ownerType="clinic" ownerId={clinic.id} onChanged={load} />
+        <DocumentChecklist ownerType="clinic" ownerId={clinic.id} onChanged={onDocumentsChanged} />
       </div>
-
-      {clinic.status === 'draft' && (
-        <div className="mt-6">
-          {!canSubmit && (
-            <div className="mb-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
-              {missingRequired.map((t) => (
-                <p key={t.key}>• {t.label} not uploaded yet.</p>
-              ))}
-            </div>
-          )}
-          {submitError && <p className="mb-2 text-sm text-red-600">{submitError}</p>}
-          <Button onClick={submitForReview} disabled={!canSubmit || submitting} full>
-            {submitting ? 'Submitting...' : 'Submit clinic for review'}
-          </Button>
-        </div>
-      )}
     </div>
   );
 }

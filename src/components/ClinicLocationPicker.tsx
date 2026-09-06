@@ -11,7 +11,8 @@ interface Props {
   initialLat: number | null;
   initialLng: number | null;
   initialAddress: string | null;
-  onSaved: (lat: number, lng: number, formattedAddress: string | null) => void;
+  initialCity: string | null;
+  onSaved: (lat: number, lng: number, formattedAddress: string | null, city: string | null) => void;
 }
 
 // Roughly the geographic centre of India - a reasonable default map center
@@ -22,10 +23,18 @@ const DEFAULT_ZOOM = 5;
 
 let searchDebounce: ReturnType<typeof setTimeout> | undefined;
 
-export default function ClinicLocationPicker({ clinicId, initialLat, initialLng, initialAddress, onSaved }: Props) {
+export default function ClinicLocationPicker({
+  clinicId,
+  initialLat,
+  initialLng,
+  initialAddress,
+  initialCity,
+  onSaved,
+}: Props) {
   const [lat, setLat] = useState(initialLat ?? DEFAULT_LAT);
   const [lng, setLng] = useState(initialLng ?? DEFAULT_LNG);
   const [address, setAddress] = useState(initialAddress ?? '');
+  const [city, setCity] = useState(initialCity);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<AddressResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -54,6 +63,7 @@ export default function ClinicLocationPicker({ clinicId, initialLat, initialLng,
     setLat(r.lat);
     setLng(r.lng);
     setAddress(r.formattedAddress);
+    setCity(r.city);
     setResults([]);
     setQuery('');
   };
@@ -62,7 +72,10 @@ export default function ClinicLocationPicker({ clinicId, initialLat, initialLng,
     setLat(newLat);
     setLng(newLng);
     const found = await reverseGeocode(newLat, newLng);
-    if (found) setAddress(found);
+    if (found) {
+      setAddress(found.formattedAddress);
+      setCity(found.city);
+    }
   };
 
   const save = async () => {
@@ -70,14 +83,14 @@ export default function ClinicLocationPicker({ clinicId, initialLat, initialLng,
     setSaving(true);
     const { error: updateError } = await supabase
       .from('clinics')
-      .update({ lat, lng, formatted_address: address.trim() || null })
+      .update({ lat, lng, formatted_address: address.trim() || null, city })
       .eq('id', clinicId);
     setSaving(false);
     if (updateError) {
       setError(updateError.message);
       return;
     }
-    onSaved(lat, lng, address.trim() || null);
+    onSaved(lat, lng, address.trim() || null, city);
   };
 
   return (
