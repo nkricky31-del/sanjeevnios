@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { uploadableDocTypesFor, type DocumentTypeConfig } from '../lib/documentTypes';
-import { openVerificationDoc, VERIFICATION_DOCS_BUCKET } from '../lib/storage';
+import { uploadVerificationDocument } from '../lib/documents';
+import { openVerificationDoc } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 import type { DocumentRow, OwnerType } from '../lib/types';
 import StatusPill from './ui/StatusPill';
@@ -11,9 +12,6 @@ interface Props {
   ownerId: string;
   onChanged?: () => void;
 }
-
-const MAX_DOC_BYTES = 10 * 1024 * 1024; // 10MB - matches the bucket's server-side limit
-const ALLOWED_DOC_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
 
 function statusTone(latest: DocumentRow | undefined): 'live' | 'warning' | 'info' | 'neutral' {
   if (!latest) return 'neutral';
@@ -83,37 +81,19 @@ export default function DocumentChecklist({ ownerType, ownerId, onChanged }: Pro
       patchRowState(config.key, { error: 'Choose a file first.' });
       return;
     }
-    if (!ALLOWED_DOC_TYPES.includes(file.type)) {
-      patchRowState(config.key, { error: 'File must be a JPG, PNG, or PDF.' });
-      return;
-    }
-    if (file.size > MAX_DOC_BYTES) {
-      patchRowState(config.key, { error: 'File must be under 10MB.' });
-      return;
-    }
 
     patchRowState(config.key, { saving: true, error: null });
-    const path = `${ownerType}s/${ownerId}/${config.key}/${crypto.randomUUID()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from(VERIFICATION_DOCS_BUCKET).upload(path, file, {
-      contentType: file.type,
-    });
-    if (uploadError) {
-      patchRowState(config.key, { saving: false, error: uploadError.message });
-      return;
-    }
-
-    const { error: insertError } = await supabase.from('documents').insert({
-      owner_type: ownerType,
-      owner_id: ownerId,
-      doc_type: config.key,
-      storage_path: path,
-      number: config.hasNumber ? state.number.trim() || null : null,
-      expiry_date: config.hasExpiry ? state.expiry || null : null,
-      status: 'pending',
+    const result = await uploadVerificationDocument({
+      ownerType,
+      ownerId,
+      docType: config.key,
+      file,
+      number: config.hasNumber ? state.number.trim() : null,
+      expiryDate: config.hasExpiry ? state.expiry : null,
     });
     patchRowState(config.key, { saving: false });
-    if (insertError) {
-      patchRowState(config.key, { error: insertError.message });
+    if (result.error) {
+      patchRowState(config.key, { error: result.error });
       return;
     }
     if (fileRefs.current[config.key]) fileRefs.current[config.key]!.value = '';

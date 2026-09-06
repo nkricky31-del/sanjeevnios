@@ -34,6 +34,7 @@ interface NextAppointment {
   status: AppointmentStatus;
   doctors: { name: string; specialty: string | null } | null;
   clinics: { name: string; address: string | null } | null;
+  family_members: { name: string } | null;
 }
 
 interface RecentEncounter {
@@ -90,11 +91,14 @@ export default function Home() {
       const memberRows = (memberData ?? []) as FamilyMember[];
       setMembers(memberRows);
 
-      // Soonest booking that hasn't happened yet - the "Next Appointment"
-      // hero card. Anything already done/cancelled is history, not "next".
+      // Soonest booking that hasn't happened yet, ACROSS EVERY FAMILY MEMBER
+      // on this account - purely informational (schema.sql section 47:
+      // booking is per member, so this is never the only booking that can
+      // exist, just the one worth surfacing first). family_members(name) so
+      // the card can say whose appointment this actually is.
       const { data: apptData } = await supabase
         .from('appointments')
-        .select('id, date, slot_time, status, doctors(name, specialty), clinics(name, address)')
+        .select('id, date, slot_time, status, doctors(name, specialty), clinics(name, address), family_members(name)')
         .gte('date', todayISO())
         .in('status', ['booked', 'accepted', 'checked_in', 'called', 'in_consultation'])
         .order('date', { ascending: true })
@@ -162,17 +166,27 @@ export default function Home() {
               </div>
               <p className="mt-1.5 text-lg font-bold text-slate-900">{next.doctors?.name ?? 'Doctor'}</p>
               <p className="text-sm text-slate-500">{next.doctors?.specialty ?? 'General Physician'}</p>
+              {next.family_members?.name && (
+                <p className="mt-1 text-sm font-medium text-slate-600">For {next.family_members.name}</p>
+              )}
               {next.clinics && (
                 <p className="mt-1.5 text-sm text-slate-500">
                   📍 {next.clinics.name}
                   {next.clinics.address ? `, ${next.clinics.address}` : ''}
                 </p>
               )}
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              {/* Booking is per member (schema.sql section 47) - this one
+                  member having an appointment never means the account is
+                  "done booking" for the day, so "Book appointment" always
+                  stays alongside it rather than being replaced by it. */}
+              <div className="mt-3 grid grid-cols-3 gap-2">
                 <Button variant="outline" onClick={() => navigate('/search')}>
                   Reschedule
                 </Button>
-                <Button onClick={() => navigate(`/bookings/${next.id}`)}>View Details</Button>
+                <Button variant="outline" onClick={() => navigate(`/bookings/${next.id}`)}>
+                  View Details
+                </Button>
+                <Button onClick={() => navigate('/search')}>Book</Button>
               </div>
             </div>
           ) : (

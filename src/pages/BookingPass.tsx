@@ -153,7 +153,7 @@ export default function BookingPass() {
 
     supabase.realtime.setAuth();
     const channel = supabase
-      .channel(`queue:${booking.doctor_id}:${booking.date}`)
+      .channel(`queue:${booking.doctor_id}:${booking.date}`, { config: { private: true } })
       .on('broadcast', { event: 'UPDATE' }, () => {
         loadQueue();
         loadBooking();

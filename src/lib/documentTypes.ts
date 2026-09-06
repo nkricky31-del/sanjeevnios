@@ -10,12 +10,6 @@ export interface DocumentTypeConfig {
   // entries here). Not meaningful for ownerType 'clinic' - clinic
   // submission isn't gated the same way, see allowNotApplicable instead.
   required: boolean;
-  // Required for the owner to reach is_verified (see sync_verification_status()
-  // in schema.sql - that function's required-type lists must be kept in sync
-  // with the `requiredForVerification: true` entries here). A separate flag
-  // from `required` above: e.g. clinic_registration_certificate isn't part of
-  // the doctor submission gate at all, but IS required to become verified.
-  requiredForVerification?: boolean;
   // True for a checklist item whose `documents` row isn't uploaded by the
   // owner - it's auto-inserted by a DB trigger from some other fact
   // (consents signed, clinics.lat/lng set). DocumentChecklist.tsx (the
@@ -32,16 +26,18 @@ export interface DocumentTypeConfig {
 // review view) render entirely from this list - adding a new document type
 // later is just adding an entry here, no screen changes needed. If a new
 // entry is `required: true` for ownerType 'doctor', also add its key to the
-// array in enforce_doctor_submission_requirements() in schema.sql; if it's
-// `requiredForVerification: true`, also add its key to the matching array in
-// sync_verification_status() in schema.sql.
+// array in enforce_doctor_submission_requirements() in schema.sql.
+//
+// Whether an item is mandatory before APPROVAL (as opposed to the submission
+// gate above) is no longer decided here at all - see the verification_
+// requirements table (schema.sql section 49) and src/lib/verificationRequirements.ts,
+// which the admin controls live from the "Requirements" tab.
 export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
   {
     key: 'government_id',
     label: 'Government ID',
     ownerType: 'doctor',
     required: true,
-    requiredForVerification: true,
     description: 'Aadhaar, PAN, or another government-issued photo ID - for identity/KYC.',
   },
   {
@@ -49,7 +45,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     label: 'Medical registration certificate',
     ownerType: 'doctor',
     required: true,
-    requiredForVerification: true,
     hasNumber: true,
     hasExpiry: true,
     description: 'NMC (or state medical council) registration certificate, with the registration number.',
@@ -59,7 +54,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     label: 'Degree / qualification certificate',
     ownerType: 'doctor',
     required: true,
-    requiredForVerification: true,
     description: 'MBBS or highest medical qualification certificate.',
   },
   {
@@ -67,7 +61,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     label: 'Doctor–clinic association proof',
     ownerType: 'doctor',
     required: true,
-    requiredForVerification: true,
     description: 'Appointment letter, or a clinic letter confirming this doctor practises here.',
   },
   {
@@ -75,7 +68,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     label: 'Photo',
     ownerType: 'doctor',
     required: true,
-    requiredForVerification: true,
     description: 'A clear, recent photo of the doctor - shown on their profile once approved.',
   },
   {
@@ -83,7 +75,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     label: 'Agreement signed (written consent)',
     ownerType: 'doctor',
     required: false, // not part of the submission gate - that's checked directly against `consents`
-    requiredForVerification: true,
     autoManaged: true,
     description: 'Confirms the doctor has signed the onboarding agreement to join SanjeevniOS.',
   },
@@ -95,7 +86,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     // applicable" claim still satisfies it, same mechanism the doctor gate
     // already treats as "not missing" - see enforce_clinic_submission_requirements()).
     required: true,
-    requiredForVerification: true,
     allowNotApplicable: true,
     description:
       'Clinical Establishments Act registration certificate. Mark "Not applicable" if your state doesn\'t require one, with a note explaining why.',
@@ -105,7 +95,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     label: 'Address / ID proof',
     ownerType: 'clinic',
     required: true,
-    requiredForVerification: true,
     description: 'A utility bill, rent agreement, or property document confirming the clinic\'s address.',
   },
   {
@@ -113,7 +102,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     label: 'Practice license',
     ownerType: 'clinic',
     required: true,
-    requiredForVerification: true,
     allowNotApplicable: true,
     description: 'Any additional license your local law requires to operate this clinic, if applicable.',
   },
@@ -122,7 +110,6 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     label: 'Map location set',
     ownerType: 'clinic',
     required: false,
-    requiredForVerification: true,
     autoManaged: true,
     description: 'Confirms the clinic has placed its pin at its exact location on the map.',
   },

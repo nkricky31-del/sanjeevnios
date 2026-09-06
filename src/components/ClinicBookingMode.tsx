@@ -34,6 +34,10 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
   // - meaningless outside that mode, so the inputs below only enable there.
   const [sameDayEnabled, setSameDayEnabled] = useState(clinic.same_day_booking_enabled ?? false);
   const [sameDayCutoff, setSameDayCutoff] = useState(String(clinic.same_day_cutoff_minutes ?? 30));
+  // Section 50 - plays the same role as sameDayCutoff above, but for every
+  // OTHER case (allow_walkins, or appointment_only without same-day booking
+  // turned on) - so unlike sameDayCutoff it's never disabled here.
+  const [pastSlotBuffer, setPastSlotBuffer] = useState(String(clinic.past_slot_buffer_minutes ?? 10));
   // Section 40 - unlike the fields above, this applies in BOTH modes, so
   // it's never disabled by the appointmentOnly gate the rest of this form
   // uses.
@@ -65,6 +69,7 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
     const horizonNum = Number(horizon);
     const capNum = Number(cap);
     const cutoffNum = Number(sameDayCutoff);
+    const pastSlotBufferNum = Number(pastSlotBuffer);
     const reportBeforeNum = Number(reportBefore);
     if (!Number.isInteger(horizonNum) || horizonNum < 1 || horizonNum > 90) {
       setError('Booking horizon must be between 1 and 90 days.');
@@ -76,6 +81,10 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
     }
     if (!Number.isInteger(cutoffNum) || cutoffNum < 0) {
       setError('Same-day cutoff must be 0 or more minutes.');
+      return;
+    }
+    if (!Number.isInteger(pastSlotBufferNum) || pastSlotBufferNum < 0) {
+      setError('Past-slot buffer must be 0 or more minutes.');
       return;
     }
     if (!Number.isInteger(reportBeforeNum) || reportBeforeNum < 1) {
@@ -90,6 +99,7 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
       daily_cap: capNum,
       same_day_booking_enabled: sameDayEnabled,
       same_day_cutoff_minutes: cutoffNum,
+      past_slot_buffer_minutes: pastSlotBufferNum,
       report_before_minutes: reportBeforeNum,
     };
     const { error: saveError } = await supabase.from('clinics').update(patch).eq('id', clinic.id);
@@ -163,6 +173,25 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
             />
             <p className="mt-1 text-[11px] text-slate-400">Across the whole clinic.</p>
           </div>
+        </div>
+
+        {/* Past-slot buffer (section 50) - always on, in every mode, so a
+            same-day slot that's already started (or about to) can never be
+            booked. An appointment_only clinic with same-day booking turned
+            on uses its own cutoff below instead once that applies. */}
+        <div className="mt-4 rounded-2xl border border-slate-100 p-3">
+          <label className="text-xs font-bold text-slate-700">Past-slot buffer (minutes)</label>
+          <input
+            type="number"
+            min={0}
+            value={pastSlotBuffer}
+            onChange={(e) => setPastSlotBuffer(e.target.value)}
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          />
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+            A same-day slot that has already started, or starts within this many minutes, is greyed out and can't be
+            booked. Applies in every mode except when the same-day cutoff below is the one in effect.
+          </p>
         </div>
 
         {/* Reporting time (section 40) - applies to every accepted booking in

@@ -78,6 +78,12 @@ export default function MyBookings() {
         setRows((data ?? []) as unknown as Row[]);
         setLoading(false);
       });
+
+    // Best-effort fallback for the day-before follow-up reminder (schema.sql
+    // section 46) - mirrors auto_mark_no_shows()'s own "the console sweeps
+    // when it loads" pattern for whenever pg_cron isn't available. Dedup
+    // happens server-side, so calling this on every load is harmless.
+    supabase.rpc('sweep_follow_up_reminders');
   }, []);
 
   const visible = useMemo(() => {
@@ -149,7 +155,12 @@ export default function MyBookings() {
                 <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-xs text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <Clock size={13} className="text-slate-400" />
-                    {r.date === today ? 'Today' : `For ${r.family_members?.name ?? 'you'}`}
+                    {/* Always the member's name, never replaced by "Today" -
+                        schema.sql section 47: an account can have several
+                        members with their own bookings on the very same day,
+                        so this is exactly when the label matters most. */}
+                    {r.date === today ? 'Today · ' : ''}
+                    {`For ${r.family_members?.name ?? 'you'}`}
                     {r.token_number != null && r.status !== 'completed' && (
                       <span className="ml-1 rounded-full bg-brand-50 px-2 py-0.5 font-bold text-brand-700">
                         Token #{r.token_number}

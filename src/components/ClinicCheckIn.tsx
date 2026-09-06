@@ -46,6 +46,7 @@ const PAYMENT_TONE: Record<AppointmentPaymentStatus, 'live' | 'warning' | 'neutr
   paid_at_clinic: 'live',
   pay_at_clinic: 'warning',
   refunded: 'neutral',
+  free_followup: 'live',
 };
 
 interface Outcome {
@@ -482,9 +483,10 @@ export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }:
                 </Button>
               )}
             </div>
-            {r.payment_status === 'paid_online' && (
+            {(r.payment_status === 'paid_online' || r.payment_status === 'free_followup') && (
               <p className="mt-1.5 text-xs text-slate-400">
-                Nothing to collect — but they still need to be checked in like anyone else.
+                {r.payment_status === 'free_followup' ? 'Free follow-up — nothing to collect' : 'Nothing to collect'}{' '}
+                — but they still need to be checked in like anyone else.
               </p>
             )}
           </Card>

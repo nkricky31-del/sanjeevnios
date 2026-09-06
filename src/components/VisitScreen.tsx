@@ -1,8 +1,8 @@
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Clock } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
-import type { PrescriptionDrug } from '../lib/types';
+import type { FollowUpInterval, PrescriptionDrug } from '../lib/types';
 import Button from './ui/Button';
 import Card from './ui/Card';
 import StatusPill from './ui/StatusPill';
@@ -18,9 +18,24 @@ interface VisitRow {
   id: string;
   diagnosis: string | null;
   notes: string | null;
-  follow_up_date: string | null;
+  follow_up_interval: FollowUpInterval;
+  follow_up_due_date: string | null;
   no_prescription: boolean;
+  // schema.sql section 54 - written only by sync_consultation_stats(),
+  // never edited here.
+  consultation_started_at: string | null;
+  consultation_ended_at: string | null;
+  duration_minutes: number | null;
+  waiting_time_minutes: number | null;
+  needs_review: boolean;
 }
+
+const FOLLOW_UP_OPTIONS: { value: FollowUpInterval; label: string }[] = [
+  { value: 'none', label: 'No follow-up needed' },
+  { value: '7', label: 'In 7 days' },
+  { value: '15', label: 'In 15 days' },
+  { value: '30', label: 'In 30 days' },
+];
 
 interface AttachedRxRow {
   id: string;
@@ -35,7 +50,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
 
   const [diagnosis, setDiagnosis] = useState('');
   const [notes, setNotes] = useState('');
-  const [followUpDate, setFollowUpDate] = useState('');
+  const [followUpInterval, setFollowUpInterval] = useState<FollowUpInterval>('none');
   const [noPrescription, setNoPrescription] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
@@ -56,7 +71,9 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
     // recent one rather than .single()/.maybeSingle() erroring on >1 row.
     const { data: visitRows } = await supabase
       .from('visits')
-      .select('id, diagnosis, notes, follow_up_date, no_prescription')
+      .select(
+        'id, diagnosis, notes, follow_up_interval, follow_up_due_date, no_prescription, consultation_started_at, consultation_ended_at, duration_minutes, waiting_time_minutes, needs_review'
+      )
       .eq('appointment_id', appointmentId)
       .order('created_at', { ascending: false })
       .limit(1);
@@ -66,7 +83,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
     if (visitData) {
       setDiagnosis(visitData.diagnosis ?? '');
       setNotes(visitData.notes ?? '');
-      setFollowUpDate(visitData.follow_up_date ?? '');
+      setFollowUpInterval(visitData.follow_up_interval ?? 'none');
       setNoPrescription(visitData.no_prescription);
 
       const { data: rxRows } = await supabase
@@ -97,7 +114,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
       appointment_id: appointmentId,
       diagnosis: diagnosis.trim() || null,
       notes: notes.trim() || null,
-      follow_up_date: followUpDate || null,
+      follow_up_interval: followUpInterval,
       no_prescription: noPrescription,
     };
 
@@ -148,7 +165,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
           appointment_id: appointmentId,
           diagnosis: diagnosis.trim() || null,
           notes: notes.trim() || null,
-          follow_up_date: followUpDate || null,
+          follow_up_interval: followUpInterval,
           no_prescription: false,
         })
         .select('id')
@@ -201,6 +218,45 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
           <p className="mt-4 text-sm text-slate-400">Loading...</p>
         ) : (
           <>
+            {/* Timed automatically off the status change (Start consultation
+                / Complete) - see schema.sql section 54. Only shown once a
+                consultation has actually started. */}
+            {visit?.consultation_started_at && (
+              <Card className="mt-4 !bg-slate-50">
+                <div className="flex items-center gap-2">
+                  <Clock size={15} className="text-brand-600" />
+                  <p className="text-sm font-semibold text-slate-900">Consultation timing</p>
+                  {visit.needs_review && <StatusPill label="Needs review" tone="warning" />}
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-slate-600">
+                  <p>
+                    Started{' '}
+                    {new Date(visit.consultation_started_at).toLocaleTimeString(undefined, {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                  {visit.consultation_ended_at ? (
+                    <p>
+                      Ended{' '}
+                      {new Date(visit.consultation_ended_at).toLocaleTimeString(undefined, {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </p>
+                  ) : (
+                    <p className="text-slate-400">Still in progress</p>
+                  )}
+                  {visit.waiting_time_minutes != null && (
+                    <p>Waited {visit.waiting_time_minutes} min after check-in</p>
+                  )}
+                  {visit.duration_minutes != null && (
+                    <p className="font-bold text-slate-900">Duration: {visit.duration_minutes} min</p>
+                  )}
+                </div>
+              </Card>
+            )}
+
             <Card className="mt-4">
               <p className="text-sm font-semibold text-slate-900">Notes & diagnosis</p>
               <div className="mt-3 space-y-3">
@@ -223,13 +279,28 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-700">Follow-up date (optional)</label>
-                  <input
-                    type="date"
-                    value={followUpDate}
-                    onChange={(e) => setFollowUpDate(e.target.value)}
+                  <label className="text-sm font-medium text-slate-700">Follow-up</label>
+                  <select
+                    value={followUpInterval}
+                    onChange={(e) => setFollowUpInterval(e.target.value as FollowUpInterval)}
                     className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
-                  />
+                  >
+                    {FOLLOW_UP_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {visit?.follow_up_due_date && followUpInterval !== 'none' && (
+                    <p className="mt-1 text-xs text-slate-400">
+                      Due{' '}
+                      {new Date(visit.follow_up_due_date + 'T00:00:00').toLocaleDateString(undefined, {
+                        day: 'numeric',
+                        month: 'short',
+                      })}
+                      . The patient will see a "Book follow-up" button on this visit once saved.
+                    </p>
+                  )}
                 </div>
                 {!attachedRx && (
                   <label className="flex items-start gap-2 text-sm text-slate-700">

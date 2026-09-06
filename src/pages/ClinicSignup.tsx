@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { CheckCircle2 } from 'lucide-react';
+import { useRef, useState, type FormEvent } from 'react';
 
 import { useAuth } from '../lib/AuthContext';
-import { livePhoneDigits, normalizePhone } from '../lib/phone';
+import { uploadVerificationDocument } from '../lib/documents';
 import { supabase } from '../lib/supabaseClient';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
@@ -11,24 +12,45 @@ interface Props {
   onRegistered?: () => void;
 }
 
-// The clinic registration form itself - embedded both by App.tsx (right
-// after a "Register your clinic" login) and by ClinicQueue.tsx (defensive
-// fallback for a 'clinic'-role account that somehow has no clinic row yet).
-// Neither host wants a second page header, so this renders bare, no chrome.
+interface QuickStartClinic {
+  id: string;
+  name: string;
+}
+
+// The clinic's QUICK-START registration (schema.sql section 48). Phone+OTP
+// has already happened by the time this renders - the same login screen
+// every patient uses (Login.tsx) - so this is deliberately the lightest
+// possible next step: name, registration number, one certificate. Submitting
+// creates the clinic directly at status='pending' (register_clinic_quick_start(),
+// skipping the old 'draft' stage entirely) and drops it straight into the
+// admin's review queue - the confirmation screen below is what "under
+// verification" looks like.
 //
-// Section 45: this only collects the clinic's basic details + contact - the
-// clinic is created as 'draft', and the actual verification uploads (plus
-// map location) happen next, from the clinic dashboard's Doctors tab
-// (ClinicOnboardingScreen.tsx) - the clinic only reaches the admin's queue
-// once it explicitly submits from there.
+// Map location, doctors, and the two remaining verification documents
+// (clinic_address_proof, clinic_license) are all still there to add
+// afterwards from the dashboard's Doctors tab (ClinicOnboardingScreen.tsx) -
+// that screen already renders regardless of clinics.status, it's just that
+// its own "Submit for review" button (which only makes sense for a 'draft'
+// clinic) never appears for a clinic that came in this way, since it's
+// already 'pending'.
+//
+// Embedded bare (no page header) by both App.tsx (right after a "Register
+// your clinic" login) and ClinicQueue.tsx (defensive fallback for a
+// 'clinic'-role account that somehow has no clinic row yet).
 export default function ClinicSignup({ onRegistered }: Props) {
   const { refreshProfile } = useAuth();
   const [name, setName] = useState('');
   const [regNo, setRegNo] = useState('');
-  const [address, setAddress] = useState('');
-  const [contactPhoneDigits, setContactPhoneDigits] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  // Set once the clinic itself is registered - swaps the form for the
+  // "under verification" confirmation. refreshProfile() (which flips
+  // profile.role to 'clinic' and, per App.tsx's render order, replaces this
+  // screen with the dashboard on the very next render) is deliberately
+  // deferred until the clinic dismisses THAT screen, not fired the moment
+  // registration succeeds - otherwise this confirmation would never be seen.
+  const [registered, setRegistered] = useState<QuickStartClinic | null>(null);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -42,34 +64,70 @@ export default function ClinicSignup({ onRegistered }: Props) {
       setError('Enter your clinic registration number.');
       return;
     }
-    if (!address.trim()) {
-      setError('Enter your clinic address.');
-      return;
-    }
-    if (contactPhoneDigits.length !== 10) {
-      setError('Enter a valid 10-digit contact phone number.');
+    const file = fileRef.current?.files?.[0] ?? null;
+    if (!file) {
+      setError('Upload your clinic registration certificate.');
       return;
     }
 
     setLoading(true);
-    const { error: rpcError } = await supabase.rpc('register_clinic', {
+    const { data, error: rpcError } = await supabase.rpc('register_clinic_quick_start', {
       p_name: name.trim(),
       p_reg_no: regNo.trim(),
-      p_address: address.trim() || null,
-      p_contact_phone: normalizePhone(contactPhoneDigits),
     });
-    setLoading(false);
-
-    if (rpcError) {
-      setError(rpcError.message);
+    const clinic = data as QuickStartClinic | null;
+    if (rpcError || !clinic) {
+      setLoading(false);
+      setError(rpcError?.message ?? 'Could not register the clinic.');
       return;
     }
 
-    // Flips profile.role to 'clinic' in local state - App.tsx will then
-    // render the clinic dashboard on the next render, no navigation needed.
+    const upload = await uploadVerificationDocument({
+      ownerType: 'clinic',
+      ownerId: clinic.id,
+      docType: 'clinic_registration_certificate',
+      file,
+    });
+    setLoading(false);
+    if (upload.error) {
+      // The clinic itself is already registered at this point - re-uploading
+      // the certificate from the Doctors tab afterwards is a normal recovery
+      // path (DocumentChecklist.tsx), so this isn't a dead end.
+      setError(`Clinic registered, but the certificate upload failed: ${upload.error}. You can upload it again from the Doctors tab once inside.`);
+    }
+    setRegistered(clinic);
+  };
+
+  const finish = async () => {
     await refreshProfile();
     onRegistered?.();
   };
+
+  if (registered) {
+    return (
+      <Card className="text-center">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+          <CheckCircle2 size={28} />
+        </div>
+        <h1 className="mt-3 text-lg font-bold text-slate-900">Under verification</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          <strong>{registered.name}</strong> is registered and in the admin's review queue. This usually takes a
+          business day or two.
+        </p>
+        <div className="mt-4 text-left">
+          <InfoBanner>
+            You can carry on setting up while you wait — add your exact map location, your doctors, and the rest of
+            your verification documents from the Doctors tab. {registered.name} stays hidden from patient search and
+            can't accept bookings until an admin approves it.
+          </InfoBanner>
+        </div>
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        <Button className="mt-4" full onClick={finish}>
+          Continue to dashboard
+        </Button>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -98,38 +156,20 @@ export default function ClinicSignup({ onRegistered }: Props) {
         </div>
 
         <div>
-          <label className="text-sm font-medium text-slate-700">Address</label>
+          <label className="text-sm font-medium text-slate-700">Clinic registration certificate</label>
           <input
-            type="text"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="Street, area, city"
-            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,application/pdf"
+            className="mt-1 block w-full text-sm"
           />
-        </div>
-
-        <div>
-          <label className="text-sm font-medium text-slate-700">Contact phone</label>
-          <div className="mt-1 flex items-center rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-brand-500">
-            <span className="pl-3 text-sm text-slate-500">+91</span>
-            <input
-              type="tel"
-              inputMode="numeric"
-              maxLength={10}
-              value={contactPhoneDigits}
-              onChange={(e) => setContactPhoneDigits(livePhoneDigits(e.target.value))}
-              placeholder="9876543210"
-              className="w-full rounded-lg px-2 py-2 text-sm outline-none"
-            />
-          </div>
-          <p className="mt-1 text-xs text-slate-400">The desk number patients and Sanjeevni admins can reach you on.</p>
+          <p className="mt-1 text-xs text-slate-400">JPG, PNG, or PDF, up to 10MB.</p>
         </div>
 
         <InfoBanner>
-          Your clinic will be created as a draft. Next, you'll place your exact location on the map, upload your
-          verification documents, and add your doctors - your clinic only joins the admin review queue once you
-          submit it from the dashboard. It stays hidden from patient search - and can't accept bookings - until
-          then and until an admin approves it.
+          This gets your clinic straight into the admin's review queue. Your exact map location, doctors, and the
+          rest of your verification documents can all be added afterwards from the dashboard. It stays hidden from
+          patient search — and can't accept bookings — until an admin approves it.
         </InfoBanner>
 
         {error && <p className="text-sm text-red-600">{error}</p>}

@@ -7,6 +7,7 @@ import {
   FlaskConical,
   HeartPulse,
   Info,
+  Lock,
   LogOut,
   Plus,
   ShieldCheck,
@@ -20,6 +21,7 @@ import { useNavigate } from 'react-router-dom';
 import FamilyMemberForm from '../components/FamilyMemberForm';
 import FamilyMemberPhoto from '../components/FamilyMemberPhoto';
 import KnownConditionsForm from '../components/KnownConditionsForm';
+import NameChangeRequestForm from '../components/NameChangeRequestForm';
 import PatientProfile from '../components/PatientProfile';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
@@ -43,16 +45,17 @@ const RELATION_LABEL: Record<string, string> = {
 type Panel = 'personal' | 'family' | 'medical' | 'privacy' | 'about' | null;
 
 export default function Profile() {
-  const { session, profile, refreshProfile } = useAuth();
+  const { session, profile } = useAuth();
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState(profile?.name ?? '');
-  const [savingName, setSavingName] = useState(false);
   const [viewingMrn, setViewingMrn] = useState<string | null>(null);
   const [conditionsFor, setConditionsFor] = useState<string | null>(null);
+  // Which family member card has its "Request name change" form open -
+  // schema.sql section 53. Mirrors conditionsFor's toggle pattern below.
+  const [nameChangeFor, setNameChangeFor] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [stats, setStats] = useState({ appointments: 0, records: 0, labReports: 0, spent: 0 });
 
@@ -105,10 +108,6 @@ export default function Profile() {
     })();
   }, []);
 
-  useEffect(() => {
-    setName(profile?.name ?? '');
-  }, [profile?.name]);
-
   const selfMember = members.find((m) => m.relation === 'self') ?? members[0];
 
   useEffect(() => {
@@ -122,13 +121,6 @@ export default function Profile() {
   }, [selfMember?.id]);
 
   if (!session || !profile) return null;
-
-  const saveName = async () => {
-    setSavingName(true);
-    await supabase.from('profiles').update({ name: name.trim() || null }).eq('id', session.user.id);
-    setSavingName(false);
-    await refreshProfile();
-  };
 
   // Section 44's onboarding fields, editable here afterward. Requires a
   // 'self' member to already exist - true for anyone who reaches this screen
@@ -239,18 +231,22 @@ export default function Profile() {
           {panel === 'personal' && (
             <div className="border-t border-slate-100 bg-slate-50/60 p-4">
               <label className="text-sm font-bold text-slate-700">Name</label>
-              <div className="mt-1.5 flex gap-2">
+              <div className="mt-1.5 flex items-center gap-2">
+                <IconTile icon={Lock} size="sm" tone="slate" />
                 <input
                   type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Add your name"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                  value={profile.name ?? ''}
+                  placeholder="Not set"
+                  disabled
+                  readOnly
+                  className="w-full cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-600 outline-none"
                 />
-                <Button onClick={saveName} disabled={savingName || name === (profile.name ?? '')}>
-                  Save
-                </Button>
               </div>
+              <p className="mt-1 text-xs text-slate-400">
+                Your legal name is locked. To fix it, submit a name-change request with a government ID.
+              </p>
+              <NameChangeRequestForm accountId={session.user.id} memberId={null} currentName={profile.name ?? '—'} />
+
               <p className="mt-3 text-sm font-bold text-slate-700">Phone</p>
               <p className="text-sm text-slate-600">+{profile.phone}</p>
               {selfMember?.mrn && (
@@ -419,6 +415,12 @@ export default function Profile() {
                         >
                           {conditionsFor === m.id ? 'Hide health info' : 'Health info'}
                         </button>
+                        <button
+                          onClick={() => setNameChangeFor((prev) => (prev === m.id ? null : m.id))}
+                          className="mt-0.5 flex items-center gap-0.5 text-[10px] font-semibold text-slate-500 underline"
+                        >
+                          <Lock size={9} /> {nameChangeFor === m.id ? 'Hide' : 'Fix name'}
+                        </button>
                       </div>
                     ))}
                     <button
@@ -435,6 +437,19 @@ export default function Profile() {
                   {conditionsFor && (
                     <div className="mt-4">
                       <KnownConditionsForm patientId={conditionsFor} onSaved={loadMembers} />
+                    </div>
+                  )}
+
+                  {nameChangeFor && (
+                    <div className="mt-4">
+                      <p className="text-xs font-bold text-slate-700">
+                        Name on file: {members.find((m) => m.id === nameChangeFor)?.name}
+                      </p>
+                      <NameChangeRequestForm
+                        accountId={session.user.id}
+                        memberId={nameChangeFor}
+                        currentName={members.find((m) => m.id === nameChangeFor)?.name ?? '—'}
+                      />
                     </div>
                   )}
                 </>

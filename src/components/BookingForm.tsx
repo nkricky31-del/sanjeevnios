@@ -8,6 +8,7 @@ import {
   DEFAULT_POLICY,
   getBookingPolicy,
   getNextAvailableDay,
+  isDuplicateMemberBookingError,
   isFullDayError,
   isSameDayCutoffError,
   isSlotFullError,
@@ -23,7 +24,7 @@ import { EMERGENCY_NOTE, PATIENT_DECLARATION_TEXT, PLATFORM_DISCLAIMER_SHORT } f
 import { createRazorpayOrder, loadRazorpayScript, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
-import type { FamilyMember, PaymentMethod } from '../lib/types';
+import type { PaymentMethod } from '../lib/types';
 import { useDpdpConsentStatus, usePatientDeclarationStatus } from '../lib/usePatientConsent';
 import Button from './ui/Button';
 import Card from './ui/Card';
@@ -32,6 +33,10 @@ interface Props {
   doctorId: string;
   doctorName: string;
   clinicId: string;
+  // Booking is per member, not per account (schema.sql section 47) - chosen
+  // by the caller (DoctorPage.tsx) BEFORE date/slot selection, not by this
+  // form. This form only ever books for the member it's handed.
+  memberId: string;
   date: string;
   slotTime: string;
   consultationFee: number;
@@ -41,6 +46,14 @@ interface Props {
   // from onCancel: the caller should also refresh the slot grid, since this
   // exact time is now stale.
   onSlotFull: () => void;
+  // Set when this booking is a follow-up of an earlier visit (DoctorPage.tsx,
+  // via BookingStatus.tsx's "Book follow-up" button) - the ORIGINAL VISIT's
+  // id, schema.sql section 46. followUpDueDate is that visit's own due date,
+  // used only to PREVIEW whether this looks free - create_payment_with_
+  // coupon() re-derives the real answer server-side from follow_up_of itself,
+  // never from these two props.
+  followUpOfVisitId?: string | null;
+  followUpDueDate?: string | null;
 }
 
 interface AppliedCoupon {
@@ -53,16 +66,17 @@ export default function BookingForm({
   doctorId,
   doctorName,
   clinicId,
+  memberId,
   date,
   slotTime,
   consultationFee,
   onCancel,
   onSlotFull,
+  followUpOfVisitId,
+  followUpDueDate,
 }: Props) {
   const { session, profile } = useAuth();
   const navigate = useNavigate();
-  const [members, setMembers] = useState<FamilyMember[]>([]);
-  const [memberId, setMemberId] = useState('');
   const [reason, setReason] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('online');
   const [loading, setLoading] = useState(false);
@@ -102,18 +116,13 @@ export default function BookingForm({
 
   const bill = computeBill(consultationFee, method, appliedCoupon?.discountAmount ?? 0);
 
-  useEffect(() => {
-    supabase
-      .from('family_members')
-      .select('*')
-      .order('created_at', { ascending: true })
-      .then(({ data }) => {
-        const list = data ?? [];
-        setMembers(list);
-        const self = list.find((m) => m.relation === 'self');
-        setMemberId(self?.id ?? list[0]?.id ?? '');
-      });
-  }, []);
+  // A PREVIEW only, shown before Confirm is even pressed - the server
+  // re-derives this itself (same doctor, this date on/before the visit's own
+  // follow_up_due_date) from follow_up_of in create_payment_with_coupon(),
+  // never from this. Doctor is never in question here: this page is always
+  // the ORIGINAL doctor's own page, reached only via that doctor's "Book
+  // follow-up" button.
+  const looksLikeFreeFollowUp = !!followUpOfVisitId && !!followUpDueDate && date <= followUpDueDate;
 
   useEffect(() => {
     getBookingPolicy(clinicId).then(setPolicy);
@@ -177,10 +186,6 @@ export default function BookingForm({
 
   const submit = async () => {
     setError(null);
-    if (!memberId) {
-      setError('Add a family member on your profile first.');
-      return;
-    }
     if (declarationStatus === 'needed' && !declarationChecked) {
       setError('Please accept the platform declaration above to continue.');
       return;
@@ -220,6 +225,12 @@ export default function BookingForm({
     // access for no reason is its own bad UX.
     const coords = sameDayAutoCheckin ? await getCurrentCoords() : null;
 
+    // A follow-up that no longer looks free (the window closed while the
+    // patient was picking a slot) falls back to a normal COD-style booking
+    // rather than blocking - create_payment_with_coupon() below is still the
+    // one true source of what actually gets charged, either way.
+    const effectiveMethod = looksLikeFreeFollowUp ? 'cod' : method;
+
     const { data: appointment, error: apptError } = await supabase
       .from('appointments')
       .insert({
@@ -236,8 +247,13 @@ export default function BookingForm({
         status: 'booked',
         // Payment is recorded, and that is ALL it does: paying online buys no
         // queue priority and does not check anyone in. It only means there's
-        // nothing to collect at the counter. See schema.sql section 30.
-        payment_status: method === 'online' ? 'paid_online' : 'pay_at_clinic',
+        // nothing to collect at the counter. See schema.sql section 30. A
+        // provisional guess for a follow-up that looks free (effectiveMethod
+        // is forced 'cod' above) - overwritten to 'free_followup' by
+        // create_payment_with_coupon() the moment it confirms this, and left
+        // as pay_at_clinic (nothing broken) if the window already closed.
+        payment_status: effectiveMethod === 'online' ? 'paid_online' : 'pay_at_clinic',
+        follow_up_of: followUpOfVisitId ?? null,
         // Only referenced at all when there's an actual fix to record - an
         // ordinary booking (no location sought, or the patient declined/no
         // fix available) never touches these columns, so it can never be
@@ -268,6 +284,13 @@ export default function BookingForm({
         setError(null);
         return;
       }
+      // schema.sql section 47: this MEMBER already has a still-open booking
+      // at this clinic today - pick a different member (or day), not a raw
+      // constraint-violation string.
+      if (isDuplicateMemberBookingError(apptError?.message)) {
+        setError('This patient already has an active booking at this clinic today. Pick a different family member, or a different day.');
+        return;
+      }
       setError(apptError?.message ?? 'Could not create the booking.');
       return;
     }
@@ -277,7 +300,7 @@ export default function BookingForm({
     // create_payment_with_coupon() in migration_41. This is what places the
     // HOLD (an online 'hold' row) or records what's due at the desk (a COD
     // 'pending' row).
-    const paymentResult = await createPaymentWithCoupon(appointment.id, method, appliedCoupon?.redemptionId ?? null);
+    const paymentResult = await createPaymentWithCoupon(appointment.id, effectiveMethod, appliedCoupon?.redemptionId ?? null);
     if ('error' in paymentResult) {
       setLoading(false);
       setError(paymentResult.error);
@@ -286,7 +309,10 @@ export default function BookingForm({
       return;
     }
 
-    if (method === 'cod') {
+    // Free (server-confirmed, not just this page's preview) or COD - either
+    // way there's no gateway step, so this is done the moment the payment row
+    // exists.
+    if (effectiveMethod === 'cod' || paymentResult.isFree) {
       // BOOKING RECEIVED - see notify.ts. Best-effort: a failure here must
       // never strand the patient on a stuck "Booking..." button when the
       // booking + payment above already succeeded.
@@ -295,7 +321,9 @@ export default function BookingForm({
           userId: session.user.id,
           appointmentId: appointment.id,
           type: 'booking_received',
-          message: bookingReceivedMessage(doctorName, date, method, paymentResult.netAmount),
+          message: paymentResult.isFree
+            ? `We've received your free follow-up booking request for ${doctorName} on ${date}. Nothing is due - you'll be confirmed once the clinic approves.`
+            : bookingReceivedMessage(doctorName, date, effectiveMethod, paymentResult.netAmount),
         });
       }
       setLoading(false);
@@ -343,7 +371,7 @@ export default function BookingForm({
             userId: session.user.id,
             appointmentId: appointment.id,
             type: 'booking_received',
-            message: bookingReceivedMessage(doctorName, date, method, paymentResult.netAmount),
+            message: bookingReceivedMessage(doctorName, date, effectiveMethod, paymentResult.netAmount),
           });
         }
         setLoading(false);
@@ -471,77 +499,70 @@ export default function BookingForm({
     <Card className="mt-4 !rounded-3xl">
       <p className="text-base font-bold text-slate-900">Book appointment</p>
 
-      <div className="mt-4 space-y-2 border-b border-slate-100 pb-4">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-slate-500">Doctor's fee</span>
-          <span className="font-semibold text-slate-900">₹{bill.consultationFee}</span>
+      {looksLikeFreeFollowUp ? (
+        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-sm font-bold text-emerald-800">Free follow-up</p>
+          <p className="mt-1 text-xs leading-relaxed text-emerald-700">
+            This is on or before your follow-up date, with the same doctor, so there's nothing to pay. If that
+            changes before you confirm, you'll see the normal fee here instead.
+          </p>
         </div>
-        {bill.convenienceFee > 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-500">Platform convenience fee</span>
-            <span className="font-semibold text-slate-900">₹{bill.convenienceFee}</span>
-          </div>
-        )}
-        {bill.discountAmount > 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-emerald-600">Coupon discount ({appliedCoupon?.code})</span>
-            <span className="font-semibold text-emerald-600">-₹{bill.discountAmount}</span>
-          </div>
-        )}
-        <div className="flex items-center justify-between text-base font-bold">
-          <span className="text-slate-900">Total</span>
-          <span className="text-slate-900">₹{bill.netAmount}</span>
-        </div>
-        {method === 'cod' && <p className="text-xs text-slate-400">Pay ₹{bill.netAmount} in cash at the clinic.</p>}
-      </div>
-
-      <div className="mt-4">
-        <p className="text-sm font-semibold text-slate-700">Coupon code</p>
-        {appliedCoupon ? (
-          <div className="mt-1 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-            <div>
-              <p className="text-sm font-bold text-emerald-800">{appliedCoupon.code} applied</p>
-              <p className="text-xs text-emerald-600">You saved ₹{appliedCoupon.discountAmount}</p>
+      ) : (
+        <>
+          <div className="mt-4 space-y-2 border-b border-slate-100 pb-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-500">Doctor's fee</span>
+              <span className="font-semibold text-slate-900">₹{bill.consultationFee}</span>
             </div>
-            <button onClick={removeCoupon} className="text-xs font-bold text-emerald-700 underline">
-              Remove
-            </button>
+            {bill.convenienceFee > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500">Platform convenience fee</span>
+                <span className="font-semibold text-slate-900">₹{bill.convenienceFee}</span>
+              </div>
+            )}
+            {bill.discountAmount > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-emerald-600">Coupon discount ({appliedCoupon?.code})</span>
+                <span className="font-semibold text-emerald-600">-₹{bill.discountAmount}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-base font-bold">
+              <span className="text-slate-900">Total</span>
+              <span className="text-slate-900">₹{bill.netAmount}</span>
+            </div>
+            {method === 'cod' && <p className="text-xs text-slate-400">Pay ₹{bill.netAmount} in cash at the clinic.</p>}
           </div>
-        ) : (
-          <div className="mt-1 flex gap-2">
-            <input
-              type="text"
-              value={couponInput}
-              onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-              placeholder="Enter code"
-              className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
-            />
-            <Button variant="outline" onClick={applyCoupon} disabled={couponApplying || !couponInput.trim()}>
-              {couponApplying ? 'Applying...' : 'Apply'}
-            </Button>
-          </div>
-        )}
-        {couponError && <p className="mt-1 text-xs text-red-600">{couponError}</p>}
-      </div>
 
-      <div className="mt-4">
-        <p className="text-sm font-semibold text-slate-700">Patient</p>
-        {members.length === 0 ? (
-          <p className="mt-1 text-sm text-red-600">No family members yet — add one on your profile before booking.</p>
-        ) : (
-          <select
-            value={memberId}
-            onChange={(e) => setMemberId(e.target.value)}
-            className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} ({m.relation})
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-slate-700">Coupon code</p>
+            {appliedCoupon ? (
+              <div className="mt-1 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                <div>
+                  <p className="text-sm font-bold text-emerald-800">{appliedCoupon.code} applied</p>
+                  <p className="text-xs text-emerald-600">You saved ₹{appliedCoupon.discountAmount}</p>
+                </div>
+                <button onClick={removeCoupon} className="text-xs font-bold text-emerald-700 underline">
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 flex gap-2">
+                <input
+                  type="text"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                  placeholder="Enter code"
+                  className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <Button variant="outline" onClick={applyCoupon} disabled={couponApplying || !couponInput.trim()}>
+                  {couponApplying ? 'Applying...' : 'Apply'}
+                </Button>
+              </div>
+            )}
+            {couponError && <p className="mt-1 text-xs text-red-600">{couponError}</p>}
+          </div>
+        </>
+      )}
 
       {sameDayAutoCheckin && (
         <p className="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
@@ -567,40 +588,42 @@ export default function BookingForm({
         />
       </div>
 
-      <div className="mt-4">
-        <p className="text-sm font-semibold text-slate-700">Payment method</p>
-        <div className="mt-1.5 flex gap-2">
-          <button
-            onClick={() => changeMethod('online')}
-            className={`flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
-              method === 'online' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
-            }`}
-          >
-            Pay online
-          </button>
-          <button
-            onClick={() => changeMethod('cod')}
-            className={`flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
-              method === 'cod' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
-            }`}
-          >
-            Cash at clinic
-          </button>
+      {!looksLikeFreeFollowUp && (
+        <div className="mt-4">
+          <p className="text-sm font-semibold text-slate-700">Payment method</p>
+          <div className="mt-1.5 flex gap-2">
+            <button
+              onClick={() => changeMethod('online')}
+              className={`flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
+                method === 'online' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              Pay online
+            </button>
+            <button
+              onClick={() => changeMethod('cod')}
+              className={`flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
+                method === 'cod' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              Cash at clinic
+            </button>
+          </div>
+          {/* What paying online does and does not buy, said up front - so
+              nobody arrives expecting to be seen sooner for it. */}
+          {method === 'online' ? (
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+              You'll complete payment via Razorpay (UPI/card). This only places a <strong>hold</strong> — nothing is
+              charged until the clinic accepts your booking. It does <strong>not</strong> move you up the queue — turn
+              order follows appointment time, then arrival.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+              You'll check in at the counter when you pay. Your place in the queue is the same either way.
+            </p>
+          )}
         </div>
-        {/* What paying online does and does not buy, said up front - so
-            nobody arrives expecting to be seen sooner for it. */}
-        {method === 'online' ? (
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-            You'll complete payment via Razorpay (UPI/card). This only places a <strong>hold</strong> — nothing is
-            charged until the clinic accepts your booking. It does <strong>not</strong> move you up the queue — turn
-            order follows appointment time, then arrival.
-          </p>
-        ) : (
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-            You'll check in at the counter when you pay. Your place in the queue is the same either way.
-          </p>
-        )}
-      </div>
+      )}
 
       <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
         {PLATFORM_DISCLAIMER_SHORT}
@@ -653,7 +676,6 @@ export default function BookingForm({
           onClick={submit}
           disabled={
             loading ||
-            members.length === 0 ||
             (declarationStatus === 'needed' && !declarationChecked) ||
             (dpdpStatus === 'needed' && !dpdpChecked)
           }

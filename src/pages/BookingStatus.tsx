@@ -1,7 +1,10 @@
 import {
+  Banknote,
   CalendarClock,
   CalendarDays,
+  CalendarPlus,
   CheckCircle2,
+  ChevronRight,
   Clock,
   MapPin,
   QrCode as QrCodeIcon,
@@ -25,11 +28,20 @@ import StatusPill from '../components/ui/StatusPill';
 import VerifiedBadge from '../components/VerifiedBadge';
 import VisitDetails from '../components/VisitDetails';
 import { getCheckInOptions, type CheckInOptions } from '../lib/checkIn';
+import { getDoctorConsultationStats } from '../lib/consultation';
 import { notifyPatient, reportingTimeReminderMessage, REPORTING_REMINDER_LEAD_MINUTES } from '../lib/notify';
 import { bookingReference, computeNowServing, countAhead } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { estimateSlotMinutes, formatTimeLabel } from '../lib/time';
-import type { AppointmentStatus, DoctorAvailability, Prescription, QueueStatusRow, Visit } from '../lib/types';
+import {
+  PAYMENT_STATUS_LABEL,
+  type AppointmentPaymentStatus,
+  type AppointmentStatus,
+  type DoctorAvailability,
+  type Prescription,
+  type QueueStatusRow,
+  type Visit,
+} from '../lib/types';
 
 interface BookingDetail {
   id: string;
@@ -48,10 +60,21 @@ interface BookingDetail {
   reject_reason: string | null;
   doctor_id: string;
   clinic_id: string;
+  // Payment and presence are separate facts (schema.sql section 30). paid_at
+  // and paid_amount are only ever stamped by mark_paid_at_clinic() (section
+  // 52) - a plain client write to any of these three is rejected server-side.
+  payment_status: AppointmentPaymentStatus;
+  paid_amount: number | null;
+  paid_at: string | null;
   doctors: { name: string; specialty: string | null } | null;
   clinics: { name: string; address: string | null; lat: number | null; lng: number | null; formatted_address: string | null } | null;
   family_members: { name: string; mrn: string } | null;
   encounters: { encounter_no: string } | null;
+  // The COD amount still owed - a payments row exists for every booking
+  // (online or COD), so this is what "Amount due" reads from before it's
+  // been collected. See schema.sql section 41.2 (net_amount = amount, post
+  // any coupon discount).
+  payments: { amount: number; net_amount: number | null }[] | null;
 }
 
 // Statuses where something can still change - a rejected/cancelled/no_show
@@ -101,7 +124,14 @@ export default function BookingStatus() {
   const [slotMinutes, setSlotMinutes] = useState(15);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [visit, setVisit] = useState<(Visit & { prescriptions: Prescription[] }) | null>(null);
+  // undefined = not checked yet, null = none booked, string = the linked
+  // follow-up's own appointment id (see follow_up_of, schema.sql section 46).
+  const [followUpBookingId, setFollowUpBookingId] = useState<string | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  // schema.sql section 54 - once this doctor has any completed-visit
+  // history, replaces the cruder slot-width guess below for "how long until
+  // I'm seen" - null until then, so slotMinutes stays the fallback.
+  const [avgConsultationMinutes, setAvgConsultationMinutes] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [doctorVerified, setDoctorVerified] = useState(false);
   const [clinicVerified, setClinicVerified] = useState(false);
@@ -112,7 +142,7 @@ export default function BookingStatus() {
     const { data } = await supabase
       .from('appointments')
       .select(
-        '*, doctors(name, specialty), clinics(name, address, lat, lng, formatted_address), family_members(name, mrn), encounters(encounter_no)'
+        '*, doctors(name, specialty), clinics(name, address, lat, lng, formatted_address), family_members(name, mrn), encounters(encounter_no), payments(amount, net_amount)'
       )
       .eq('id', appointmentId)
       .single();
@@ -143,7 +173,22 @@ export default function BookingStatus() {
       .eq('appointment_id', appointmentId)
       .order('created_at', { ascending: false })
       .limit(1);
-    setVisit((data ?? [])[0] as (Visit & { prescriptions: Prescription[] }) | undefined ?? null);
+    const v = ((data ?? [])[0] as (Visit & { prescriptions: Prescription[] }) | undefined) ?? null;
+    setVisit(v);
+
+    if (v?.follow_up_due_date) {
+      const { data: existing } = await supabase
+        .from('appointments')
+        .select('id')
+        .eq('follow_up_of', v.id)
+        .not('status', 'in', '(cancelled,rejected)')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setFollowUpBookingId(existing?.id ?? null);
+    } else {
+      setFollowUpBookingId(null);
+    }
   };
 
   const loadQueue = async (doctorId: string, date: string) => {
@@ -204,6 +249,11 @@ export default function BookingStatus() {
   }, [booking?.doctor_id, booking?.date]);
 
   useEffect(() => {
+    if (!booking) return;
+    getDoctorConsultationStats(booking.doctor_id).then((stats) => setAvgConsultationMinutes(stats.avgMinutes));
+  }, [booking?.doctor_id]);
+
+  useEffect(() => {
     if (!booking || !WATCHED_STATUSES.includes(booking.status)) return;
 
     let cancelled = false;
@@ -211,13 +261,14 @@ export default function BookingStatus() {
 
     supabase.realtime.setAuth();
     const channel = supabase
-      .channel(`queue:${booking.doctor_id}:${booking.date}`)
+      .channel(`queue:${booking.doctor_id}:${booking.date}`, { config: { private: true } })
       .on('broadcast', { event: 'UPDATE' }, () => {
         if (!cancelled) {
           loadQueue(booking.doctor_id, booking.date);
           loadVisit();
           loadBooking();
           checkLatestNotification();
+          getDoctorConsultationStats(booking.doctor_id).then((stats) => setAvgConsultationMinutes(stats.avgMinutes));
         }
       })
       .subscribe();
@@ -234,6 +285,9 @@ export default function BookingStatus() {
   // rule (schema.sql section 31) a lower token does not mean an earlier turn.
   const nowServing = computeNowServing(queueRows);
   const aheadOfMe = countAhead(queueRows, booking?.token_number ?? null);
+  // This doctor's own real pace once there's any history at all (schema.sql
+  // section 54) - otherwise the slot-width guess is all there is to go on.
+  const perPersonMinutes = avgConsultationMinutes ?? slotMinutes;
 
   // Fire the two in-app reminders once each, when their condition is first met.
   useEffect(() => {
@@ -252,12 +306,12 @@ export default function BookingStatus() {
     if (aheadOfMe === 0 && !alerted.current.next) {
       alerted.current.next = true;
       raiseAlert("You're next! Please head to the clinic now.");
-    } else if (aheadOfMe > 0 && aheadOfMe * slotMinutes <= 30 && !alerted.current.thirty) {
+    } else if (aheadOfMe > 0 && aheadOfMe * perPersonMinutes <= 30 && !alerted.current.thirty) {
       alerted.current.thirty = true;
       raiseAlert('Your turn is about 30 minutes away.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aheadOfMe, booking?.id, slotMinutes]);
+  }, [aheadOfMe, booking?.id, perPersonMinutes]);
 
   // The one-shot "reporting time is approaching" nudge (section 40). Unlike
   // the queue reminders above, this fires from a plain clock, not a change in
@@ -319,7 +373,15 @@ export default function BookingStatus() {
   const awaitingArrival = booking.status === 'accepted';
   const cancelWindowHours = options?.rescheduleWindowHours ?? DEFAULT_CANCEL_WINDOW_HOURS;
   const ahead = inQueue ? aheadOfMe : null;
-  const estimatedWaitMinutes = ahead != null ? Math.round(ahead * slotMinutes) : 0;
+  const estimatedWaitMinutes = ahead != null ? Math.round(ahead * perPersonMinutes) : 0;
+
+  // Never show a due amount once payment_status is any paid state - the
+  // "Mark paid" button at the desk (ClinicCheckIn.tsx) is what flips this,
+  // and the live-queue realtime channel above re-fetches this row the
+  // instant it does (schema.sql section 52.4).
+  const isPaid = ['paid_online', 'paid_at_clinic', 'free_followup'].includes(booking.payment_status);
+  const paymentRow = booking.payments?.[0] ?? null;
+  const amountDue = paymentRow ? (paymentRow.net_amount ?? paymentRow.amount) : null;
 
   const bookingMoment = new Date(`${booking.date}T${booking.slot_time}`);
   const endMoment = new Date(bookingMoment.getTime() + slotMinutes * 60 * 1000);
@@ -448,6 +510,25 @@ export default function BookingStatus() {
             <IconTile icon={Clock} size="sm" />
             <p className="min-w-0 flex-1 text-sm font-bold text-slate-900">Duration</p>
             <span className="text-sm text-slate-500">{slotMinutes} mins</span>
+          </div>
+
+          {/* Never shows a due amount once payment_status is any paid state -
+              flips to "Paid" the instant the desk taps Mark paid, over the
+              same realtime channel as the live token above. */}
+          <div className="flex items-center gap-3 border-t border-slate-100 p-4">
+            <IconTile
+              icon={isPaid ? CheckCircle2 : Banknote}
+              size="sm"
+              tone={isPaid ? 'emerald' : booking.payment_status === 'refunded' ? 'slate' : 'amber'}
+            />
+            <p className="min-w-0 flex-1 text-sm font-bold text-slate-900">Payment</p>
+            {isPaid ? (
+              <StatusPill label={PAYMENT_STATUS_LABEL[booking.payment_status]} tone="live" icon={CheckCircle2} />
+            ) : booking.payment_status === 'refunded' ? (
+              <StatusPill label={PAYMENT_STATUS_LABEL.refunded} tone="neutral" />
+            ) : (
+              <span className="text-sm font-bold text-amber-600">Amount due ₹{amountDue ?? 0}</span>
+            )}
           </div>
 
           {booking.reason && (
@@ -636,6 +717,37 @@ export default function BookingStatus() {
         )}
 
         <VisitDetails visit={visit} prescription={visit?.prescriptions[0] ?? null} />
+
+        {/* Follow-up scheduling (schema.sql section 46) - only once this visit
+            actually has a due date, and only on the COMPLETED appointment,
+            same gate as VisitDetails above. */}
+        {booking.status === 'completed' && visit?.follow_up_due_date && (
+          <div className="mt-4">
+            {followUpBookingId === undefined ? null : followUpBookingId ? (
+              <button
+                onClick={() => navigate(`/bookings/${followUpBookingId}`)}
+                className="flex w-full items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-left"
+              >
+                <CalendarPlus size={18} className="shrink-0 text-emerald-700" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-emerald-800">Follow-up booked</span>
+                  <span className="block text-xs text-emerald-600">Tap to view that appointment.</span>
+                </span>
+                <ChevronRight size={16} className="shrink-0 text-emerald-400" />
+              </button>
+            ) : (
+              <Button
+                full
+                onClick={() =>
+                  navigate(`/doctors/${booking.doctor_id}?followUp=${visit.id}`)
+                }
+              >
+                <CalendarPlus size={17} /> Book follow-up
+              </Button>
+            )}
+          </div>
+        )}
+
         <FileUpload appointmentId={booking.id} memberId={booking.member_id} />
       </div>
     </div>

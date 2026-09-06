@@ -183,6 +183,10 @@ export interface Clinic {
   // before until it opts in.
   same_day_booking_enabled: boolean;
   same_day_cutoff_minutes: number;
+  // Same-day past-slot buffer for every OTHER mode (section 50) - always on,
+  // unlike same_day_cutoff_minutes above which only means anything once
+  // same_day_booking_enabled is true.
+  past_slot_buffer_minutes: number;
   auto_checkin_verified_same_day: boolean;
   same_day_checkin_radius_m: number;
   // The published-schedule estimate (section 34): where the running clock
@@ -223,15 +227,22 @@ export type PayoutStatus = 'pending' | 'paid';
 
 // The appointment's own payment state. Entirely independent of whether the
 // patient has physically arrived (checked_in_at) - paying online buys no
-// queue priority whatsoever. See schema.sql section 30.
-export type AppointmentPaymentStatus = 'pay_at_clinic' | 'paid_online' | 'paid_at_clinic' | 'refunded';
+// queue priority whatsoever. See schema.sql section 30. 'free_followup'
+// (section 46) means this booking fell inside its original visit's free
+// re-consult window - nothing was ever held or collected.
+export type AppointmentPaymentStatus = 'pay_at_clinic' | 'paid_online' | 'paid_at_clinic' | 'refunded' | 'free_followup';
 
 export const PAYMENT_STATUS_LABEL: Record<AppointmentPaymentStatus, string> = {
   pay_at_clinic: 'Pay at clinic',
   paid_online: 'Paid online',
   paid_at_clinic: 'Paid at clinic',
   refunded: 'Refunded',
+  free_followup: 'Free follow-up',
 };
+
+// visits.follow_up_interval - see schema.sql section 46. 'none' means no
+// follow-up was recommended.
+export type FollowUpInterval = 'none' | '7' | '15' | '30';
 
 // Who funds a coupon's discount - see payouts.ts. Null when no coupon was used.
 export type CouponFundedBy = 'platform' | 'clinic';
@@ -274,6 +285,25 @@ export interface Notification {
   at: string;
   appointment_id: string | null;
   channel: NotificationChannel;
+}
+
+// schema.sql section 53 - a patient's legal name (their own profiles.name,
+// or a family member's family_members.name) is locked; this is the only way
+// either one can change. member_id null = the account's own name.
+export type NameChangeStatus = 'pending' | 'approved' | 'rejected';
+
+export interface NameChangeRequest {
+  id: string;
+  account_id: string;
+  member_id: string | null;
+  current_name: string | null;
+  requested_name: string | null;
+  id_document_path: string;
+  status: NameChangeStatus;
+  reject_reason: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
 }
 
 // The coupons table itself is never read directly by the patient-facing app
@@ -348,6 +378,17 @@ export interface DocumentRow {
   review_note: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  created_at: string;
+}
+
+// Admin-owned "is this doc_type mandatory before approval" flag (schema.sql
+// section 49) - one row per (owner_type, doc_type), same conditions_ref
+// pattern as known conditions: everyone reads, only an admin writes.
+export interface VerificationRequirement {
+  id: string;
+  owner_type: OwnerType;
+  doc_type: string;
+  required: boolean;
   created_at: string;
 }
 
@@ -438,6 +479,10 @@ export interface Appointment {
   checked_in_at: string | null;
   checked_in_by: string | null;
   check_in_method: CheckInMethod | null;
+  // Stamped the instant call_next_patient() flips status to 'called' -
+  // always the LATEST call, since skip_to_back() can send the same row back
+  // to 'checked_in' to be called again. See schema.sql section 54.
+  called_at: string | null;
   patient_type: PatientType;
   // Payment and presence are separate facts - see schema.sql section 30.
   payment_status: AppointmentPaymentStatus;
@@ -473,6 +518,9 @@ export interface Appointment {
   // auto-check-in; kept afterwards only as a record of that decision.
   booking_lat: number | null;
   booking_lng: number | null;
+  // Set when this booking is a follow-up of an earlier visit (section 46) -
+  // the ORIGINAL VISIT's id, not the original appointment's.
+  follow_up_of: string | null;
   created_at: string;
 }
 
@@ -560,7 +608,23 @@ export interface Visit {
   notes: string | null;
   diagnosis: string | null;
   follow_up_date: string | null;
+  // Structured follow-up (section 46) - replaces the free-text
+  // follow_up_date above for anything the app now acts on (the patient's
+  // "Book follow-up" button, the day-before reminder).
+  follow_up_interval: FollowUpInterval;
+  follow_up_due_date: string | null;
   no_prescription: boolean;
+  // schema.sql section 54 - written only by sync_consultation_stats(), never
+  // directly: started when the doctor taps "Start consultation" (status ->
+  // in_consultation), ended on "Complete". needs_review covers both "no
+  // start was ever recorded" and "left open past the 3-hour sanity cap" -
+  // get_doctor_avg_consultation_minutes() excludes those rows from the
+  // average either way.
+  consultation_started_at: string | null;
+  consultation_ended_at: string | null;
+  duration_minutes: number | null;
+  waiting_time_minutes: number | null;
+  needs_review: boolean;
   created_at: string;
 }
 

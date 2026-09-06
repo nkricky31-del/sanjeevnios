@@ -9,9 +9,11 @@ import AdminCoupons from '../components/AdminCoupons';
 import AdminDashboard from '../components/AdminDashboard';
 import AdminDocumentReview from '../components/AdminDocumentReview';
 import AdminFraud from '../components/AdminFraud';
+import AdminNameChanges from '../components/AdminNameChanges';
 import AdminPayments from '../components/AdminPayments';
 import AdminRejectForm from '../components/AdminRejectForm';
 import AdminSubscriptions from '../components/AdminSubscriptions';
+import AdminVerificationRequirements from '../components/AdminVerificationRequirements';
 import PatientLookup from '../components/PatientLookup';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
@@ -22,11 +24,11 @@ import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
-import { hasUnresolvedRejection } from '../lib/documents';
 import { openVerificationDoc } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
-import type { DocumentRow } from '../lib/types';
+import type { DocumentRow, VerificationRequirement } from '../lib/types';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
+import { approvalBlockers, loadVerificationRequirements } from '../lib/verificationRequirements';
 
 interface PendingClinic {
   id: string;
@@ -51,19 +53,28 @@ interface PendingDoctor {
   clinics: { name: string; owner_id: string; status: string } | null;
 }
 
-// Groups a flat list of documents (spanning many owners) by owner_id and
-// returns the set of owner_ids where hasUnresolvedRejection is true for
-// their own documents.
-function rejectedOwnerIds(documents: DocumentRow[]): Set<string> {
+// Computes each owner's own approval blockers (schema.sql section 49) - the
+// exact same rule the server enforces, just so the reasons can be listed,
+// not only whether Approve is disabled. Takes the full list of owner_ids
+// (not just the ones with at least one document row) - an owner with ZERO
+// documents uploaded is exactly the case this whole feature exists to catch,
+// so it must still get every required item listed as missing, not be
+// skipped for having nothing to group.
+function blockersByOwner(
+  ownerType: 'clinic' | 'doctor',
+  ownerIds: string[],
+  documents: DocumentRow[],
+  requirements: VerificationRequirement[]
+): Map<string, string[]> {
   const byOwner = new Map<string, DocumentRow[]>();
   for (const d of documents) {
     const list = byOwner.get(d.owner_id) ?? [];
     list.push(d);
     byOwner.set(d.owner_id, list);
   }
-  const result = new Set<string>();
-  for (const [ownerId, docs] of byOwner) {
-    if (hasUnresolvedRejection(docs)) result.add(ownerId);
+  const result = new Map<string, string[]>();
+  for (const ownerId of ownerIds) {
+    result.set(ownerId, approvalBlockers(ownerType, requirements, byOwner.get(ownerId) ?? []));
   }
   return result;
 }
@@ -83,6 +94,8 @@ export default function AdminConsole() {
     | 'audit'
     | 'patients'
     | 'conditions'
+    | 'requirements'
+    | 'names'
   >('dashboard');
   const [clinics, setClinics] = useState<PendingClinic[]>([]);
   const [doctors, setDoctors] = useState<PendingDoctor[]>([]);
@@ -91,8 +104,13 @@ export default function AdminConsole() {
   const [rejectDoctorId, setRejectDoctorId] = useState<string | null>(null);
   const [clinicDocsOpenFor, setClinicDocsOpenFor] = useState<string | null>(null);
   const [doctorDocsOpenFor, setDoctorDocsOpenFor] = useState<string | null>(null);
-  const [clinicsWithRejection, setClinicsWithRejection] = useState<Set<string>>(new Set());
-  const [doctorsWithRejection, setDoctorsWithRejection] = useState<Set<string>>(new Set());
+  const [requirements, setRequirements] = useState<VerificationRequirement[]>([]);
+  // Every reason approval is currently blocked, per owner - an empty array
+  // means ready to approve. schema.sql section 49: exactly what the server
+  // itself checks, computed here so the Approve button and the list of
+  // reasons shown next to it can never disagree.
+  const [clinicBlockers, setClinicBlockers] = useState<Map<string, string[]>>(new Map());
+  const [doctorBlockers, setDoctorBlockers] = useState<Map<string, string[]>>(new Map());
   const [actionError, setActionError] = useState<string | null>(null);
   const [approvedClinics, setApprovedClinics] = useState<PendingClinic[]>([]);
   const [approvedDoctors, setApprovedDoctors] = useState<PendingDoctor[]>([]);
@@ -101,34 +119,51 @@ export default function AdminConsole() {
 
   const loadPending = async () => {
     setLoading(true);
+
+    // Best-effort - closes the "no cron job" gap for a required document
+    // whose expiry_date has simply passed with no other event to trigger a
+    // resync (schema.sql section 49), the same "sweep on load" pattern
+    // auto_mark_no_shows()/sweep_follow_up_reminders() already use. Awaited
+    // first so anything it drops back to 'pending' shows up correctly in
+    // the very same load, not a stale "still approved" row.
+    await supabase.rpc('sweep_expired_verifications');
+
     // is_verified is orthogonal to status - a clinic/doctor that's already
     // approved (and thus invisible to the "pending" queries below) still
     // needs a way to reach its verification checklist, hence the separate
     // approved-status queries further down.
-    const [{ data: clinicData }, { data: doctorData }, { data: approvedClinicData }, { data: approvedDoctorData }] =
-      await Promise.all([
-        supabase.from('clinics').select('*').eq('status', 'pending').order('created_at', { ascending: true }),
-        supabase
-          .from('doctors')
-          .select('*, clinics(name, owner_id, status)')
-          .eq('status', 'pending')
-          .order('created_at', { ascending: true }),
-        supabase.from('clinics').select('*').eq('status', 'approved').order('name', { ascending: true }),
-        supabase
-          .from('doctors')
-          .select('*, clinics(name, owner_id, status)')
-          .eq('status', 'approved')
-          .order('name', { ascending: true }),
-      ]);
+    const [
+      { data: clinicData },
+      { data: doctorData },
+      { data: approvedClinicData },
+      { data: approvedDoctorData },
+      loadedRequirements,
+    ] = await Promise.all([
+      supabase.from('clinics').select('*').eq('status', 'pending').order('created_at', { ascending: true }),
+      supabase
+        .from('doctors')
+        .select('*, clinics(name, owner_id, status)')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true }),
+      supabase.from('clinics').select('*').eq('status', 'approved').order('name', { ascending: true }),
+      supabase
+        .from('doctors')
+        .select('*, clinics(name, owner_id, status)')
+        .eq('status', 'approved')
+        .order('name', { ascending: true }),
+      loadVerificationRequirements(),
+    ]);
     setClinics((clinicData ?? []) as PendingClinic[]);
     setDoctors((doctorData ?? []) as unknown as PendingDoctor[]);
     setApprovedClinics((approvedClinicData ?? []) as PendingClinic[]);
     setApprovedDoctors((approvedDoctorData ?? []) as unknown as PendingDoctor[]);
+    setRequirements(loadedRequirements);
 
-    // Approve should be blocked while any document's LATEST upload is still
-    // rejected (a resolved-and-re-uploaded one doesn't count) - fetched
-    // up front so the button is correctly disabled even before the admin
-    // opens "Review documents" for that row.
+    // Approve must be blocked until every REQUIRED item (schema.sql section
+    // 49 - admin-controlled, via verification_requirements) is both uploaded
+    // and verified - fetched up front so the button is correctly disabled,
+    // and the reasons why are visible, even before the admin opens "Review
+    // documents" for that row.
     const clinicIds = (clinicData ?? []).map((c) => c.id);
     const doctorIds = (doctorData ?? []).map((d) => d.id);
     const [{ data: clinicDocs }, { data: doctorDocs }] = await Promise.all([
@@ -139,8 +174,8 @@ export default function AdminConsole() {
         ? supabase.from('documents').select('*').eq('owner_type', 'doctor').in('owner_id', doctorIds)
         : Promise.resolve({ data: [] as DocumentRow[] }),
     ]);
-    setClinicsWithRejection(rejectedOwnerIds((clinicDocs ?? []) as DocumentRow[]));
-    setDoctorsWithRejection(rejectedOwnerIds((doctorDocs ?? []) as DocumentRow[]));
+    setClinicBlockers(blockersByOwner('clinic', clinicIds, (clinicDocs ?? []) as DocumentRow[], loadedRequirements));
+    setDoctorBlockers(blockersByOwner('doctor', doctorIds, (doctorDocs ?? []) as DocumentRow[], loadedRequirements));
 
     setLoading(false);
   };
@@ -241,6 +276,8 @@ export default function AdminConsole() {
     { value: 'audit', label: 'Audit log' },
     { value: 'patients', label: 'Patients' },
     { value: 'conditions', label: 'Conditions' },
+    { value: 'requirements', label: 'Requirements' },
+    { value: 'names', label: 'Name changes' },
   ];
 
   return (
@@ -308,6 +345,18 @@ export default function AdminConsole() {
           </div>
         )}
 
+        {view === 'requirements' && (
+          <div className="mt-4">
+            <AdminVerificationRequirements />
+          </div>
+        )}
+
+        {view === 'names' && (
+          <div className="mt-4">
+            <AdminNameChanges />
+          </div>
+        )}
+
         {view === 'verification' && (
           <>
             {actionError && <p className="mb-3 mt-4 text-sm text-red-600">{actionError}</p>}
@@ -338,7 +387,7 @@ export default function AdminConsole() {
                     </button>
                   )}
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Button onClick={() => approveClinic(c)} disabled={clinicsWithRejection.has(c.id)}>
+                    <Button onClick={() => approveClinic(c)} disabled={(clinicBlockers.get(c.id)?.length ?? 0) > 0}>
                       Approve
                     </Button>
                     <Button variant="danger" onClick={() => setRejectClinicId((prev) => (prev === c.id ? null : c.id))}>
@@ -351,10 +400,15 @@ export default function AdminConsole() {
                       {clinicDocsOpenFor === c.id ? 'Hide documents' : 'Review documents'}
                     </Button>
                   </div>
-                  {clinicsWithRejection.has(c.id) && (
-                    <p className="mt-1 text-xs font-medium text-red-600">
-                      Can't approve - this clinic has a rejected document. Review documents below.
-                    </p>
+                  {(clinicBlockers.get(c.id)?.length ?? 0) > 0 && (
+                    <div className="mt-1.5 rounded-xl bg-red-50 p-2 text-xs font-medium text-red-600">
+                      <p>Can't approve yet:</p>
+                      <ul className="ml-4 list-disc">
+                        {clinicBlockers.get(c.id)!.map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                   {rejectClinicId === c.id && (
                     <AdminRejectForm
@@ -369,6 +423,7 @@ export default function AdminConsole() {
                       ownerId={c.id}
                       notifyUserId={c.owner_id}
                       label="Clinic documents"
+                      requirements={requirements}
                       onChanged={loadPending}
                     />
                   )}
@@ -404,7 +459,7 @@ export default function AdminConsole() {
                     </button>
                   )}
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Button onClick={() => approveDoctor(d)} disabled={doctorsWithRejection.has(d.id)}>
+                    <Button onClick={() => approveDoctor(d)} disabled={(doctorBlockers.get(d.id)?.length ?? 0) > 0}>
                       Approve
                     </Button>
                     <Button variant="danger" onClick={() => setRejectDoctorId((prev) => (prev === d.id ? null : d.id))}>
@@ -417,10 +472,15 @@ export default function AdminConsole() {
                       {doctorDocsOpenFor === d.id ? 'Hide documents' : 'Review documents'}
                     </Button>
                   </div>
-                  {doctorsWithRejection.has(d.id) && (
-                    <p className="mt-1 text-xs font-medium text-red-600">
-                      Can't approve - this doctor has a rejected document. Review documents below.
-                    </p>
+                  {(doctorBlockers.get(d.id)?.length ?? 0) > 0 && (
+                    <div className="mt-1.5 rounded-xl bg-red-50 p-2 text-xs font-medium text-red-600">
+                      <p>Can't approve yet:</p>
+                      <ul className="ml-4 list-disc">
+                        {doctorBlockers.get(d.id)!.map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                   {rejectDoctorId === d.id && (
                     <AdminRejectForm
@@ -435,6 +495,7 @@ export default function AdminConsole() {
                       ownerId={d.id}
                       notifyUserId={d.clinics.owner_id}
                       label="Doctor documents & consent"
+                      requirements={requirements}
                       onChanged={loadPending}
                     />
                   )}
@@ -474,6 +535,7 @@ export default function AdminConsole() {
                       ownerId={c.id}
                       notifyUserId={c.owner_id}
                       label="Clinic verification checklist"
+                      requirements={requirements}
                       onChanged={loadPending}
                     />
                   )}
@@ -510,6 +572,7 @@ export default function AdminConsole() {
                       ownerType="doctor"
                       ownerId={d.id}
                       notifyUserId={d.clinics.owner_id}
+                      requirements={requirements}
                       label="Doctor verification checklist"
                       onChanged={loadPending}
                     />

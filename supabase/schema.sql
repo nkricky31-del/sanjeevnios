@@ -7673,3 +7673,1121 @@ begin
   return new_clinic;
 end;
 $$;
+
+-- ============================================================================
+-- 46. FOLLOW-UP SCHEDULING
+-- ============================================================================
+-- Extends the visit/consultation flow (section 10) and the two-step booking
+-- flow (sections 27, 39) with a structured follow-up, replacing the old
+-- free-text visits.follow_up_date with something the app can actually act on:
+--
+--   * The clinic sets visits.follow_up_interval (none/7/15/30 days) when
+--     completing a visit - VisitScreen.tsx's "Notes & diagnosis" card.
+--     visits.follow_up_due_date is derived from it SERVER-SIDE (this visit's
+--     own appointment date + the interval), never trusted from the client -
+--     the same reasoning create_payment_with_coupon() already applies to
+--     money now also applies to this date.
+--   * appointments.follow_up_of links a follow-up booking back to the
+--     ORIGINAL VISIT (not the original appointment), so a doctor opening
+--     either appointment can trace the whole thread, and so
+--     create_payment_with_coupon() below has everything it needs (the
+--     original doctor + the due date) to decide whether this booking is free.
+--   * FREE RE-CONSULT WINDOW: a follow-up appointment is free (payment_status
+--     'free_followup', nothing held, no Razorpay order ever created) exactly
+--     when it is booked with the SAME doctor, on or before the original
+--     visit's follow_up_due_date. Booked later, or with a different doctor,
+--     it is priced exactly like any other appointment - create_payment_with_
+--     coupon() re-derives this itself from follow_up_of, never from anything
+--     the client claims, exactly like it already re-derives the gross fee
+--     from doctors.consultation_fee rather than trusting the client's figure.
+--   * A day-before reminder (sweep_follow_up_reminders(), best-effort pg_cron
+--     + a fallback sweep on MyBookings.tsx load, mirroring section 29.4's
+--     no-show sweep) nudges a patient who has a due date tomorrow and hasn't
+--     booked the follow-up yet - deduped the same way the three lifecycle
+--     notices already are (migration 39), reusing appointment_id + type
+--     rather than adding a new notifications column, since one visit has
+--     exactly one appointment. Reusing appointment_id also means
+--     NotificationsList.tsx's existing "tap a notice, jump to its
+--     appointment" already lands the patient on exactly the completed visit
+--     that carries the "Book follow-up" button - no new navigation needed.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 46.1 visits.follow_up_interval / follow_up_due_date
+-- ----------------------------------------------------------------------------
+alter table visits add column if not exists follow_up_interval text not null default 'none';
+alter table visits drop constraint if exists visits_follow_up_interval_check;
+alter table visits add constraint visits_follow_up_interval_check
+  check (follow_up_interval in ('none', '7', '15', '30'));
+
+alter table visits add column if not exists follow_up_due_date date;
+
+-- Derived from the VISIT'S OWN appointment date, never from the client - a
+-- doctor changing the interval always recomputes off the real visit date,
+-- even if the row is edited long after the appointment happened.
+create or replace function public.set_visit_follow_up_due_date()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_visit_date date;
+begin
+  if new.follow_up_interval = 'none' then
+    new.follow_up_due_date := null;
+    return new;
+  end if;
+
+  select date into v_visit_date from appointments where id = new.appointment_id;
+  new.follow_up_due_date := v_visit_date + (new.follow_up_interval || ' days')::interval;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_visit_follow_up_due_date on visits;
+create trigger on_visit_follow_up_due_date
+  before insert or update on visits
+  for each row execute function public.set_visit_follow_up_due_date();
+
+-- ----------------------------------------------------------------------------
+-- 46.2 appointments.follow_up_of - links a follow-up booking to the ORIGINAL
+-- visit, and the new free-followup payment state.
+-- ----------------------------------------------------------------------------
+alter table appointments add column if not exists follow_up_of uuid references visits (id) on delete set null;
+create index if not exists appointments_follow_up_of_idx on appointments (follow_up_of);
+
+alter table appointments drop constraint if exists appointments_payment_status_check;
+alter table appointments add constraint appointments_payment_status_check
+  check (payment_status in ('pay_at_clinic', 'paid_online', 'paid_at_clinic', 'refunded', 'free_followup'));
+
+-- ----------------------------------------------------------------------------
+-- 46.3 create_payment_with_coupon() - re-derives free-followup eligibility
+-- from follow_up_of, exactly like it already re-derives the gross fee from
+-- the doctor's real consultation_fee. A client can set follow_up_of to
+-- anything at booking time (appointments_insert already allows any column on
+-- an own booking) - the worst that buys anyone is "not actually eligible",
+-- never a wrong charge, because eligibility is re-checked here from the
+-- ORIGINAL appointment's real doctor_id and the visit's own due date, not
+-- from anything claimed earlier by the client.
+--
+-- Return shape gains is_free - drop first since CREATE OR REPLACE can't
+-- change a function's return type.
+-- ----------------------------------------------------------------------------
+drop function if exists public.create_payment_with_coupon(uuid, text, uuid);
+
+create or replace function public.create_payment_with_coupon(
+  p_appointment_id uuid,
+  p_method text,
+  p_redemption_id uuid default null
+)
+returns table (payment_id uuid, gross_amount numeric, discount_amount numeric, net_amount numeric, is_free boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  a appointments;
+  v_fee numeric;
+  v_convenience numeric;
+  v_gross numeric;
+  v_discount numeric := 0;
+  v_net numeric;
+  v_redemption coupon_redemptions;
+  v_coupon coupons;
+  v_funded_by text;
+  v_coupon_code text;
+  v_payment_id uuid;
+  v_is_free boolean := false;
+  v_orig_doctor uuid;
+  v_due_date date;
+  v_payment_status text;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_member(a.member_id) or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your booking.';
+  end if;
+  if exists (select 1 from payments where appointment_id = p_appointment_id) then
+    raise exception 'A payment already exists for this appointment.';
+  end if;
+  if p_method not in ('online', 'cod') then
+    raise exception 'Invalid payment method.';
+  end if;
+
+  if a.follow_up_of is not null then
+    select ap.doctor_id, v.follow_up_due_date into v_orig_doctor, v_due_date
+    from visits v join appointments ap on ap.id = v.appointment_id
+    where v.id = a.follow_up_of;
+
+    if v_orig_doctor is not null and v_orig_doctor = a.doctor_id
+       and v_due_date is not null and a.date <= v_due_date then
+      v_is_free := true;
+    end if;
+  end if;
+
+  select consultation_fee into v_fee from doctors where id = a.doctor_id;
+
+  if v_is_free then
+    -- Nothing held, nothing collected, no convenience fee (no gateway is
+    -- ever involved) - gross/discount are recorded purely so the ledger
+    -- shows what was waived, never so anything is actually charged.
+    v_gross := v_fee;
+    v_convenience := 0;
+    v_discount := v_fee;
+    v_net := 0;
+    v_payment_status := 'waived';
+  else
+    v_convenience := case when p_method = 'online' then 10 else 0 end;
+    v_gross := v_fee + v_convenience;
+    v_payment_status := case when p_method = 'online' then 'hold' else 'pending' end;
+
+    if p_redemption_id is not null then
+      select * into v_redemption from coupon_redemptions where id = p_redemption_id;
+      if v_redemption.id is null or v_redemption.patient_id <> auth.uid() or v_redemption.status <> 'reserved' then
+        raise exception 'This coupon is no longer applied - please re-apply it.';
+      end if;
+      if v_redemption.reserved_at < now() - interval '15 minutes' then
+        raise exception 'Your coupon reservation expired - please re-apply it.';
+      end if;
+
+      select * into v_coupon from coupons where id = v_redemption.coupon_id;
+      if not v_coupon.active or (v_coupon.valid_to is not null and v_coupon.valid_to < now()) then
+        raise exception 'This coupon is no longer valid.';
+      end if;
+      if v_gross < v_coupon.min_amount then
+        raise exception 'This coupon needs a minimum order of Rs.%.', v_coupon.min_amount;
+      end if;
+
+      v_discount := case v_coupon.type
+        when 'flat' then v_coupon.value
+        else round(v_gross * v_coupon.value / 100.0)
+      end;
+      if v_coupon.type = 'percent' and v_coupon.max_discount is not null then
+        v_discount := least(v_discount, v_coupon.max_discount);
+      end if;
+      v_discount := least(v_discount, v_gross - 1);
+      v_coupon_code := v_coupon.code;
+      v_funded_by := v_coupon.funded_by;
+
+      update coupon_redemptions
+      set appointment_id = p_appointment_id, discount_amount = v_discount
+      where id = p_redemption_id;
+    end if;
+
+    v_net := v_gross - v_discount;
+  end if;
+
+  insert into payments (appointment_id, amount, method, status, gross_amount, coupon_code, discount_amount, net_amount, funded_by)
+  values (
+    p_appointment_id,
+    v_net,
+    p_method,
+    v_payment_status,
+    v_gross,
+    v_coupon_code,
+    v_discount,
+    v_net,
+    v_funded_by
+  )
+  returning id into v_payment_id;
+
+  if v_is_free then
+    update appointments set payment_status = 'free_followup' where id = p_appointment_id;
+  end if;
+
+  return query select v_payment_id, v_gross, v_discount, v_net, v_is_free;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 46.4 sweep_follow_up_reminders() - "remind the patient a day before, if
+-- they haven't booked yet." Reuses the lifecycle notices' own dedup pattern
+-- (migration 39): one partial unique index, one security-definer sweep that
+-- can run as often as it likes without ever double-sending.
+-- ----------------------------------------------------------------------------
+create unique index if not exists notifications_follow_up_reminder_dedup_idx
+  on notifications (appointment_id, type)
+  where appointment_id is not null and type = 'follow_up_reminder';
+
+create or replace function public.sweep_follow_up_reminders()
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int := 0;
+begin
+  with due as (
+    select v.id as visit_id, a.id as appointment_id, fm.account_id, v.follow_up_due_date, d.name as doctor_name
+    from visits v
+    join appointments a on a.id = v.appointment_id
+    join family_members fm on fm.id = a.member_id
+    join doctors d on d.id = a.doctor_id
+    where v.follow_up_due_date = current_date + 1
+      and fm.account_id is not null
+      and not exists (
+        select 1 from appointments fu
+        where fu.follow_up_of = v.id and fu.status not in ('cancelled', 'rejected')
+      )
+  )
+  insert into notifications (user_id, appointment_id, type, message)
+  select
+    due.account_id,
+    due.appointment_id,
+    'follow_up_reminder',
+    format('Your follow-up with %s was recommended for %s — book your slot before it passes.', due.doctor_name, to_char(due.follow_up_due_date, 'DD Mon'))
+  from due
+  on conflict (appointment_id, type) where appointment_id is not null and type = 'follow_up_reminder' do nothing;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+-- Best-effort scheduling, exactly mirroring section 29.4's no-show sweep -
+-- pg_cron may not be available/enabled on every project, and MyBookings.tsx
+-- also calls this once when it loads, so the reminder still goes out either
+-- way.
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
+    begin
+      create extension if not exists pg_cron;
+      perform cron.unschedule('sanjeevni_follow_up_reminders');
+    exception when others then
+      null; -- no existing job to unschedule, or no permission - fall through
+    end;
+    begin
+      perform cron.schedule('sanjeevni_follow_up_reminders', '0 9 * * *',
+        $cron$select public.sweep_follow_up_reminders()$cron$);
+    exception when others then
+      raise notice 'pg_cron present but scheduling failed; the app will sweep on load instead.';
+    end;
+  else
+    raise notice 'pg_cron unavailable; the app sweeps follow-up reminders when a patient loads My Appointments.';
+  end if;
+end $$;
+
+-- ============================================================================
+-- 47. MULTI-MEMBER BOOKING FIX
+-- ============================================================================
+-- Booking has always been algorithmically PER MEMBER - appointments.member_id
+-- already keys everything downstream (the queue, payments, MRNs, encounters)
+-- - but nothing on the write path ever actually enforced that, and the
+-- PATIENT APP layered its own account-wide assumption on top: the Home
+-- screen's "next appointment" query looked for the soonest still-open
+-- booking across EVERY family member on the account, then swapped its
+-- primary "Book an appointment" button for Reschedule/View Details tied to
+-- that ONE appointment - so once any single member had a live booking, the
+-- app behaved as if the whole ACCOUNT could only ever have one at a time.
+--
+--   * appointments_member_clinic_day_active_unique - the one guard that was
+--     actually missing: a given MEMBER can't hold two still-open bookings at
+--     the SAME clinic on the SAME day (whichever doctor - two different
+--     doctors at one clinic on one day for one person is a duplicate
+--     registration, not two separate visits). Scoped to member_id, so a
+--     second family member booking the same clinic on the same day is
+--     completely untouched - that's the whole point of this fix. "Still-
+--     open" excludes completed/cancelled/rejected/no_show, matching every
+--     other status-scoped uniqueness rule already in this schema (e.g.
+--     appointments_active_token_unique, section 27.4).
+--   * This is a plain unique index, not a locked-counter trigger like
+--     enforce_slot_capacity()/enforce_booking_policy() - a uniqueness check
+--     on a single row is already atomic under Postgres, so there is no
+--     read-then-write race to close here the way there is for a COUNT(*)
+--     against a capacity limit.
+--   * The client-side half of this fix (an explicit member picker before
+--     date/slot selection, the Home screen always offering "Book an
+--     appointment" regardless of any one member's status, and My Appointments
+--     always labelling each row with its member) lives in the app repo, not
+--     here - this migration is only the DB-level guarantee a client bug can
+--     never bypass.
+-- ============================================================================
+
+create unique index if not exists appointments_member_clinic_day_active_unique
+  on appointments (member_id, clinic_id, date)
+  where status not in ('completed', 'cancelled', 'rejected', 'no_show');
+
+-- ============================================================================
+-- 48. QUICK-START CLINIC REGISTRATION
+-- ============================================================================
+-- Section 45 gave a clinic a two-stage signup: register_clinic() creates a
+-- 'draft', then the clinic has to fill in map location + THREE required
+-- documents (clinic_registration_certificate, clinic_address_proof,
+-- clinic_license) before it can even flip itself to 'pending' and join the
+-- admin's queue (see enforce_clinic_submission_requirements()). That's the
+-- right bar for a clinic that's fully setting itself up in one sitting, but
+-- it's a lot to ask before a clinic has been seen by anyone at all.
+--
+-- register_clinic_quick_start() is a SECOND, LIGHTER path onto the exact
+-- same clinics/documents tables - not a parallel system:
+--   * Collects only name + registration number (no address, no separately-
+--     typed contact phone - the account's own OTP-verified profiles.phone
+--     is used as the contact number, since that's who the admin/patients
+--     would actually be reaching).
+--   * Inserts the clinic DIRECTLY at status = 'pending', skipping 'draft'
+--     entirely - enforce_clinic_submission_requirements() only ever fires
+--     on an UPDATE (old.status='draft' -> new.status='pending'), so an
+--     INSERT straight at 'pending' never touches that gate. The client
+--     (ClinicSignup.tsx) is expected to upload exactly one document -
+--     clinic_registration_certificate, via the same uploadVerificationDocument()
+--     path DocumentChecklist.tsx already uses - immediately after this
+--     returns, but nothing here requires that to have happened first: a
+--     'pending' clinic with zero documents rows already renders and can
+--     already be approved in AdminConsole.tsx today (verified against the
+--     current admin queue query - it has no document-count check, only a
+--     check for an unresolved REJECTION, which an empty document list can
+--     never have).
+--   * clinics_insert/update RLS (section 45) and the clinics_status_check
+--     constraint already allow this - 'pending' is already a valid value,
+--     and clinics_insert only ever required owner_id = auth.uid(). Nothing
+--     else changes.
+--   * The Part 30 patient-visibility gate (search_doctors(), clinics_select,
+--     doctors_select - all requiring status = 'approved' AND is_active) is
+--     completely untouched: a quick-start clinic is just as invisible to
+--     patients at 'pending' as a fully-onboarded one ever was.
+--   * The clinic can still open the Doctors tab (ClinicOnboardingScreen.tsx)
+--     at any time afterwards to add its map location, its doctors, and the
+--     two remaining documents - that screen already renders regardless of
+--     clinics.status, and its "Submit for review" button (which only makes
+--     sense for a 'draft' clinic) simply never appears for a clinic that
+--     took this path, since it's already 'pending'.
+-- ============================================================================
+
+create or replace function public.register_clinic_quick_start(
+  p_name text,
+  p_reg_no text
+)
+returns clinics
+language plpgsql
+as $$
+declare
+  new_clinic clinics;
+  v_phone text;
+begin
+  if auth.uid() is null then
+    raise exception 'You must be signed in to register a clinic.';
+  end if;
+
+  if trim(coalesce(p_name, '')) = '' then
+    raise exception 'Clinic name is required.';
+  end if;
+  if trim(coalesce(p_reg_no, '')) = '' then
+    raise exception 'Clinic registration number is required.';
+  end if;
+
+  if exists (select 1 from clinics where owner_id = auth.uid()) then
+    raise exception 'This account already has a registered clinic.';
+  end if;
+
+  select phone into v_phone from profiles where id = auth.uid();
+
+  update profiles set role = 'clinic' where id = auth.uid() and role = 'patient';
+
+  insert into clinics (owner_id, name, reg_no, contact_phone, status, is_active)
+  values (auth.uid(), trim(p_name), trim(p_reg_no), v_phone, 'pending', true)
+  returning * into new_clinic;
+
+  return new_clinic;
+end;
+$$;
+
+-- ============================================================================
+-- 49. MANDATORY ITEMS BEFORE A CLINIC (OR DOCTOR) CAN BE APPROVED
+-- ============================================================================
+-- Today, approving a clinic or doctor (AdminConsole.tsx's Approve button) only
+-- checks "no document is currently REJECTED" (clinicsWithRejection /
+-- hasUnresolvedRejection in src/lib/documents.ts) - a clinic/doctor with ZERO
+-- documents uploaded, or with everything sitting at 'pending' review, sails
+-- through untouched. Separately, section 16's sync_verification_status()
+-- computes the VERIFIED badge from its own hardcoded required-type arrays,
+-- which have already drifted from src/lib/documentTypes.ts's
+-- `requiredForVerification` flags (that function's clinic set omits
+-- clinic_address_proof/clinic_license; its doctor set omits doctor_photo).
+-- And neither axis has ever affected the other: rejecting a document could
+-- drop is_verified to false while status stayed 'approved' forever.
+--
+--   * verification_requirements - the "required" flag becomes admin-owned
+--     data, not a hardcoded array duplicated in two places (schema.sql and
+--     documentTypes.ts). One row per (owner_type, doc_type), exactly the
+--     conditions_ref pattern (section 24): readable by anyone authenticated,
+--     writable only by public.is_admin(), no delete policy (flip the flag,
+--     don't remove the row - src/lib/documentTypes.ts still needs every
+--     doc_type's config regardless of whether it's currently required).
+--     Seeded with the set actually asked for: clinic_registration_certificate
+--     and map_location required for a clinic; government_id and
+--     medical_registration_certificate required for a doctor (plus
+--     written_consent, since that one is the platform agreement itself, not
+--     a discretionary document). Everything else - clinic_address_proof,
+--     clinic_license, degree_certificate, doctor_clinic_association_proof,
+--     doctor_photo - starts optional; the admin can flip any of these live
+--     from the new "Requirements" tab, no deploy needed.
+--   * is_owner_approval_ready(owner_type, owner_id) - true iff every item
+--     marked required for that owner_type has a LATEST documents row that is
+--     'verified' and not expired. This is now the ONE place that answers
+--     "can this be approved" - both the new server-side gate below and
+--     sync_verification_status() call it, so "approved" and "verified" can
+--     never drift the way status/is_verified used to.
+--   * enforce_clinic_approval_requirements() / enforce_doctor_approval_requirements()
+--     - two new BEFORE UPDATE triggers, firing only on old.status <> 'approved'
+--     -> new.status = 'approved', raising if is_owner_approval_ready() is
+--     false. This is the part that can't be bypassed by calling the API
+--     directly - RLS already restricts the 'approved' transition to admin
+--     sessions only, but said nothing about WHETHER the clinic/doctor was
+--     actually ready. AdminConsole.tsx's disabled Approve button is now just
+--     the UI reflection of this same rule, computed client-side from the
+--     same documents + verification_requirements rows it already has to load
+--     for the checklist - not a separate, potentially-drifting check.
+--   * sync_verification_status() - rewritten to call is_owner_approval_ready()
+--     instead of its own hardcoded arrays (closing the drift noted above),
+--     and to ALSO drop status from 'approved' back to 'pending' the moment
+--     all_ok flips false while it was previously true - "drop the clinic/
+--     doctor out of approved state" the spec asks for. Since this only
+--     changes anything inside the existing "did all_ok actually change"
+--     guard, it fires exactly once, at exactly the moment a required item
+--     gets rejected (or a fresh sync notices an expiry) - not on every
+--     unrelated document event.
+--   * is_currently_verified() (badge visibility) is UNCHANGED - it already
+--     live-checks expiry_date on every read for display purposes ("hide the
+--     VERIFIED badge" already just works, reusing Part 39 exactly as asked).
+--     What's missing without a cron job (this app has none, by design - see
+--     section 29's own note) is the STATUS actually flipping back to
+--     'pending' purely because a calendar date passed with no other document
+--     event to trigger a resync - sweep_expired_verifications() closes that
+--     gap the same "sweep on load" way section 29.4's auto_mark_no_shows()
+--     and section 46's sweep_follow_up_reminders() already do: AdminConsole.tsx
+--     calls it once when the verification tab loads.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 49.1 verification_requirements - the admin-owned "required" flag
+-- ----------------------------------------------------------------------------
+create table if not exists verification_requirements (
+  id uuid primary key default gen_random_uuid(),
+  owner_type text not null check (owner_type in ('clinic', 'doctor')),
+  doc_type text not null,
+  required boolean not null default false,
+  created_at timestamptz not null default now(),
+  unique (owner_type, doc_type)
+);
+
+insert into verification_requirements (owner_type, doc_type, required) values
+  ('clinic', 'clinic_registration_certificate', true),
+  ('clinic', 'clinic_address_proof', false),
+  ('clinic', 'clinic_license', false),
+  ('clinic', 'map_location', true),
+  ('doctor', 'government_id', true),
+  ('doctor', 'medical_registration_certificate', true),
+  ('doctor', 'degree_certificate', false),
+  ('doctor', 'doctor_clinic_association_proof', false),
+  ('doctor', 'doctor_photo', false),
+  ('doctor', 'written_consent', true)
+on conflict (owner_type, doc_type) do nothing;
+
+alter table verification_requirements enable row level security;
+
+drop policy if exists "verification_requirements_select" on verification_requirements;
+create policy "verification_requirements_select" on verification_requirements for select
+  to authenticated
+  using (true);
+
+drop policy if exists "verification_requirements_insert" on verification_requirements;
+create policy "verification_requirements_insert" on verification_requirements for insert
+  with check (public.is_admin());
+
+drop policy if exists "verification_requirements_update" on verification_requirements;
+create policy "verification_requirements_update" on verification_requirements for update
+  using (public.is_admin());
+
+-- ----------------------------------------------------------------------------
+-- 49.2 is_owner_approval_ready() - the one true "can this be approved" check
+-- ----------------------------------------------------------------------------
+create or replace function public.is_owner_approval_ready(p_owner_type text, p_owner_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    bool_and(
+      coalesce(latest.status, 'missing') = 'verified'
+      and (latest.expiry_date is null or latest.expiry_date >= current_date)
+    ),
+    true -- no required items configured at all - nothing to block on
+  )
+  from verification_requirements vr
+  left join lateral (
+    select status, expiry_date from documents
+    where owner_type = p_owner_type and owner_id = p_owner_id and documents.doc_type = vr.doc_type
+    order by created_at desc
+    limit 1
+  ) latest on true
+  where vr.owner_type = p_owner_type and vr.required = true;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 49.3 The server-side approval gate - cannot be bypassed by calling the API
+-- directly, since RLS already means only an admin session reaches this
+-- UPDATE at all, and this now also has to be true.
+-- ----------------------------------------------------------------------------
+create or replace function public.enforce_clinic_approval_requirements()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'approved' and old.status is distinct from 'approved' then
+    if not public.is_owner_approval_ready('clinic', new.id) then
+      raise exception 'Cannot approve this clinic - every required item must be uploaded and verified first.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_clinic_approve_check on clinics;
+create trigger on_clinic_approve_check
+  before update on clinics
+  for each row
+  execute function public.enforce_clinic_approval_requirements();
+
+create or replace function public.enforce_doctor_approval_requirements()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'approved' and old.status is distinct from 'approved' then
+    if not public.is_owner_approval_ready('doctor', new.id) then
+      raise exception 'Cannot approve this doctor - every required item must be uploaded and verified first.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_doctor_approve_check on doctors;
+create trigger on_doctor_approve_check
+  before update on doctors
+  for each row
+  execute function public.enforce_doctor_approval_requirements();
+
+-- ----------------------------------------------------------------------------
+-- 49.4 sync_verification_status() - now driven by is_owner_approval_ready(),
+-- and now also drops status out of 'approved' the moment that flips false.
+-- ----------------------------------------------------------------------------
+create or replace function public.sync_verification_status(p_owner_type text, p_owner_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  all_ok boolean;
+  was_verified boolean;
+  owner_name text;
+  owner_status text;
+  notify_user_id uuid;
+  dropped boolean;
+begin
+  if p_owner_type = 'clinic' then
+    select is_verified, name, status, owner_id into was_verified, owner_name, owner_status, notify_user_id
+    from clinics where id = p_owner_id;
+  elsif p_owner_type = 'doctor' then
+    select d.is_verified, d.name, d.status, c.owner_id into was_verified, owner_name, owner_status, notify_user_id
+    from doctors d join clinics c on c.id = d.clinic_id
+    where d.id = p_owner_id;
+  else
+    return;
+  end if;
+
+  if owner_name is null then
+    return; -- owner row doesn't exist (shouldn't happen in normal flow)
+  end if;
+
+  all_ok := public.is_owner_approval_ready(p_owner_type, p_owner_id);
+
+  if all_ok = was_verified then
+    return; -- nothing changed
+  end if;
+
+  -- "Drop the clinic/doctor out of approved state" - only ever fires here,
+  -- at the exact moment a required item that WAS satisfied stops being so
+  -- (a rejection, or a resync noticing an expiry) - never on the way UP,
+  -- re-approval after a drop is always the admin's own explicit decision.
+  dropped := owner_status = 'approved' and not all_ok;
+
+  perform set_config('sanjeevnios.verification_sync', 'true', true);
+
+  if p_owner_type = 'clinic' then
+    update clinics
+    set is_verified = all_ok,
+        verified_at = case when all_ok then now() else null end,
+        verified_by = case when all_ok then auth.uid() else null end,
+        status = case when dropped then 'pending' else status end
+    where id = p_owner_id;
+  else
+    update doctors
+    set is_verified = all_ok,
+        verified_at = case when all_ok then now() else null end,
+        verified_by = case when all_ok then auth.uid() else null end,
+        status = case when dropped then 'pending' else status end
+    where id = p_owner_id;
+  end if;
+
+  insert into audit_log (actor, action, target)
+  values (
+    auth.uid(),
+    p_owner_type || (case when all_ok then '_verified' when dropped then '_dropped_from_approved' else '_verification_dropped' end),
+    p_owner_id::text
+  );
+
+  if notify_user_id is not null then
+    insert into notifications (user_id, type, message)
+    values (
+      notify_user_id,
+      p_owner_type || (case when all_ok then '_verified' when dropped then '_dropped_from_approved' else '_verification_dropped' end),
+      case
+        when all_ok then format('%s "%s" is now VERIFIED on SanjeevniOS.', initcap(p_owner_type), owner_name)
+        when dropped then format(
+          '%s "%s" has been moved back to pending review - a required item is missing, rejected, or has expired. It is hidden from patients until an admin re-approves it.',
+          initcap(p_owner_type), owner_name
+        )
+        else format('%s "%s" is no longer VERIFIED - a required item needs your attention.', initcap(p_owner_type), owner_name)
+      end
+    );
+  end if;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 49.5 sweep_expired_verifications() - best-effort, no cron required (see
+-- this migration's header) - mirrors auto_mark_no_shows()/
+-- sweep_follow_up_reminders()'s own "the console sweeps on load" pattern.
+-- ----------------------------------------------------------------------------
+create or replace function public.sweep_expired_verifications()
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int := 0;
+  r record;
+begin
+  for r in
+    select distinct d.owner_type, d.owner_id
+    from documents d
+    where d.status = 'verified'
+      and d.expiry_date is not null
+      and d.expiry_date < current_date
+      and (
+        (d.owner_type = 'clinic' and exists (
+          select 1 from clinics c where c.id = d.owner_id and (c.is_verified or c.status = 'approved')
+        ))
+        or (d.owner_type = 'doctor' and exists (
+          select 1 from doctors doc where doc.id = d.owner_id and (doc.is_verified or doc.status = 'approved')
+        ))
+      )
+  loop
+    perform public.sync_verification_status(r.owner_type, r.owner_id);
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end;
+$$;
+
+-- ============================================================================
+-- 50. GRAY OUT PAST TIME SLOTS
+-- ============================================================================
+-- enforce_booking_policy()'s SAME_DAY_CUTOFF check (section 37.3) - "a
+-- same-day slot that has already passed, or starts too soon, can't be
+-- booked" - has only ever applied to an appointment_only clinic that opted
+-- into same-day booking, gated by `if c.mode = 'appointment_only' then ...`.
+-- An allow_walkins clinic (the default, and the common case) has never had
+-- ANY same-day past-slot protection at all: a patient could book a 10 AM
+-- slot from home at 2 PM the same day, and the server would happily accept
+-- it - SlotPicker.tsx showed every one of today's computed slots as a plain,
+-- selectable time with no time-of-day awareness whatsoever.
+--
+--   * clinics.past_slot_buffer_minutes - a new, always-on setting (default
+--     10 minutes, matches the spec's own example) that plays the exact same
+--     role same_day_cutoff_minutes already plays for an appointment_only
+--     clinic, for every OTHER clinic. Admin-editable from
+--     ClinicBookingMode.tsx, same as its sibling.
+--   * enforce_booking_policy() - the SAME_DAY_CUTOFF check is generalized
+--     from "only in appointment_only mode" to "in any mode, for a scheduled
+--     (not walk-in) booking on today's date" - using same_day_cutoff_minutes
+--     where that admin-set number already applies (appointment_only + same-
+--     day booking enabled), and past_slot_buffer_minutes everywhere else.
+--     Deliberately kept as the SAME error prefix (SAME_DAY_CUTOFF) rather
+--     than a new one: the client already has a complete, working "That time
+--     is too close now" recovery screen wired to that exact prefix
+--     (isSameDayCutoffError() in bookingPolicy.ts, BookingForm.tsx's
+--     sameDayCutoff state) - this is the same rule, now applied more widely,
+--     not a second rule to keep consistent with the first.
+--   * Everything else about enforce_booking_policy() - the advance-only
+--     date-range checks, the daily cap, walk-in gating, auto-accept - is
+--     completely unchanged, and still scoped to appointment_only mode only.
+-- ============================================================================
+
+alter table clinics add column if not exists past_slot_buffer_minutes int not null default 10;
+alter table clinics drop constraint if exists clinics_past_slot_buffer_minutes_check;
+alter table clinics add constraint clinics_past_slot_buffer_minutes_check
+  check (past_slot_buffer_minutes >= 0);
+
+create or replace function public.enforce_booking_policy()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c clinics;
+  v_today date;
+  v_now_local timestamp;
+  v_same_day boolean;
+  v_taken int;
+  v_full boolean;
+  v_cutoff_minutes int;
+begin
+  select * into c from clinics where id = new.clinic_id;
+  if c.id is null then
+    raise exception 'Clinic not found.';
+  end if;
+
+  v_now_local := now() at time zone coalesce(c.timezone, 'Asia/Kolkata');
+  v_today := v_now_local::date;
+  v_same_day := (new.date = v_today);
+
+  if c.mode = 'appointment_only' then
+    if new.date < v_today then
+      raise exception 'This clinic takes advance bookings only - the earliest you can book is %.',
+        to_char(case when c.same_day_booking_enabled then v_today else v_today + 1 end, 'DD Mon YYYY');
+    end if;
+
+    if v_same_day then
+      if not c.same_day_booking_enabled then
+        raise exception 'This clinic takes advance bookings only - the earliest you can book is %.',
+          to_char(v_today + 1, 'DD Mon YYYY');
+      end if;
+
+      if new.patient_type = 'walk_in' then
+        raise exception 'This clinic is appointment-only - walk-ins are not accepted.';
+      end if;
+    else
+      if new.date > v_today + c.booking_horizon_days then
+        raise exception 'This clinic accepts bookings up to % day(s) ahead - the latest you can book is %.',
+          c.booking_horizon_days, to_char(v_today + c.booking_horizon_days, 'DD Mon YYYY');
+      end if;
+    end if;
+  end if;
+
+  -- GRAY OUT PAST TIME SLOTS (schema.sql section 50) - a scheduled booking
+  -- for a slot that has already started, or starts within the buffer below,
+  -- is refused - in ANY clinic mode, not just appointment_only. A walk-in's
+  -- slot_time is a real, currently-open slot picked from the doctor's grid
+  -- at the moment of registration (section 38), never a stale one, so this
+  -- never applies to patient_type = 'walk_in'.
+  if v_same_day and new.patient_type = 'scheduled' then
+    v_cutoff_minutes := case
+      when c.mode = 'appointment_only' and c.same_day_booking_enabled then c.same_day_cutoff_minutes
+      else c.past_slot_buffer_minutes
+    end;
+
+    if (new.date + new.slot_time)::timestamp < v_now_local + make_interval(mins => v_cutoff_minutes) then
+      raise exception 'SAME_DAY_CUTOFF: the % slot has already passed or is too soon - same-day booking closes % minutes before a slot starts.',
+        to_char(new.slot_time, 'HH12:MI AM'), v_cutoff_minutes;
+    end if;
+  end if;
+
+  -- The daily cap: always enforced in appointment_only mode (as before, any
+  -- booking), and now ALSO for a walk-in at any clinic (section 38.2). A
+  -- scheduled/advance booking at an allow_walkins clinic never reaches this
+  -- block, so stays uncapped exactly as before.
+  if c.mode = 'appointment_only' or new.patient_type = 'walk_in' then
+    -- Take the day's lock BEFORE counting - see 33.2.
+    insert into clinic_day_locks (clinic_id, date)
+    values (new.clinic_id, new.date)
+    on conflict (clinic_id, date) do update set updated_at = now();
+
+    select seats_taken, is_full into v_taken, v_full
+    from public.day_availability(new.clinic_id, new.date);
+
+    if coalesce(v_full, false) then
+      raise exception 'FULL_DAY: % is fully booked (% of % seats taken).',
+        to_char(new.date, 'DD Mon YYYY'), v_taken, c.daily_cap;
+    end if;
+  end if;
+
+  -- Inside the cap, so there is nothing to approve - but only appointment_only
+  -- mode auto-accepts. A walk-in at an allow_walkins clinic still goes
+  -- through the desk's explicit accept step, exactly as before.
+  if c.mode = 'appointment_only' and new.status = 'booked' then
+    new.status := 'accepted';
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ============================================================================
+-- 51. FIX: AN APPROVED CLINIC/DOCTOR CAN'T UPDATE ITS OWN SETTINGS
+-- ============================================================================
+-- Found while testing section 50's new past_slot_buffer_minutes setting:
+-- saving it from ClinicBookingMode.tsx failed with "new row violates row-
+-- level security policy for table 'clinics'" - for ANY already-approved
+-- clinic, on ANY field, not just this new one.
+--
+-- clinics_update's WITH CHECK (section 45) reads:
+--   is_admin() or (owner_id = auth.uid() and status in ('draft', 'pending'))
+-- doctors_update's (section 14) has the identical shape, one level down.
+-- The stated intent (section 45's own comment) was narrower than what got
+-- written: "the owning clinic may only move itself between draft and
+-- pending - approved/rejected stays admin-only." But a WITH CHECK clause
+-- only ever sees the proposed NEW row, with no way to compare it to the OLD
+-- one - so this ended up gating every column, on every update, by the FINAL
+-- status value alone. The moment a clinic (or doctor) is approved, its own
+-- owner can no longer save ANYTHING on it - booking mode, cap, cutoffs, map
+-- location, a doctor's fee or specialty, nothing - because the row's own
+-- status is 'approved', which fails that check regardless of which column
+-- was actually being changed.
+--
+-- Fixed the same way this schema already fixes exactly this class of
+-- problem elsewhere (prevent_self_verification(), section 16 - "some
+-- columns need a rule WITH CHECK can't express because it can't see the OLD
+-- row"): relax both WITH CHECKs to plain ownership, and move the actual
+-- status-transition restriction into a trigger, which CAN compare
+-- OLD.status to NEW.status. A clinic/doctor can now freely edit its own
+-- settings at any status; only actually changing status TO 'approved' or
+-- 'rejected' still requires an admin - exactly the original intent, now
+-- correctly expressed.
+-- ============================================================================
+
+drop policy if exists "clinics_update" on clinics;
+create policy "clinics_update" on clinics for update
+  using (owner_id = auth.uid() or public.is_admin())
+  with check (owner_id = auth.uid() or public.is_admin());
+
+create or replace function public.prevent_self_clinic_approval()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status is distinct from old.status
+     and new.status in ('approved', 'rejected')
+     and not public.is_admin()
+  then
+    raise exception 'Only an admin can approve or reject a clinic.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_clinic_prevent_self_approval on clinics;
+create trigger on_clinic_prevent_self_approval
+  before update on clinics
+  for each row
+  execute function public.prevent_self_clinic_approval();
+
+drop policy if exists "doctors_update" on doctors;
+create policy "doctors_update" on doctors for update
+  using (public.is_own_clinic(clinic_id) or public.is_admin())
+  with check (public.is_own_clinic(clinic_id) or public.is_admin());
+
+create or replace function public.prevent_self_doctor_approval()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status is distinct from old.status
+     and new.status in ('approved', 'rejected')
+     and not public.is_admin()
+  then
+    raise exception 'Only an admin can approve or reject a doctor.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_doctor_prevent_self_approval on doctors;
+create trigger on_doctor_prevent_self_approval
+  before update on doctors
+  for each row
+  execute function public.prevent_self_doctor_approval();
+
+-- ============================================================================
+-- 52. MARK PAID AT CLINIC - CLEARS THE DUE AMOUNT LIVE
+-- ============================================================================
+-- Ties the clinic desk's "Mark paid" button (ClinicCheckIn.tsx, Part 44) to
+-- the patient's own booking screen (BookingStatus.tsx), over the exact same
+-- realtime channel the live token already uses ("queue:<doctor_id>:<date>",
+-- section 5/26).
+--
+-- Three things change together:
+--
+--   1. mark_paid_at_clinic() now records WHO collected the money and WHEN,
+--      not just the fact that it happened - appointments gains paid_amount,
+--      paid_at and marked_paid_by. It is made explicitly idempotent: calling
+--      it again on an already-paid_at_clinic appointment is a no-op that
+--      returns without touching the existing record, so a double-tap (or two
+--      desk staff pressing it at once) never double-counts or overwrites who
+--      actually took the cash.
+--
+--   2. Section 30.5's "presence cannot be forged" guard (guard_presence_columns)
+--      is extended to cover the same ground for money: a plain client update
+--      can no longer set payment_status to 'paid_at_clinic', or write
+--      paid_amount/paid_at/marked_paid_by, directly. Only mark_paid_at_clinic()
+--      (which announces itself with app.payment_write, the same pattern
+--      app.checkin_write already uses) may set them. This matters here
+--      specifically because appointments_update's USING clause allows the
+--      PATIENT themselves to update their own booking row
+--      (is_own_member(member_id)) - without this guard, a patient could
+--      simply PATCH their own pay_at_clinic booking to paid_at_clinic and
+--      make their own due amount vanish without paying anyone.
+--      AdminPayments.tsx's existing direct `update ... set payment_status =
+--      'refunded'` is untouched: the guard only blocks the transition INTO
+--      'paid_at_clinic' and writes to the three new columns, not refunds.
+--
+--   3. The live-queue broadcast trigger (section 27.8) only fired on a
+--      status or token_number change, so marking someone paid never woke up
+--      anyone watching BookingStatus.tsx's realtime channel - the patient's
+--      "Amount due" line would only have updated on their next manual
+--      refresh. Its WHEN clause now also fires on a payment_status change.
+--      The broadcast payload itself carries the raw row either way (as it
+--      already did for status/token_number) - every subscriber's handler
+--      only uses it as a ping to refetch through the normal RLS-protected
+--      read path, never reads fields off the payload, so this adds no new
+--      exposure.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 52.1 appointments - who/when/how much was collected at the desk
+-- ----------------------------------------------------------------------------
+alter table appointments add column if not exists paid_amount numeric;
+alter table appointments add column if not exists paid_at timestamptz;
+alter table appointments add column if not exists marked_paid_by uuid references profiles (id);
+
+-- ----------------------------------------------------------------------------
+-- 52.2 mark_paid_at_clinic() - now idempotent, and stamps who/when/how much.
+-- ----------------------------------------------------------------------------
+create or replace function public.mark_paid_at_clinic(p_appointment_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  a appointments;
+  v_amount numeric;
+begin
+  select * into a from appointments where id = p_appointment_id;
+  if a.id is null then
+    raise exception 'Appointment not found.';
+  end if;
+  if not (public.is_admin() or public.is_own_clinic(a.clinic_id)) then
+    raise exception 'This is not your clinic.';
+  end if;
+  if a.payment_status = 'paid_online' then
+    raise exception 'This appointment was already paid online - there is nothing to collect.';
+  end if;
+  if a.payment_status = 'refunded' then
+    raise exception 'This appointment has been refunded.';
+  end if;
+  if a.payment_status = 'free_followup' then
+    raise exception 'This is a free follow-up - there is nothing to collect.';
+  end if;
+
+  -- Idempotent: tapping "Mark paid" again on an already-settled appointment
+  -- (double tap, stale tab, two desks at once) just leaves the existing
+  -- paid record - amount, time, who - exactly as it was.
+  if a.payment_status = 'paid_at_clinic' then
+    return;
+  end if;
+
+  select coalesce(net_amount, amount) into v_amount
+  from payments
+  where appointment_id = a.id
+  order by created_at desc
+  limit 1;
+
+  perform set_config('app.payment_write', '1', true);
+  update appointments
+  set payment_status = 'paid_at_clinic',
+      paid_amount = coalesce(v_amount, 0),
+      paid_at = now(),
+      marked_paid_by = auth.uid()
+  where id = a.id;
+  perform set_config('app.payment_write', '0', true);
+
+  update payments set status = 'captured' where appointment_id = a.id and status = 'pending';
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 52.3 Money cannot be forged either - same pattern as section 30.5's
+-- presence guard, extended to the paid-at-clinic record.
+-- ----------------------------------------------------------------------------
+create or replace function public.guard_presence_columns()
+returns trigger
+language plpgsql
+as $$
+begin
+  if coalesce(current_setting('app.checkin_write', true), '') = '1'
+     or coalesce(current_setting('app.payment_write', true), '') = '1' then
+    return new;  -- we're inside check_in_appointment()/skip_to_back()/mark_paid_at_clinic()
+  end if;
+
+  if new.checked_in_at is not null and new.checked_in_at is distinct from old.checked_in_at then
+    raise exception 'checked_in_at is set by checking a patient in, not by writing to it directly.';
+  end if;
+  if new.token_number is not null and new.token_number is distinct from old.token_number then
+    raise exception 'token_number is issued by the arrival counter, not by writing to it directly.';
+  end if;
+  if new.arrival_seq is not null and new.arrival_seq is distinct from old.arrival_seq then
+    raise exception 'arrival_seq is issued by the arrival counter, not by writing to it directly.';
+  end if;
+
+  if new.payment_status = 'paid_at_clinic' and new.payment_status is distinct from old.payment_status then
+    raise exception 'paid_at_clinic is recorded by mark_paid_at_clinic(), not by writing payment_status directly.';
+  end if;
+  if new.paid_amount is distinct from old.paid_amount then
+    raise exception 'paid_amount is recorded by mark_paid_at_clinic(), not by writing to it directly.';
+  end if;
+  if new.paid_at is distinct from old.paid_at then
+    raise exception 'paid_at is recorded by mark_paid_at_clinic(), not by writing to it directly.';
+  end if;
+  if new.marked_paid_by is distinct from old.marked_paid_by then
+    raise exception 'marked_paid_by is recorded by mark_paid_at_clinic(), not by writing to it directly.';
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 52.4 The live-queue broadcast also fires on a payment_status change now,
+-- so BookingStatus.tsx's realtime channel wakes up the instant the desk
+-- taps "Mark paid" - same channel the live token already rides.
+-- ----------------------------------------------------------------------------
+drop trigger if exists on_appointment_queue_broadcast on appointments;
+create trigger on_appointment_queue_broadcast
+  after update on appointments
+  for each row
+  when (
+    old.status is distinct from new.status
+    or old.token_number is distinct from new.token_number
+    or old.payment_status is distinct from new.payment_status
+  )
+  execute function public.broadcast_appointment_queue_change();

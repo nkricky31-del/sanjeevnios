@@ -13,6 +13,10 @@ interface Props {
   selectedDate: string | null;
   selectedSlot: string | null;
   onSelect: (date: string, slotTime: string) => void;
+  // Day the calendar strip should open on, before anything is picked - e.g.
+  // a follow-up's due date (DoctorPage.tsx, schema.sql section 46). Only
+  // read once, on mount; falls back to selectedDate, then today.
+  initialDate?: string | null;
 }
 
 const DEFAULT_DAYS_TO_SHOW = 14;
@@ -22,10 +26,10 @@ const DEFAULT_DAYS_TO_SHOW = 14;
 // walk-in patient in the same flow) so both respect the same working hours,
 // taken slots, and clinic holidays instead of drifting apart. Read-only
 // picker - it doesn't create anything, just reports back what got clicked.
-export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DAYS_TO_SHOW, selectedDate, selectedSlot, onSelect }: Props) {
+export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DAYS_TO_SHOW, selectedDate, selectedSlot, onSelect, initialDate }: Props) {
   const [availability, setAvailability] = useState<DoctorAvailability[]>([]);
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
-  const [date, setDate] = useState(selectedDate ?? todayISO());
+  const [date, setDate] = useState(initialDate ?? selectedDate ?? todayISO());
   const [takenSlots, setTakenSlots] = useState<Set<string>>(new Set());
   const [policy, setPolicy] = useState<BookingPolicy>(DEFAULT_POLICY);
   const [dayInfo, setDayInfo] = useState<DayAvailability | null>(null);
@@ -78,18 +82,18 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
   // same minute for a very tight capacity/window combo.
   const allSlots = isHolidayToday ? [] : Array.from(new Set(computeSlots(windowsToday)));
 
-  // A same-day slot inside the clinic's cutoff (schema.sql section 37.3) -
-  // greyed out here purely so the grid doesn't invite a tap that the server
-  // will refuse with SAME_DAY_CUTOFF. That check only exists server-side for
-  // an appointment_only clinic that has opted into same-day booking - an
-  // allow_walkins clinic has never had a same-day cutoff and still doesn't,
-  // so this must stay scoped to exactly that combination, not applied to
-  // "today" generally.
+  // A same-day slot that has already started, or starts within the buffer
+  // below, is greyed out here purely so the grid doesn't invite a tap the
+  // server will refuse with SAME_DAY_CUTOFF (schema.sql section 50). An
+  // appointment_only clinic that has opted into same-day booking keeps its
+  // own admin-set cutoff; every other case (allow_walkins, the common case)
+  // uses the smaller, always-on pastSlotBufferMinutes instead - same rule,
+  // same error code, just no longer scoped to one clinic mode.
   const isToday = date === todayISO();
-  const sameDayCutoffApplies = appointmentOnly && policy.sameDayBookingEnabled;
-  const cutoffMs = policy.sameDayCutoffMinutes * 60_000;
+  const cutoffMinutes = appointmentOnly && policy.sameDayBookingEnabled ? policy.sameDayCutoffMinutes : policy.pastSlotBufferMinutes;
+  const cutoffMs = cutoffMinutes * 60_000;
   const nowMs = Date.now();
-  const withinCutoff = (s: string) => sameDayCutoffApplies && isToday && new Date(`${date}T${s}`).getTime() - nowMs < cutoffMs;
+  const withinCutoff = (s: string) => isToday && new Date(`${date}T${s}`).getTime() - nowMs < cutoffMs;
 
   // takenSlots (from get_taken_slots, section 36) already means "this exact
   // time's active bookings have reached its capacity" - a slot with room

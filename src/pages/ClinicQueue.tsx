@@ -299,7 +299,6 @@ export default function ClinicQueue() {
     }
 
     if (a.family_members?.account_id) {
-      const paidOnline = updated.payment_status === 'paid_online';
       await notifyPatient({
         userId: a.family_members.account_id,
         appointmentId: a.id,
@@ -307,7 +306,7 @@ export default function ClinicQueue() {
         message: appointmentConfirmedMessage(
           a.slot_time,
           bookingReference(a.id),
-          paidOnline,
+          updated.payment_status,
           clinic?.report_before_minutes ?? 30
         ),
       });

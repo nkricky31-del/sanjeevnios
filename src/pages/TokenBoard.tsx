@@ -93,7 +93,7 @@ export default function TokenBoard() {
     supabase.realtime.setAuth();
     const channels = doctorIds.map((id) =>
       supabase
-        .channel(`queue:${id}:${today}`)
+        .channel(`queue:${id}:${today}`, { config: { private: true } })
         .on('broadcast', { event: 'UPDATE' }, () => load())
         .on('broadcast', { event: 'INSERT' }, () => load())
         .subscribe()

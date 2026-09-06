@@ -2,6 +2,7 @@ import { BellRing, PlayCircle, SkipForward, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { skipToBack } from '../lib/checkIn';
+import { getDoctorConsultationStats } from '../lib/consultation';
 import { ageFromDob } from '../lib/date';
 import { bookingReference } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
@@ -83,6 +84,12 @@ export default function WaitingList({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // schema.sql section 54 - refetched alongside the queue itself, so it's
+  // already live over the same realtime channel: completing a visit
+  // broadcasts an UPDATE, which reloads both the queue AND this average in
+  // the same pass, on every open tab watching this doctor/date.
+  const [avgMinutes, setAvgMinutes] = useState<number | null>(null);
+  const [avgSampleSize, setAvgSampleSize] = useState(0);
 
   const load = useCallback(async () => {
     if (!doctorId) {
@@ -90,12 +97,14 @@ export default function WaitingList({
       setLoading(false);
       return;
     }
-    const { data, error: loadError } = await supabase.rpc('get_clinic_queue', {
-      p_doctor_id: doctorId,
-      p_date: date,
-    });
+    const [{ data, error: loadError }, stats] = await Promise.all([
+      supabase.rpc('get_clinic_queue', { p_doctor_id: doctorId, p_date: date }),
+      getDoctorConsultationStats(doctorId),
+    ]);
     if (loadError) setError(loadError.message);
     setRows((data ?? []) as QueueRow[]);
+    setAvgMinutes(stats.avgMinutes);
+    setAvgSampleSize(stats.sampleSize);
     setLoading(false);
   }, [doctorId, date]);
 
@@ -110,7 +119,7 @@ export default function WaitingList({
     if (!doctorId) return;
     supabase.realtime.setAuth();
     const channel = supabase
-      .channel(`queue:${doctorId}:${date}`)
+      .channel(`queue:${doctorId}:${date}`, { config: { private: true } })
       .on('broadcast', { event: 'UPDATE' }, () => load())
       .on('broadcast', { event: 'INSERT' }, () => load())
       .subscribe();
@@ -250,6 +259,11 @@ export default function WaitingList({
           <span className="text-xs font-semibold text-slate-500">Now serving: #{nowServing}</span>
         ) : (
           nextUp && <span className="text-xs font-semibold text-slate-500">Up next: #{nextUp.token_number}</span>
+        )}
+        {avgMinutes != null && (
+          <span className="text-xs font-semibold text-slate-400">
+            · Avg consultation: {avgMinutes} min ({avgSampleSize} visit{avgSampleSize === 1 ? '' : 's'})
+          </span>
         )}
       </div>
 

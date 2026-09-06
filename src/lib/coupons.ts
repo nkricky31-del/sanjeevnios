@@ -70,6 +70,10 @@ export interface CreatePaymentResult {
   grossAmount: number;
   discountAmount: number;
   netAmount: number;
+  // True when this booking fell inside its original visit's free re-consult
+  // window (schema.sql section 46) - netAmount is 0 and there is nothing to
+  // hold or collect, regardless of which method was passed in.
+  isFree: boolean;
 }
 
 // Replaces the old plain `insert into payments` - this is where the charge
@@ -91,6 +95,7 @@ export async function createPaymentWithCoupon(
     gross_amount: number;
     discount_amount: number;
     net_amount: number;
+    is_free: boolean;
   }[])[0];
   if (!row) return { error: 'Could not record payment for this booking.' };
   return {
@@ -98,5 +103,6 @@ export async function createPaymentWithCoupon(
     grossAmount: row.gross_amount,
     discountAmount: row.discount_amount,
     netAmount: row.net_amount,
+    isFree: row.is_free,
   };
 }

@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { formatTimeLabel, reportingTimeFor } from './time';
-import type { NotificationChannel, PaymentMethod } from './types';
+import type { AppointmentPaymentStatus, NotificationChannel, PaymentMethod } from './types';
 
 // How close to the reporting time (not the slot time) the one-shot "please
 // head over" nudge fires - see BookingStatus.tsx's reminder effect and
@@ -80,20 +80,23 @@ export function bookingReceivedMessage(doctorName: string, date: string, method:
 
 // Sent only once the clinic taps Accept - never before. By this point
 // migration_39's handle_appointment_status_change() has already captured any
-// held online payment, so paidOnline here just decides which payment line to
-// show, not whether to capture anything. reportBeforeMinutes is the clinic's
-// own setting (section 40) - clamped inside reportingTimeFor so the quoted
-// time can never fall outside the check-in window.
+// held online payment, so paymentStatus here just decides which payment line
+// to show, not whether to capture anything. reportBeforeMinutes is the
+// clinic's own setting (section 40) - clamped inside reportingTimeFor so the
+// quoted time can never fall outside the check-in window.
 export function appointmentConfirmedMessage(
   slotTime: string,
   bookingRef: string,
-  paidOnline: boolean,
+  paymentStatus: AppointmentPaymentStatus,
   reportBeforeMinutes: number
 ): string {
   const reportBy = formatTimeLabel(reportingTimeFor(slotTime, reportBeforeMinutes));
-  const paymentNote = paidOnline
-    ? "You've already paid online, so there's nothing to pay at the desk."
-    : 'Payment is due at the desk when you arrive.';
+  const paymentNote =
+    paymentStatus === 'free_followup'
+      ? "This is a free follow-up visit, so there's nothing to pay."
+      : paymentStatus === 'paid_online' || paymentStatus === 'paid_at_clinic'
+        ? "You've already paid, so there's nothing to pay at the desk."
+        : 'Payment is due at the desk when you arrive.';
   return `Confirmed! Please reach the clinic by ${reportBy} (your reporting time) for your ${formatTimeLabel(
     slotTime
   )} slot. Show your QR at the desk to check in. Booking ref ${bookingRef}. ${paymentNote}`;

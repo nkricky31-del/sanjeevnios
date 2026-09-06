@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 
+import { todayISO } from '../lib/date';
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
 import { docTypesFor } from '../lib/documentTypes';
 import { openVerificationDoc } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
-import type { Consent, DocumentRow, OwnerType } from '../lib/types';
+import type { Consent, DocumentRow, OwnerType, VerificationRequirement } from '../lib/types';
+import { isRequired } from '../lib/verificationRequirements';
 import AdminRejectForm from './AdminRejectForm';
 import ClinicLocationPreview from './ClinicLocationPreview';
 import StatusPill from './ui/StatusPill';
@@ -22,6 +24,10 @@ interface Props {
   ownerId: string;
   notifyUserId: string;
   label: string;
+  // Which doc_types are currently mandatory before approval (schema.sql
+  // section 49) - loaded once by the caller (AdminConsole.tsx) so every
+  // checklist on the page reads the exact same admin-controlled list.
+  requirements: VerificationRequirement[];
   onChanged?: () => void;
 }
 
@@ -31,7 +37,7 @@ const STATUS_TONE: Record<'pending' | 'verified' | 'rejected', 'live' | 'warning
   rejected: 'warning',
 };
 
-export default function AdminDocumentReview({ ownerType, ownerId, notifyUserId, label, onChanged }: Props) {
+export default function AdminDocumentReview({ ownerType, ownerId, notifyUserId, label, requirements, onChanged }: Props) {
   const { session } = useAuth();
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [consent, setConsent] = useState<Consent | null>(null);
@@ -161,16 +167,22 @@ export default function AdminDocumentReview({ ownerType, ownerId, notifyUserId, 
       <div className="mt-2 space-y-2">
         {configs.map((config) => {
           const doc = latestFor(config.key);
+          const required = isRequired(requirements, ownerType, config.key);
+          const expired = !!doc?.expiry_date && doc.expiry_date < todayISO();
           return (
             <div key={config.key} className="rounded-xl bg-slate-50 p-2.5">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-bold text-slate-800">
                   {config.label}
-                  {config.requiredForVerification && <span className="text-coral-500"> *</span>}
+                  {required ? (
+                    <span className="text-coral-500"> * Required</span>
+                  ) : (
+                    <span className="text-slate-400"> · Optional</span>
+                  )}
                 </p>
                 <StatusPill
-                  label={!doc ? 'Not uploaded' : doc.not_applicable ? `N/A · ${doc.status}` : doc.status}
-                  tone={!doc ? 'neutral' : STATUS_TONE[doc.status]}
+                  label={!doc ? 'Not uploaded' : doc.not_applicable ? `N/A · ${doc.status}` : expired ? 'Expired' : doc.status}
+                  tone={!doc ? 'neutral' : expired ? 'warning' : STATUS_TONE[doc.status]}
                 />
               </div>
               {config.key === 'map_location' && clinicLocation && (
@@ -182,6 +194,11 @@ export default function AdminDocumentReview({ ownerType, ownerId, notifyUserId, 
                 />
               )}
               {doc?.number && <p className="mt-1 text-xs text-slate-500">Number: {doc.number}</p>}
+              {doc?.expiry_date && (
+                <p className={`mt-1 text-xs ${expired ? 'font-medium text-red-600' : 'text-slate-500'}`}>
+                  {expired ? 'Expired' : 'Expires'}: {doc.expiry_date}
+                </p>
+              )}
               {doc?.not_applicable && doc.not_applicable_note && (
                 <p className="mt-1 text-xs text-slate-500">Note: {doc.not_applicable_note}</p>
               )}

@@ -11,6 +11,11 @@ export interface BookingPolicy {
   // 37) - meaningless outside that mode, where same-day is already open.
   sameDayBookingEnabled: boolean;
   sameDayCutoffMinutes: number;
+  // Same idea as sameDayCutoffMinutes, but ALWAYS in effect (schema.sql
+  // section 50) - the buffer used for every clinic mode except
+  // appointment_only-with-same-day-booking-enabled, which keeps its own,
+  // admin-set cutoff above instead.
+  pastSlotBufferMinutes: number;
   // Whether a same-day booking made from a verified location gets checked
   // in on the spot (section 37.4) - only ever true for an appointment_only
   // clinic that both allows same-day booking AND opted into this. Gates
@@ -31,6 +36,7 @@ export const DEFAULT_POLICY: BookingPolicy = {
   dailyCap: 100,
   sameDayBookingEnabled: false,
   sameDayCutoffMinutes: 30,
+  pastSlotBufferMinutes: 10,
   autoCheckinVerifiedSameDay: false,
 };
 
@@ -38,7 +44,7 @@ export async function getBookingPolicy(clinicId: string): Promise<BookingPolicy>
   const { data } = await supabase
     .from('clinics')
     .select(
-      'mode, booking_horizon_days, daily_cap, same_day_booking_enabled, same_day_cutoff_minutes, auto_checkin_verified_same_day'
+      'mode, booking_horizon_days, daily_cap, same_day_booking_enabled, same_day_cutoff_minutes, past_slot_buffer_minutes, auto_checkin_verified_same_day'
     )
     .eq('id', clinicId)
     .maybeSingle();
@@ -49,6 +55,7 @@ export async function getBookingPolicy(clinicId: string): Promise<BookingPolicy>
     dailyCap: data.daily_cap ?? 100,
     sameDayBookingEnabled: data.same_day_booking_enabled ?? false,
     sameDayCutoffMinutes: data.same_day_cutoff_minutes ?? 30,
+    pastSlotBufferMinutes: data.past_slot_buffer_minutes ?? 10,
     autoCheckinVerifiedSameDay: data.auto_checkin_verified_same_day ?? false,
   };
 }
@@ -132,4 +139,15 @@ export function isSlotFullError(message: string | undefined): boolean {
 // patient back to pick a later time instead of showing a raw database error.
 export function isSameDayCutoffError(message: string | undefined): boolean {
   return !!message && message.includes('SAME_DAY_CUTOFF');
+}
+
+// The DB refuses a second still-open booking for the SAME member at the SAME
+// clinic on the SAME day - appointments_member_clinic_day_active_unique, see
+// schema.sql section 47. A plain unique index (not a custom RAISE EXCEPTION
+// prefix like the three helpers above), so this recognises Postgres' own
+// constraint-violation message by the index name instead. Scoped to one
+// member - a DIFFERENT family member booking the same clinic/day is a
+// completely separate insert and never trips this.
+export function isDuplicateMemberBookingError(message: string | undefined): boolean {
+  return !!message && message.includes('appointments_member_clinic_day_active_unique');
 }
