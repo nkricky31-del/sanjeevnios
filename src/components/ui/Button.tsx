@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes } from 'react';
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'outline' | 'coral' | 'danger' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'outline' | 'coral' | 'danger' | 'ghost' | 'dark';
   full?: boolean;
 }
 
@@ -16,6 +16,9 @@ const VARIANTS: Record<string, string> = {
   coral: 'bg-coral-500 text-white shadow-sm shadow-coral-500/20 hover:bg-coral-600',
   danger: 'border border-red-200 bg-red-50 text-red-600 hover:bg-red-100',
   ghost: 'text-slate-500 hover:bg-slate-100',
+  // AdminLogin.tsx's own accent - deliberately not brand/coral so the admin
+  // screen never gets mistaken for the patient or clinic ones.
+  dark: 'bg-slate-900 text-white shadow-sm shadow-slate-900/25 hover:bg-slate-800',
 };
 
 export default function Button({ variant = 'primary', full, className = '', ...props }: Props) {

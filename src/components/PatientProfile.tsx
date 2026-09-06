@@ -2,7 +2,7 @@ import { Eye, Info } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { useAuth } from '../lib/AuthContext';
+import { getStoredActingMode } from '../lib/actingMode';
 import { ageFromDob } from '../lib/date';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember, HasKnownConditions } from '../lib/types';
@@ -84,7 +84,6 @@ function mergeProfile(rows: FamilyMember[]): MergedProfile | null {
 }
 
 export default function PatientProfile({ mrn }: Props) {
-  const { profile: viewerProfile } = useAuth();
   const [rows, setRows] = useState<FamilyMember[]>([]);
   const [encounters, setEncounters] = useState<EncounterRow[]>([]);
   const [conditions, setConditions] = useState<ConditionRow[]>([]);
@@ -209,7 +208,12 @@ export default function PatientProfile({ mrn }: Props) {
         )}
       </div>
 
-      {viewerProfile?.role === 'clinic' && (
+      {/* Was `viewerProfile.role === 'clinic'` - switched to the session's
+          acting mode (schema.sql migration 58) since role no longer implies
+          "currently viewing as clinic staff": a dual-role account (a patient
+          who's also clinic staff) keeps role 'patient' forever now, and this
+          banner should only show while they're actually acting as clinic. */}
+      {getStoredActingMode() === 'clinic' && (
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs font-medium text-amber-800">
           <Info size={15} className="mt-0.5 shrink-0" />
           You are viewing only the encounters of this patient at your clinic. Encounters from other clinics are not

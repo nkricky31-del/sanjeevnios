@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react';
 
+import { clearActingMode } from './actingMode';
 import { supabase } from './supabaseClient';
 import type { Profile } from './types';
 
@@ -48,6 +49,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
         loadProfile(newSession.user.id);
       } else {
         setProfile(null);
+        // Otherwise a stale 'clinic' (or 'patient') choice from whoever was
+        // just signed in would silently misroute the NEXT sign-in on this
+        // same tab (sessionStorage survives a sign-out within one tab -
+        // only closing it clears it on its own).
+        clearActingMode();
       }
     });
 

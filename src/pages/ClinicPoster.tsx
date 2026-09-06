@@ -22,22 +22,28 @@ const REFRESH_MS = 60 * 1000;
 export default function ClinicPoster() {
   const { profile } = useAuth();
   const navigate = useNavigate();
-  const [clinic, setClinic] = useState<{ id: string; name: string; self_checkin_enabled: boolean } | null>(null);
+  const [clinic, setClinic] = useState<{
+    id: string;
+    name: string;
+    clinic_code: string | null;
+    self_checkin_enabled: boolean;
+  } | null>(null);
   const [code, setCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!profile) return;
-    supabase
-      .from('clinics')
-      .select('id, name, self_checkin_enabled')
-      .eq('owner_id', profile.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setClinic(data as typeof clinic);
-        setLoading(false);
-      });
+    (async () => {
+      // my_clinic_id() (schema.sql migration 57) resolves this account's
+      // clinic whether it's the owner or a registered staff phone.
+      const { data: id } = await supabase.rpc('my_clinic_id');
+      const { data } = id
+        ? await supabase.from('clinics').select('id, name, clinic_code, self_checkin_enabled').eq('id', id).maybeSingle()
+        : { data: null };
+      setClinic(data as typeof clinic);
+      setLoading(false);
+    })();
   }, [profile]);
 
   // Pulled out so the callback below depends on a plain string rather than
@@ -89,6 +95,17 @@ export default function ClinicPoster() {
       </div>
 
       <div className="mx-auto flex max-w-2xl flex-col items-center px-6 pb-12 text-center">
+        {/* Unlike the check-in code below, this is the clinic's own login
+            credential (paired with a registered phone) rather than a
+            patient-facing code, so it never rotates - shown regardless of
+            self-check-in status since this screen is the one thing in the
+            app meant to be left up (or printed) for staff to see. */}
+        {clinic?.clinic_code && (
+          <p className="mt-4 text-xs text-slate-300">
+            Clinic ID: <span className="font-mono font-semibold text-slate-400">{clinic.clinic_code}</span>
+          </p>
+        )}
+
         {!clinic ? (
           <p className="mt-20 text-slate-400">No clinic found for this account.</p>
         ) : !clinic.self_checkin_enabled ? (

@@ -8,6 +8,7 @@ import ClinicCheckIn from '../components/ClinicCheckIn';
 import ClinicHolidays from '../components/ClinicHolidays';
 import ClinicLocationPicker from '../components/ClinicLocationPicker';
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
+import ClinicStaffAccess from '../components/ClinicStaffAccess';
 import FullDayCancelForm from '../components/FullDayCancelForm';
 import PatientLookup from '../components/PatientLookup';
 import PublishDaySchedule from '../components/PublishDaySchedule';
@@ -23,6 +24,7 @@ import IconTile from '../components/ui/IconTile';
 import SectionTitle from '../components/ui/SectionTitle';
 import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
+import { setActingMode } from '../lib/actingMode';
 import { useAuth } from '../lib/AuthContext';
 import { ageFromDob, todayISO } from '../lib/date';
 import { appointmentConfirmedMessage, notifyPatient } from '../lib/notify';
@@ -164,16 +166,20 @@ export default function ClinicQueue() {
   // realtime broadcast is slow or the socket has dropped.
   const [queueVersion, setQueueVersion] = useState(0);
   const [view, setView] = useState<
-    'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing'
+    'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'access'
   >('today');
 
   const loadClinicAndDoctors = async () => {
     if (!session) return;
-    const { data: clinicData } = await supabase
-      .from('clinics')
-      .select('*')
-      .eq('owner_id', session.user.id)
-      .maybeSingle();
+    // my_clinic_id() (schema.sql migration 57) resolves to this account's
+    // clinic whether it's the owner or a registered staff phone - a plain
+    // `owner_id = session.user.id` filter here used to leave a staff login
+    // with no clinic found at all, even though RLS would otherwise let them
+    // read the row just fine.
+    const { data: clinicId } = await supabase.rpc('my_clinic_id');
+    const { data: clinicData } = clinicId
+      ? await supabase.from('clinics').select('*').eq('id', clinicId).maybeSingle()
+      : { data: null };
     setClinic(clinicData);
     if (!clinicData) {
       setLoading(false);
@@ -386,6 +392,17 @@ export default function ClinicQueue() {
 
   const signOut = () => supabase.auth.signOut();
 
+  // One phone, two roles (schema.sql migration 58): this same account is
+  // also a patient. Unlike Profile.tsx's "Switch to Clinic console" (only
+  // shown to a phone that actually has clinic access), this is always
+  // offered - every clinic owner/staff account is a patient too, since
+  // that's just what a patient account is (family_members etc.), never a
+  // separate capability to check for.
+  const switchToPatient = () => {
+    setActingMode('patient');
+    navigate('/', { replace: true });
+  };
+
   if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
 
   if (!clinic) {
@@ -394,7 +411,10 @@ export default function ClinicQueue() {
         <AppHeader title="Clinic" bellDot={hasUnread} onBellClick={() => navigate('/notifications')} />
         <div className="mx-auto max-w-md px-4 py-8">
           <ClinicSignup onRegistered={loadClinicAndDoctors} />
-          <Button variant="ghost" onClick={signOut} className="mt-4">
+          <Button variant="ghost" onClick={switchToPatient} className="mt-4">
+            Switch to Patient app
+          </Button>
+          <Button variant="ghost" onClick={signOut} className="mt-1">
             Sign out
           </Button>
         </div>
@@ -471,7 +491,7 @@ export default function ClinicQueue() {
     <div>
       <AppHeader
         title={clinic.name}
-        subtitle="Clinic dashboard"
+        subtitle={clinic.clinic_code ? `Clinic ID: ${clinic.clinic_code}` : 'Clinic dashboard'}
         pill={<StatusPill label={CLINIC_STATUS_LABEL[clinic.status]} tone={CLINIC_STATUS_TONE[clinic.status]} />}
         bellDot={hasUnread}
         onBellClick={() => navigate('/notifications')}
@@ -532,6 +552,7 @@ export default function ClinicQueue() {
             { value: 'billing', label: 'Billing' },
             { value: 'location', label: 'Location' },
             { value: 'patients', label: 'Patients' },
+            { value: 'access', label: 'Login & staff' },
           ]}
           value={view}
           onChange={setView}
@@ -646,6 +667,15 @@ export default function ClinicQueue() {
           </div>
         )}
 
+        {view === 'access' && (
+          <div className="mt-4">
+            <ClinicStaffAccess
+              clinic={clinic}
+              onClinicSaved={(patch) => setClinic((prev) => (prev ? { ...prev, ...patch } : prev))}
+            />
+          </div>
+        )}
+
         {view === 'publish' && (
           <div className="mt-4">
             <PublishDaySchedule
@@ -678,8 +708,9 @@ export default function ClinicQueue() {
               initialLat={clinic.lat}
               initialLng={clinic.lng}
               initialAddress={clinic.formatted_address}
-              onSaved={(lat, lng, formattedAddress) =>
-                setClinic((prev) => (prev ? { ...prev, lat, lng, formatted_address: formattedAddress } : prev))
+              initialCity={clinic.city}
+              onSaved={(lat, lng, formattedAddress, city) =>
+                setClinic((prev) => (prev ? { ...prev, lat, lng, formatted_address: formattedAddress, city } : prev))
               }
             />
             {clinic.lat != null && clinic.lng != null && (
@@ -924,7 +955,10 @@ export default function ClinicQueue() {
           </>
         )}
 
-        <Button variant="ghost" onClick={signOut} className="mt-6">
+        <Button variant="ghost" onClick={switchToPatient} className="mt-6">
+          Switch to Patient app
+        </Button>
+        <Button variant="ghost" onClick={signOut} className="mt-1">
           Sign out
         </Button>
       </div>

@@ -1,6 +1,7 @@
 import {
   BadgeCheck,
   Bell,
+  Building2,
   CalendarDays,
   ChevronRight,
   FileText,
@@ -29,6 +30,7 @@ import Card from '../components/ui/Card';
 import IconTile from '../components/ui/IconTile';
 import ScreenHeader from '../components/ui/ScreenHeader';
 import SectionTitle from '../components/ui/SectionTitle';
+import { setActingMode } from '../lib/actingMode';
 import { useAuth } from '../lib/AuthContext';
 import { livePhoneDigits, normalizePhone } from '../lib/phone';
 import { supabase } from '../lib/supabaseClient';
@@ -58,6 +60,12 @@ export default function Profile() {
   const [nameChangeFor, setNameChangeFor] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [stats, setStats] = useState({ appointments: 0, records: 0, labReports: 0, spent: 0 });
+  // "Switch to Clinic console" only shows up for a phone that's actually the
+  // owner or a registered staff phone of some clinic (migration 57's
+  // my_clinic_id()) - checked once here rather than on every app load
+  // (App.tsx doesn't need this at all, only this one button does), so a
+  // plain patient never pays for a query whose answer is always "no".
+  const [clinicId, setClinicId] = useState<string | null>(null);
 
   // Section 44 - the fields collected at onboarding, editable here afterward.
   // Seeded from the 'self' family member once it loads (see the effect
@@ -83,6 +91,10 @@ export default function Profile() {
 
   useEffect(() => {
     loadMembers();
+  }, []);
+
+  useEffect(() => {
+    supabase.rpc('my_clinic_id').then(({ data }) => setClinicId(data ?? null));
   }, []);
 
   // The four counters across the top of the profile card, each a plain
@@ -166,6 +178,15 @@ export default function Profile() {
 
   const signOut = () => supabase.auth.signOut();
   const togglePanel = (p: Panel) => setPanel((prev) => (prev === p ? null : p));
+
+  // One phone, two roles (schema.sql migration 58): this same account also
+  // owns or staffs a clinic - clicking through just flips which shell THIS
+  // session sees (actingMode.ts), it doesn't touch the account itself, so
+  // switching back later never loses anything on either side.
+  const switchToClinic = () => {
+    setActingMode('clinic');
+    navigate('/', { replace: true });
+  };
 
   if (viewingMrn) {
     return (
@@ -485,6 +506,20 @@ export default function Profile() {
         {/* Account & Preferences */}
         <SectionTitle className="mt-6">Account & Preferences</SectionTitle>
         <Card className="mt-2 !p-0">
+          {clinicId && (
+            <button
+              onClick={switchToClinic}
+              className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3.5 text-left hover:bg-slate-50"
+            >
+              <IconTile icon={Building2} tone="emerald" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold text-slate-900">Switch to Clinic console</span>
+                <span className="block text-xs text-slate-500">This phone is also registered clinic staff</span>
+              </span>
+              <ChevronRight size={18} className="shrink-0 text-slate-300" />
+            </button>
+          )}
+
           <button
             onClick={() => navigate('/notifications')}
             className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-slate-50"

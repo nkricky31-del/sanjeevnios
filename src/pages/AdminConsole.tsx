@@ -116,6 +116,10 @@ export default function AdminConsole() {
   const [approvedDoctors, setApprovedDoctors] = useState<PendingDoctor[]>([]);
   const [approvedClinicDocsOpenFor, setApprovedClinicDocsOpenFor] = useState<string | null>(null);
   const [approvedDoctorDocsOpenFor, setApprovedDoctorDocsOpenFor] = useState<string | null>(null);
+  // Set right after approveClinic() succeeds - shown once, right on this
+  // screen, so the admin never has to go hunting for the Clinic ID they just
+  // issued (schema.sql migration 57 mints it the moment status -> 'approved').
+  const [justApproved, setJustApproved] = useState<{ name: string; code: string } | null>(null);
 
   const loadPending = async () => {
     setLoading(true);
@@ -191,22 +195,41 @@ export default function AdminConsole() {
 
   const approveClinic = async (c: PendingClinic) => {
     setActionError(null);
+    setJustApproved(null);
     if (!session) return;
-    const { error } = await supabase
+    // .select() so the row this update trigger just stamped a clinic_code
+    // onto (on_clinic_approve_assign_code, schema.sql migration 57) comes
+    // straight back - no second round trip needed just to learn the ID.
+    const { data: updated, error } = await supabase
       .from('clinics')
       .update({ status: 'approved', reject_reason: null })
-      .eq('id', c.id);
+      .eq('id', c.id)
+      .select('clinic_code')
+      .single();
     if (error) {
       setActionError(error.message);
       return;
     }
+    const clinicCode = updated?.clinic_code ?? null;
     await recordAdminDecision(
       session.user.id,
       'approve_clinic',
       c.id,
       c.owner_id,
-      `Your clinic "${c.name}" has been approved! It's now visible to patients and can accept bookings.`
+      clinicCode
+        ? `Your clinic "${c.name}" has been approved! It's now visible to patients and can accept bookings. Your Clinic ID for staff login is ${clinicCode} - it's also shown in your console header and under the "Login & staff" tab.`
+        : `Your clinic "${c.name}" has been approved! It's now visible to patients and can accept bookings.`
     );
+    if (clinicCode) {
+      setJustApproved({ name: c.name, code: clinicCode });
+      // Best-effort SMS/email of the same Clinic ID - quietly no-ops on
+      // either channel if its gateway isn't configured server-side (see
+      // supabase/functions/send-clinic-approval-notice). Never blocks this
+      // screen: the in-app notification above already landed regardless.
+      supabase.functions.invoke('send-clinic-approval-notice', { body: { clinicId: c.id } }).catch((err) => {
+        console.error('send-clinic-approval-notice failed:', err);
+      });
+    }
     loadPending();
   };
 
@@ -360,6 +383,22 @@ export default function AdminConsole() {
         {view === 'verification' && (
           <>
             {actionError && <p className="mb-3 mt-4 text-sm text-red-600">{actionError}</p>}
+
+            {justApproved && (
+              <div className="mt-4 flex items-start justify-between gap-3 rounded-2xl bg-emerald-50 p-3.5 text-sm text-emerald-800">
+                <p>
+                  <strong>{justApproved.name}</strong> approved. Clinic ID:{' '}
+                  <span className="font-mono font-bold">{justApproved.code}</span> — sent to the clinic by SMS/email
+                  where configured.
+                </p>
+                <button
+                  onClick={() => setJustApproved(null)}
+                  className="shrink-0 text-xs font-semibold text-emerald-600 underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
 
             <SectionTitle className="mt-5" actionLabel="Refresh" onAction={loadPending}>
               Pending clinics

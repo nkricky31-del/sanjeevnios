@@ -150,12 +150,17 @@ export interface Clinic {
   reg_no: string | null;
   address: string | null;
   contact_phone: string | null;
+  contact_email: string | null;
+  // Assigned once, the moment an admin first approves this clinic
+  // (schema.sql migration 57) - null for a draft/pending/rejected clinic.
+  clinic_code: string | null;
   status: ClinicStatus;
   reject_reason: string | null;
   registration_doc_path: string | null;
   lat: number | null;
   lng: number | null;
   formatted_address: string | null;
+  city: string | null;
   subscription_tier: string;
   is_active: boolean;
   is_verified: boolean;

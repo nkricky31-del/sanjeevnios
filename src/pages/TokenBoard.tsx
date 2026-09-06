@@ -38,16 +38,17 @@ export default function TokenBoard() {
 
   useEffect(() => {
     if (!profile) return;
-    supabase
-      .from('clinics')
-      .select('id, name')
-      .eq('owner_id', profile.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setClinicId(data?.id ?? null);
-        setClinicName(data?.name ?? '');
-        if (!data) setLoading(false);
-      });
+    (async () => {
+      // my_clinic_id() (schema.sql migration 57) resolves this account's
+      // clinic whether it's the owner or a registered staff phone.
+      const { data: id } = await supabase.rpc('my_clinic_id');
+      const { data } = id
+        ? await supabase.from('clinics').select('id, name').eq('id', id).maybeSingle()
+        : { data: null };
+      setClinicId(data?.id ?? null);
+      setClinicName(data?.name ?? '');
+      if (!data) setLoading(false);
+    })();
   }, [profile]);
 
   const load = useCallback(async () => {

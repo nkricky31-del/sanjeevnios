@@ -1654,3 +1654,80 @@ The clinic's own submission (draft → pending) and each doctor's submission (dr
 2. You land on that doctor's own onboarding screen. Sign the agreement (**1. Written consent**), then upload all four required documents including the new **Photo** item (**2. Documents**) - government ID, medical registration certificate, degree certificate, doctor–clinic association proof, and photo.
 3. Press **Submit for review**. `select status from doctors where id = '<doctor id>';` → `'pending'`.
 4. As **admin**, the **Verification** queue now shows both the clinic (from part C) and this doctor as separate pending items - approving one has no effect on the other, confirming the two gates are genuinely independent.
+
+## Test 27 — Clinic Login ID: Clinic ID + registered phone, server-enforced
+
+`migration_57_clinic_login_id.sql` gives every approved clinic a human-readable Clinic ID (`SNJ-CL-000123`) and lets it register more than one staff phone. Login is Clinic ID + a registered phone → OTP - never an MRN, and never on its own without a matching phone.
+
+### Setup
+
+1. Run `supabase/migration_57_clinic_login_id.sql`.
+2. (Optional) Deploy `send-clinic-approval-notice` and set its secrets if you want to see real SMS/email delivery rather than a quiet `skipped`: `npx supabase functions deploy send-clinic-approval-notice`, then `npx supabase secrets set MSG91_AUTH_KEY=... MSG91_SMS_TEMPLATE_ID=...` and/or `RESEND_API_KEY=... RESEND_FROM_EMAIL=...`. Skipping this is fine - the login itself doesn't depend on either channel.
+
+### A. Approving a clinic issues a Clinic ID
+
+1. Register a test clinic (Test 26) and get it to `pending` with a doctor approved, or use any clinic already sitting at `pending`.
+2. As **admin**, open **Verification** and press **Approve** on that clinic.
+3. A green banner appears right there: *"\<name> approved. Clinic ID: SNJ-CL-0001XX"*. `select clinic_code from clinics where id = '<clinic id>';` → the same value, non-null.
+4. Approve a second clinic - its code is the next number up, never reused.
+
+### B. The clinic sees its own Clinic ID
+
+1. Log in as that clinic's owner (phone + OTP, no Clinic ID needed for its own account's normal sign-in yet - see part C).
+2. The console header subtitle now reads **"Clinic ID: SNJ-CL-0001XX"** instead of "Clinic dashboard".
+3. Open the **Login & staff** tab - the same Clinic ID is shown again (with a copy button), plus an empty staff-phone list and a contact-email field.
+4. Open **Token board** (`/board`) or the self-check-in poster (`/poster`) - the Clinic ID is shown there too.
+
+### C. Clinic Login - right Clinic ID + right phone reaches the console
+
+1. Sign out. Open `/clinic/login`.
+2. Enter the Clinic ID from part A and the clinic owner's own phone number. Press Continue.
+3. An OTP is sent (this went through `verify_clinic_login()` first - if it hadn't matched, no OTP would ever be sent). Enter it.
+4. You land on that clinic's own console, Clinic ID visible in the header - confirming the login is real, not just cosmetic.
+
+### D. Wrong Clinic ID + phone combination - refused before any OTP
+
+1. Sign out. Open `/clinic/login` again.
+2. Enter the correct Clinic ID from part A, but a phone number that has never been registered to any clinic (or the SECOND clinic's Clinic ID with the FIRST clinic's phone). Press Continue.
+3. Refused with *"That Clinic ID and phone number don't match an approved clinic."* - no OTP is sent (check your phone / the Supabase Auth logs to confirm). Try it directly against the RPC too: `select verify_clinic_login('<real clinic id>', '9999999999');` → `false`.
+4. Confirm this is server-side, not just the screen: call the same RPC as an anonymous/unauthenticated client (e.g. `curl` with just the anon key, no user JWT) with a wrong pair - still `false`, still no OTP path opened.
+
+### E. A second staff phone works too, and MRN never appears
+
+1. As the clinic (part C), open **Login & staff**, add a second phone number under **Staff phone numbers**.
+2. Sign out. Log in at `/clinic/login` with the SAME Clinic ID but this NEW phone. It's accepted, and you reach the same clinic's console.
+3. `select is_own_clinic('<clinic id>')` run as that second phone's session → `true`.
+4. Grep the whole clinic login screen (`src/pages/ClinicLogin.tsx`) and this staff panel (`src/components/ClinicStaffAccess.tsx`) for "MRN" - no matches. Only a Clinic ID and phone numbers are ever asked for or shown.
+
+## Test 28 — One phone, two roles: patient and clinic staff, kept separate
+
+`migration_58_dual_role_patient_clinic.sql` fixes a real bug migration 57 introduced: it used to permanently flip a staff phone's `profiles.role` to `'clinic'`, which (with the old role-based routing) would have locked that phone out of its own patient app forever. Clinic access is now a live capability (`is_own_clinic()`/`is_clinic()`, unaffected by whatever `profiles.role` says), and which app a signed-in session actually SEES is a per-session choice (`src/lib/actingMode.ts`) set by which login screen was used, switchable mid-session, reusing the existing Part 50 route guard - never two shells open at once.
+
+### Setup
+
+1. Run `migration_57_clinic_login_id.sql` then `migration_58_dual_role_patient_clinic.sql`, in that order, if you haven't already.
+2. Pick one phone number and give it both roles: book at least one appointment as a normal patient with it (so it has its own MRN/history), then add that SAME phone as a staff phone on a test clinic (Test 27's **Login & staff** tab) - or use the clinic owner's own phone directly, which already has both by construction.
+
+### A. Choosing Patient shows only the personal app
+
+1. Sign out. Open `/login`, enter that phone, verify the OTP.
+2. You land in the personal patient app - Home/Search/Bookings/Records/Profile, your own MRN visible under Profile → Personal Details. No console chrome anywhere.
+3. Try typing `/board`, `/poster`, or reloading on a bare clinic URL by hand - you're bounced back to `/` (the existing catch-all route), never shown any clinic screen.
+
+### B. Choosing Clinic (with the Clinic ID) shows only that clinic's console
+
+1. Sign out. Open `/clinic/login`, enter the Clinic ID + the SAME phone number, verify the OTP.
+2. You land in that clinic's console - Clinic ID in the header, queue/doctors/billing tabs. No patient tab bar, no way to reach `/bookings`, `/search`, `/records`, or `/profile` (the clinic shell never renders those components regardless of what's typed in the address bar).
+3. Open **Login & staff** - the Clinic ID matches what you entered, confirming this really is that clinic's own console and not a coincidence.
+
+### C. Switching mid-session, cleanly
+
+1. From the clinic console (part B), press **Switch to Patient app** near Sign out at the bottom. You land on `/` as a plain patient - your own bookings/records, same as part A.
+2. From there, open Profile → **Switch to Clinic console** (only visible because this phone has clinic access - `select my_clinic_id();` as this session → the clinic's id). You're back in the same clinic's console.
+3. Neither switch re-sends an OTP or touches the account - it only decides which shell this browser tab renders next.
+
+### D. Data stays separate
+
+1. While in the clinic console (part B), open **Patients** and look this phone's OWN patient record up by its MRN (from part A) - you see only the encounters logged AT THIS CLINIC for that MRN, never encounters from any other clinic, exactly like looking up any other patient.
+2. Confirm this account's staff access doesn't leak to a second clinic: `select is_own_clinic('<some OTHER clinic's id>');` run as this session → `false`.
+3. Sign out. Sign back in as a completely unrelated plain patient (a different phone). Confirm they land straight in the patient app with NO acting-mode leftover from the previous session (`sessionStorage.getItem('sn_acting_mode')` in devtools → cleared on sign-out, so a fresh sign-in never inherits a stale mode from whoever used this tab before).
