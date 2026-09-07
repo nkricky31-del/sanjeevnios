@@ -10,7 +10,8 @@
 //
 // Configure this in the Razorpay dashboard (Settings -> Webhooks) pointing
 // at this function's URL, with these events enabled: subscription.charged,
-// subscription.pending, subscription.halted. Razorpay signs every request
+// subscription.pending, subscription.halted, and (once Route is set up -
+// see release-clinic-payout) transfer.processed. Razorpay signs every request
 // with a WEBHOOK SECRET you set when creating the webhook there (NOT the
 // same as RAZORPAY_KEY_SECRET) - copy it into RAZORPAY_WEBHOOK_SECRET below.
 //
@@ -30,9 +31,18 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const RAZORPAY_WEBHOOK_SECRET = Deno.env.get('RAZORPAY_WEBHOOK_SECRET')!;
+// Only needed for the doctor-count downgrade check below (migration 62) -
+// this function otherwise never calls OUT to Razorpay, only verifies what
+// Razorpay calls IN with RAZORPAY_WEBHOOK_SECRET above.
+const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID');
+const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET');
 
 function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+function basicAuthHeader(): string {
+  return 'Basic ' + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`);
 }
 
 async function hmacHex(secret: string, message: string): Promise<string> {
@@ -60,11 +70,16 @@ interface RazorpayPaymentEntity {
   amount: number; // paise
   status: string;
 }
+interface RazorpayTransferEntity {
+  id: string;
+  status: string; // 'processed' once it has actually reached the linked account
+}
 interface WebhookPayload {
   event: string;
   payload: {
     subscription?: { entity: RazorpaySubscriptionEntity };
     payment?: { entity: RazorpayPaymentEntity };
+    transfer?: { entity: RazorpayTransferEntity };
   };
 }
 
@@ -94,6 +109,23 @@ Deno.serve(async (req) => {
     event = JSON.parse(rawBody);
   } catch {
     return json({ error: 'Invalid JSON body.' }, 400);
+  }
+
+  // Route transfer confirmation - the actual "settled" proof for a payout
+  // (migration 59). release-clinic-payout only ever gets as far as
+  // recording razorpay_transfer_id when it creates the transfer; THIS is
+  // the signed, server-to-server event that confirms the money actually
+  // reached the clinic's linked account, same "never trust a client
+  // callback" reasoning as subscription.charged below.
+  const transfer = event.payload.transfer?.entity;
+  if (event.event === 'transfer.processed' && transfer) {
+    const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    await serviceClient
+      .from('settlements')
+      .update({ status: 'settled', settled_at: new Date().toISOString() })
+      .eq('razorpay_transfer_id', transfer.id)
+      .eq('status', 'released');
+    return json({ received: true });
   }
 
   const sub = event.payload.subscription?.entity;
@@ -158,6 +190,62 @@ Deno.serve(async (req) => {
       `Your subscription payment succeeded. Your clinic stays live through ${new Date(periodEnd).toLocaleDateString()}.`,
       'billing_paid'
     );
+
+    // DOWNGRADE check (migration_62_doctor_count_plans.sql) - the one place
+    // this ever runs, on purpose: a new billing cycle has just been
+    // acknowledged, which is exactly when "move it down on the next billing
+    // cycle" means NOW. The immediate, upgrade-only direction lives in the
+    // reassign_clinic_plan_for_doctor_count() DB trigger instead - this is
+    // deliberately the only place a clinic ever moves to a CHEAPER plan.
+    const { data: correctPlanId } = await serviceClient.rpc('plan_for_doctor_count_for_clinic', {
+      p_clinic_id: clinicId,
+    });
+    if (correctPlanId && correctPlanId !== subscriptionRow.plan_id) {
+      const { data: correctPlan } = await serviceClient
+        .from('plans')
+        .select('name, monthly_price, razorpay_plan_id')
+        .eq('id', correctPlanId)
+        .maybeSingle();
+      const { data: oldPlan } = await serviceClient
+        .from('plans')
+        .select('monthly_price')
+        .eq('id', subscriptionRow.plan_id)
+        .maybeSingle();
+
+      // Still upgrade-safe even here: if doctor count grew enough between
+      // the last check and this cycle boundary that the CURRENT plan is now
+      // too small, let it through too - only ever refuse to make the
+      // clinic's own bill go UP as a surprise mid-flow is never the
+      // concern here, going down unexpectedly would be, and this is exactly
+      // the sanctioned moment for that.
+      await serviceClient.from('subscriptions').update({ plan_id: correctPlanId }).eq('id', subscriptionRow.id);
+      await serviceClient
+        .from('audit_log')
+        .insert({ action: 'clinic_plan_cycle_reconciled', target: clinicId });
+
+      const movedDown = !!(correctPlan && oldPlan && correctPlan.monthly_price < oldPlan.monthly_price);
+      if (movedDown) {
+        await notify(
+          `Your doctor count no longer needs your previous plan - you've moved to ${correctPlan!.name} (₹${correctPlan!.monthly_price}/month) starting this billing cycle.`,
+          'plan_auto_downgraded'
+        );
+      }
+
+      // Best-effort: keep Razorpay's own subscription plan in step too. See
+      // sync-razorpay-subscription-plan's header for why this is separate
+      // from (and never blocks) the plan_id update above.
+      if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET && correctPlan?.razorpay_plan_id) {
+        try {
+          await fetch(`https://api.razorpay.com/v1/subscriptions/${sub.id}`, {
+            method: 'PATCH',
+            headers: { Authorization: basicAuthHeader(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plan_id: correctPlan.razorpay_plan_id, schedule_change_at: 'cycle_end' }),
+          });
+        } catch (err) {
+          console.error('Razorpay subscription plan sync failed:', err);
+        }
+      }
+    }
   } else if (event.event === 'subscription.pending') {
     const payment = event.payload.payment?.entity;
     const periodStart = toIso(sub.current_start) ?? new Date().toISOString();

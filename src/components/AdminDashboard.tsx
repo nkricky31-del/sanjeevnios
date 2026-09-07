@@ -2,7 +2,6 @@ import { Building2, CalendarCheck, IndianRupee, Stethoscope, Users } from 'lucid
 import { useEffect, useState } from 'react';
 
 import { todayISO } from '../lib/date';
-import { PLATFORM_FEE_PERCENT } from '../lib/payouts';
 import { supabase } from '../lib/supabaseClient';
 import type { ClinicStatus } from '../lib/types';
 import StatTile from './ui/StatTile';
@@ -31,7 +30,7 @@ export default function AdminDashboard() {
 
   const load = async () => {
     setLoading(true);
-    const [{ data: clinicStatuses }, { count: doctorCount }, { count: patientCount }, { count: apptToday }, { data: capturedPayments }] =
+    const [{ data: clinicStatuses }, { count: doctorCount }, { count: patientCount }, { count: apptToday }, { data: capturedPayments }, { data: settlements }] =
       await Promise.all([
         supabase.from('clinics').select('status'),
         supabase.from('doctors').select('id', { count: 'exact', head: true }),
@@ -40,6 +39,10 @@ export default function AdminDashboard() {
         // Only ONLINE captured payments are money the platform actually
         // touched - COD is paid straight to the clinic, never collected here.
         supabase.from('payments').select('amount').eq('status', 'captured').eq('method', 'online'),
+        // Real per-plan commission (migration 59), not a flat guess - only
+        // counts a row once its fee is actually known (past 'collected'),
+        // same reasoning the settlement console itself uses.
+        supabase.from('settlements').select('platform_fee').neq('status', 'collected'),
       ]);
 
     const clinicsByStatus: Record<ClinicStatus, number> = { draft: 0, pending: 0, approved: 0, rejected: 0 };
@@ -49,7 +52,7 @@ export default function AdminDashboard() {
     }
 
     const grossCollected = (capturedPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
-    const platformRevenue = Math.round(grossCollected * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
+    const platformRevenue = (settlements ?? []).reduce((sum, s) => sum + Number(s.platform_fee), 0);
 
     setStats({
       clinicsByStatus,
@@ -93,14 +96,15 @@ export default function AdminDashboard() {
             <StatTile icon={CalendarCheck} label="Appointments today" value={stats.appointmentsToday} tone="brand" />
             <StatTile
               icon={IndianRupee}
-              label={`Revenue (${PLATFORM_FEE_PERCENT}% fee, all-time)`}
+              label="Platform commission (all-time)"
               value={`₹${stats.platformRevenue.toLocaleString()}`}
               tone="emerald"
             />
           </div>
           <p className="mt-2 text-xs text-slate-400">
             Gross collected online (all-time): ₹{stats.grossCollected.toLocaleString()}. COD payments aren't
-            collected by the platform, so they're excluded from revenue.
+            collected by the platform, so they're excluded. See the Settlements tab for what's eligible, released,
+            and settled.
           </p>
         </>
       )}

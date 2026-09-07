@@ -1731,3 +1731,139 @@ The clinic's own submission (draft → pending) and each doctor's submission (dr
 1. While in the clinic console (part B), open **Patients** and look this phone's OWN patient record up by its MRN (from part A) - you see only the encounters logged AT THIS CLINIC for that MRN, never encounters from any other clinic, exactly like looking up any other patient.
 2. Confirm this account's staff access doesn't leak to a second clinic: `select is_own_clinic('<some OTHER clinic's id>');` run as this session → `false`.
 3. Sign out. Sign back in as a completely unrelated plain patient (a different phone). Confirm they land straight in the patient app with NO acting-mode leftover from the previous session (`sessionStorage.getItem('sn_acting_mode')` in devtools → cleared on sign-out, so a fresh sign-in never inherits a stale mode from whoever used this tab before).
+
+## Test 29 — Payment settlement: collected first, released by an admin, then settled
+
+`migration_59_payment_settlement.sql` renames `commission_ledger` to `settlements` and gives it a real state machine (collected → eligible → released → settled, plus on_hold/refunded). It also retires AdminPayments.tsx's old "Clinic payouts" section (a flat 10% guess with no completion gate) - that math is gone, replaced entirely by the **Settlements** tab reading the real per-plan commission.
+
+### Setup
+
+1. Run `migration_59_payment_settlement.sql`.
+2. Have one clinic with a doctor and a plan that actually carries a commission (`update plans set per_booking_commission = 0.02 where name = 'Premium';` then put the test clinic's subscription on that plan, or just note whichever plan it's already on - 0% is fine too, the math still holds, the fee just comes out to ₹0).
+3. (Optional) To see a real Razorpay Route transfer attempt rather than a quiet skip, set `clinics.razorpay_fund_account_id` to a real linked account id and deploy `release-clinic-payout` with `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET`. Skipping this is fine - release still fully works and is fully testable without it.
+
+### A. Two paid, completed visits turn eligible
+
+1. Book two online-paid appointments at the same test clinic (different patients or the same one, doesn't matter), and step both all the way through: clinic **Accept**s (this is the moment `razorpay-capture-payment` actually captures the money and `settlements` gets a row at `'collected'` - `select status, net_amount, platform_fee from settlements where appointment_id = '<id>';` → `collected`, fee `0`), then run the visit to **Completed**.
+2. The instant each hits `completed`, its settlement row flips to `eligible` with the real fee computed: `select status, net_amount, commission_rate, platform_fee from settlements where appointment_id = '<id>';` → `eligible`, `commission_rate` matching the clinic's current plan, `platform_fee = net_amount * commission_rate`.
+3. As **admin**, open **Settlements** → **Eligible** tab. Both payments show up under this clinic, with a running total at the top matching the sum of (net − fee) for both.
+
+### B. Release one payment by itself
+
+1. Press **Release** on just ONE of the two payments. The confirm card shows the exact ₹ amount - press **Confirm release**.
+2. That row disappears from Eligible and appears under **Released**, showing who released it and when: `select status, net_payout, released_by, released_at from settlements where id = '<id>';` → `released`, `net_payout = net_amount - platform_fee`, `released_by` = your admin user id, `released_at` populated.
+3. The OTHER payment is untouched - still `eligible`, still shown in the Eligible tab with its own total.
+
+### C. Release the rest all at once
+
+1. Back in **Eligible**, press **Release all for this clinic** (or **Release all eligible** to cover every clinic at once) - confirm.
+2. The remaining payment moves to **Released** too: `select count(*) from settlements where clinic_id = '<clinic id>' and status = 'eligible';` → `0`.
+3. Try releasing again - nothing left to release for this clinic (the button disappears once its Eligible list is empty), and `release_eligible_settlements('<clinic id>')` called directly now returns zero rows - it only ever touches rows still `'eligible'`.
+
+### D. Settled, and the guard against reversing after release
+
+1. On either released row, press **Mark settled** (the manual fallback for when Razorpay Route isn't configured - see setup step 3). It moves to the **Settled** tab: `select status, settled_at from settlements where id = '<id>';` → `settled`.
+2. Try reversing that same payment from the **Payments** tab's "Reverse payment" action - refused: *"This payment has already been released to the clinic and can't be reversed here..."* (`prevent_refund_after_release()` - a real database trigger, not just a missing button).
+3. Confirm a genuinely UNRELEASED payment can still be reversed normally from the same screen - the guard only blocks it after release, never before.
+
+## Test 30 — Clinic Earnings: the clinic's own view of the same ledger
+
+`migration_60_clinic_payout_reference.sql` adds a stable payout reference (`PO-00000123`), set the moment a payment is released regardless of whether Razorpay Route is configured. `src/components/ClinicEarnings.tsx` is the clinic-side read of the exact same `settlements` rows Test 29 exercises from the admin side - same table, same RLS, no separate calculation anywhere.
+
+### Setup
+
+1. Run `migration_60_clinic_payout_reference.sql` (after migration 59).
+2. Reuse Test 29's clinic: it should have one settlement `released` (part B) and, if you continued through part D, one `settled` too. Book and accept (but don't complete) one more online-paid visit at the same clinic, so there's also something genuinely `collected` (Pending) to look at.
+
+### A. The three totals add up
+
+1. Log in to that clinic's console (Test 27/28) and open the **Earnings** tab.
+2. **Pending** shows the one accepted-but-not-completed visit, total = its raw collected amount (fee is 0 - not decided yet, matching `settlements.platform_fee` for a `'collected'` row).
+3. **Ready** shows anything still `eligible` (from Test 29 you released everything, so this should be empty unless you completed a new visit without releasing it).
+4. **Paid** shows the released/settled row(s) from Test 29, each with its payout date and `PO-XXXXXXXX` reference.
+5. Add up Pending + Ready + Paid by hand from the three tiles - it should equal the total of every non-refunded settlement row for this clinic: `select sum(net_amount - platform_fee) filter (where status in ('eligible','released','settled')) + sum(net_amount) filter (where status = 'collected') from settlements where clinic_id = '<clinic id>';`
+
+### B. The net amounts match the Admin console exactly
+
+1. Open a second browser/incognito window as **admin**, **Settlements** tab, same clinic.
+2. Compare the Paid tab's net figures here against the same rows' `net_payout` in the admin console (Released/Settled tabs) - they must be identical, since both screens read the same `net_payout`/`net_amount - platform_fee` off the same rows. Same for the Ready total against the admin's per-clinic Eligible total.
+
+### C. Releasing moves Ready into Paid, with a reference number
+
+1. As **admin**, complete the Pending visit from setup step 2 (mark it Completed) - it disappears from the clinic's Pending and appears in Ready.
+2. Still as admin, release it (Settlements tab).
+3. Back on the clinic's Earnings tab, press **Refresh** - the payment has moved from Ready to Paid, showing today's date and a `PO-XXXXXXXX` reference: `select payout_reference from settlements where id = '<id>';` → matches what's shown.
+
+### D. No patient data, date filter, and export
+
+1. Confirm the Paid/Ready/Pending tables show only a booking reference (8 characters, uppercase) and amounts - no patient name, phone, or any other personal detail anywhere on this page.
+2. Set the **From**/**To** date filter to a range that excludes one of your test visits - the totals and tables update to match; clear it and they return to the full picture.
+3. Press **CSV** - a file downloads with one row per payment (booking ref, visit date, status, collected, fee, net, payout date, payout reference). Press **Print / Save PDF** - the browser's print dialog opens showing just the statement (filter controls and buttons excluded via `print:hidden`), which you can save as a PDF from there.
+
+## Test 31 — Doctor/clinic ratings: genuine, moderated, and shown on the profile
+
+`migration_61_reviews.sql` adds `reviews` (one row per completed appointment, unique on `appointment_id`), `submit_review()`, admin moderation (`moderate_review()`/`delete_review()`), and rating aggregates surfaced on `search_doctors()` and via `get_doctor_rating()`/`get_clinic_rating()`.
+
+### Setup
+
+1. Run `migration_61_reviews.sql`.
+2. Take one booking all the way through to `completed` (Test in section 7/8 covers the check-in → consultation → complete flow) - note its patient login and the doctor it was with.
+
+### A. Leaving a review
+
+1. Log in as that patient, open **My Bookings → Completed**, tap into that booking (`BookingStatus.tsx`).
+2. Below the booking details, a **Rate this visit** button appears (only because `booking.status === 'completed'` and no review exists yet for this appointment). Tap it, pick 5 stars, leave a comment, leave "Show my name" unchecked, submit.
+3. The button is replaced by a filled 5-star "You rated this visit" chip. Refresh the page - it's still there (the review persisted, not just local state): `select rating, comment, anonymous, reviewer_name from reviews where appointment_id = '<id>';` → `5`, your comment, `anonymous = true`, `reviewer_name` populated (stored, just not shown, since anonymous is true).
+
+### B. The average and percent-positive update, and appear on the profile
+
+1. `select * from get_doctor_rating('<doctor id>');` → `avg_rating` reflects your new review, `review_count` incremented by 1.
+2. Open that doctor's profile (`/doctors/<id>`) as any patient - the star badge next to their **Verified** badge now shows the updated average and review count. With fewer than 5 total ratings, no percent-positive shows yet (by design - "one review can't swing it"); once a 5th rating lands, `92% positive` (or whatever the real split is) appears automatically, no code change needed.
+3. Scroll down to **Patient reviews** - your review appears (comment, stars, "Anonymous patient" since you left it unchecked). Add one more review as a DIFFERENT patient with "Show my name" checked - confirm THAT one shows the real name instead.
+4. Open **Search**, look up this doctor - the same star average and count show in the compact badge on the result row, matching the profile exactly (same `search_doctors()` call, same underlying rows).
+
+### C. A patient with no visit to that doctor cannot review
+
+1. Log in as a different patient who has never booked with this doctor. Try calling the RPC directly: `select submit_review('<some other appointment id not theirs, or any random uuid>', 5, 'fake review', true);` → refused: *"That booking was not found on your account."*
+2. Try it against a booking that IS theirs but isn't completed yet (still `booked`/`accepted`): refused with *"You can only rate a visit after it's completed."*
+3. Try submitting a second review for the SAME appointment from part A (as that same patient, that same booking): refused with *"You've already reviewed this visit."* - and confirm the hard backstop too: `insert into reviews (appointment_id, clinic_id, doctor_id, account_id, rating) values ('<same appointment id>', '<clinic id>', '<doctor id>', auth.uid(), 4);` run directly → refused by the `reviews_appointment_id_unique` constraint, not just the RPC's own check.
+
+### D. Admin moderation, and reviews respecting privacy
+
+1. As **admin**, open the **Reviews** tab - your test review appears in **Visible**, showing the reviewer's real name (admins always see it) with a note that it's posted anonymously to other patients.
+2. Press **Hide**, give a reason, confirm - it moves to **Hidden**. `select status, hidden_reason, hidden_by from reviews where id = '<id>';` → `hidden`, your reason, your admin id.
+3. Immediately re-check the doctor's rating: `select * from get_doctor_rating('<doctor id>');` → `review_count` dropped by 1, `avg_rating` recomputed without it - and the profile page (part B) no longer shows it in the reviews list or counts it toward the badge.
+4. Press **Unhide** - it's back in Visible and counted again. Try **Delete** on a different test review - confirms, then permanently gone from both tabs and the count.
+
+## Test 32 — Subscription price scales with doctor count
+
+`migration_62_doctor_count_plans.sql` adds four new plans (Solo/Small/Group/Hospital, priced by doctor-count band) and retires Basic/Standard/Premium (`active = false`, kept for history). `doctors.is_active` is the clinic's own new "remove/restore a doctor" lever. Two reconciliation moments, on purpose: upgrading is immediate (`reassign_clinic_plan_for_doctor_count()`), downgrading only ever happens at the next billing cycle (`razorpay-webhook`'s `subscription.charged` handler).
+
+### Setup
+
+1. Run `migration_62_doctor_count_plans.sql` (after 57-61).
+2. Pick a test clinic. As **admin**, open **Billing**, assign it the **Small (2-5 doctors)** plan from the dropdown next to it and press **Assign**. `select p.name from subscriptions s join plans p on p.id = s.plan_id where s.clinic_id = '<clinic id>';` → `Small`.
+
+### A. Adding doctors up to the plan's limit
+
+1. As that clinic, open **Doctors** and add + fully onboard 5 doctors (name, reg no, documents) - for each, as **admin**, approve them AND verify every required document (so `status = 'approved'` and `is_verified = true` for all 5).
+2. After the 5th is both approved and verified: `select count(*) from doctors where clinic_id = '<clinic id>' and status = 'approved' and is_verified and is_active;` → `5`. Open the clinic's **Billing** tab - "Doctors" reads **5 / 5**, the progress bar is full, and it still says **Small**.
+
+### B. The 6th doctor prompts an upgrade
+
+1. As the clinic, open **Doctors → + Add doctor**, start filling in a 6th doctor's details. Before submitting, an amber banner appears: *"Your Small plan covers up to 5 doctors - you're currently using 5. Once this doctor is approved and verified, you'll be moved to **Group** (₹3,999/month)..."* - confirm it names the correct next tier and price (`select name, monthly_price from plans where name = 'Group';`).
+2. Submit anyway (the prompt never blocks it - it's a heads-up, not a wall) and finish onboarding this 6th doctor the same way as the first 5.
+3. As **admin**, approve and verify the 6th doctor. The INSTANT the second of those two (approve/verify) lands, check: `select p.name, p.monthly_price from subscriptions s join plans p on p.id = s.plan_id where s.clinic_id = '<clinic id>';` → already `Group`, `3999` - no waiting for a billing cycle, matching "before the doctor goes live". `select action from audit_log where target = '<clinic id>' order by at desc limit 1;` → `clinic_plan_auto_upgraded`.
+
+### C. The new price shows on the clinic's plan page and next invoice
+
+1. Refresh the clinic's **Billing** tab - "Current plan" now reads **Group**, ₹3,999/month, and "Doctors" reads **6 / 15**. The clinic also has an in-app notification about the auto-upgrade (bell icon).
+2. Confirm the invoice-timing rule is stated plainly on the same screen: the note above the Invoices list ("bills your plan as of the START of that billing cycle... pushes you to a higher plan, that plan starts on your NEXT invoice, not this one").
+3. If you have `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` configured and this clinic is genuinely subscribed via Razorpay Checkout already, deploy `sync-razorpay-subscription-plan` and confirm a call to it (fired automatically after the approve action, or by simply reopening Billing) returns `{ synced: true, appliesFrom: 'cycle_end' }` - otherwise it returns a clear `skipped` reason (`not_on_razorpay_yet` or `razorpay_not_configured`), never a silent failure.
+
+### D. Removing a doctor doesn't lower the bill until the next cycle
+
+1. As the clinic, open **Doctors**, press **Remove from clinic** on one of the 6 approved doctors. It's marked **Inactive**, and a note confirms it won't lower the bill until the next billing cycle.
+2. Confirm it's really gone from patient-facing surfaces too: search for that doctor by name in **Search** - no longer appears; `select * from search_doctors('<doctor name>');` → no row for them.
+3. Confirm the plan does NOT change yet: `select p.name from subscriptions s join plans p on p.id = s.plan_id where s.clinic_id = '<clinic id>';` → still `Group` (5 counted doctors would actually fit `Small`, but nothing moves it down here).
+4. Simulate the next billing cycle by calling the downgrade path directly (or wait for a real `subscription.charged` webhook if Razorpay is live): `select plan_for_doctor_count_for_clinic('<clinic id>');` → the `Small` plan's id, confirming that's what the NEXT cycle would reconcile to.

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { createRazorpaySubscription, loadRazorpayScript, openRazorpaySubscriptionCheckout } from '../lib/razorpay';
 import { supabase } from '../lib/supabaseClient';
-import type { Invoice, Plan, Subscription } from '../lib/types';
+import type { ClinicDoctorUsage, Invoice, Plan, Subscription } from '../lib/types';
 import Button from './ui/Button';
 import Card from './ui/Card';
 import SectionTitle from './ui/SectionTitle';
@@ -18,6 +18,7 @@ export default function ClinicBilling({ clinicId }: Props) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [usage, setUsage] = useState<ClinicDoctorUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [subscribing, setSubscribing] = useState(false);
@@ -26,7 +27,7 @@ export default function ClinicBilling({ clinicId }: Props) {
 
   const load = async () => {
     setLoading(true);
-    const [{ data: planData }, { data: subData }, { data: invoiceData }] = await Promise.all([
+    const [{ data: planData }, { data: subData }, { data: invoiceData }, { data: usageRows }] = await Promise.all([
       supabase.from('plans').select('*').eq('active', true).order('monthly_price', { ascending: true }),
       supabase.from('subscriptions').select('*').eq('clinic_id', clinicId).maybeSingle(),
       supabase
@@ -35,16 +36,31 @@ export default function ClinicBilling({ clinicId }: Props) {
         .eq('clinic_id', clinicId)
         .order('created_at', { ascending: false })
         .limit(20),
+      // migration 62 - how many doctors the CURRENT plan includes vs how
+      // many are actually used (verified, active, approved only), plus
+      // what the next tier up would cost.
+      supabase.rpc('get_clinic_doctor_usage', { p_clinic_id: clinicId }),
     ]);
     setPlans((planData ?? []) as Plan[]);
     setSubscription((subData ?? null) as Subscription | null);
     setInvoices((invoiceData ?? []) as Invoice[]);
+    setUsage(((usageRows ?? [])[0] as ClinicDoctorUsage | undefined) ?? null);
     setSelectedPlanId((prev) => prev || (subData as Subscription | null)?.plan_id || (planData ?? [])[0]?.id || '');
     setLoading(false);
   };
 
   useEffect(() => {
     load();
+    // Best-effort, fire-and-forget: an upgrade can also happen with no
+    // single client action to hook it from (document verification flips
+    // is_verified via a DB trigger chain, not a dedicated RPC call this app
+    // makes anywhere) - reassign_clinic_plan_for_doctor_count() (migration
+    // 62) already updated subscriptions.plan_id regardless, this just gives
+    // the Razorpay-side subscription a chance to catch up too whenever the
+    // clinic actually looks at this page.
+    supabase.functions.invoke('sync-razorpay-subscription-plan', { body: { clinicId } }).catch((err) => {
+      console.error('sync-razorpay-subscription-plan failed:', err);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clinicId]);
 
@@ -147,6 +163,37 @@ export default function ClinicBilling({ clinicId }: Props) {
         {!subscription?.razorpay_subscription_id && (
           <p className="mt-1 text-xs text-slate-400">Not yet subscribed via Razorpay - pick a plan below to start.</p>
         )}
+
+        {/* migration 62 - how many doctors this plan covers, how many are
+            actually counted (approved, verified, active - same rule
+            AddDoctorForm.tsx's own prompt uses), and what going one further
+            would cost right now. */}
+        {usage && usage.plan_name && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="flex items-center justify-between text-sm">
+              <p className="font-semibold text-slate-700">Doctors</p>
+              <p className="font-bold text-slate-900">
+                {usage.doctors_used} / {usage.max_doctors ?? '∞'}
+              </p>
+            </div>
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className={`h-full rounded-full ${usage.max_doctors != null && usage.doctors_used >= usage.max_doctors ? 'bg-red-500' : 'bg-brand-500'}`}
+                style={{
+                  width: `${usage.max_doctors == null ? 20 : Math.min(100, (usage.doctors_used / usage.max_doctors) * 100)}%`,
+                }}
+              />
+            </div>
+            {usage.next_plan_name ? (
+              <p className="mt-1.5 text-xs text-slate-400">
+                Your next doctor would move you to <strong className="text-slate-600">{usage.next_plan_name}</strong>{' '}
+                (₹{usage.next_plan_price?.toLocaleString()}/month).
+              </p>
+            ) : (
+              <p className="mt-1.5 text-xs text-slate-400">You're on the highest available plan.</p>
+            )}
+          </div>
+        )}
       </Card>
 
       <div className="mt-4">
@@ -160,7 +207,8 @@ export default function ClinicBilling({ clinicId }: Props) {
         >
           {plans.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} - ₹{p.monthly_price}/month
+              {p.name} ({p.max_doctors == null ? `${p.min_doctors}+` : `${p.min_doctors}-${p.max_doctors}`} doctors) - ₹
+              {p.monthly_price}/month
             </option>
           ))}
         </select>
@@ -174,6 +222,10 @@ export default function ClinicBilling({ clinicId }: Props) {
       <SectionTitle className="mt-6" actionLabel="Refresh" onAction={load}>
         Invoices
       </SectionTitle>
+      <p className="mt-0.5 text-xs text-slate-400">
+        Each invoice bills your plan as of the START of that billing cycle. A doctor added mid-cycle isn't pro-rated
+        - if they push you to a higher plan, that plan starts on your NEXT invoice, not this one.
+      </p>
       <div className="mt-2 space-y-2">
         {invoices.length === 0 && <p className="text-sm text-slate-400">No invoices yet.</p>}
         {invoices.map((inv) => (

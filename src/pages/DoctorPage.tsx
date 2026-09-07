@@ -4,12 +4,14 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import BookingForm from '../components/BookingForm';
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
+import RatingBadge from '../components/RatingBadge';
+import ReviewsList from '../components/ReviewsList';
 import SlotPicker from '../components/SlotPicker';
 import Card from '../components/ui/Card';
 import ScreenHeader from '../components/ui/ScreenHeader';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { supabase } from '../lib/supabaseClient';
-import type { FamilyMember } from '../lib/types';
+import type { FamilyMember, RatingSummary } from '../lib/types';
 
 interface DoctorWithClinic {
   id: string;
@@ -39,6 +41,7 @@ export default function DoctorPage() {
   const [slotPickerKey, setSlotPickerKey] = useState(0);
   const [doctorVerified, setDoctorVerified] = useState(false);
   const [clinicVerified, setClinicVerified] = useState(false);
+  const [doctorRating, setDoctorRating] = useState<RatingSummary>({ avg_rating: null, review_count: 0, percent_positive: null });
   // Booking is PER MEMBER (schema.sql section 47), so this is picked FIRST -
   // before date/slot - rather than buried inside BookingForm after the fact.
   // Fetched independently of doctorId so it's ready as soon as the page is.
@@ -95,15 +98,18 @@ export default function DoctorPage() {
       // in schema.sql for why (a lapsed certificate must hide the badge even
       // if nobody has re-reviewed this doctor/clinic since it expired).
       if (doctorData) {
-        const [{ data: docVerified }, { data: clinicVerifiedData }] = await Promise.all([
+        const [{ data: docVerified }, { data: clinicVerifiedData }, { data: ratingRows }] = await Promise.all([
           supabase.rpc('is_currently_verified', { p_owner_type: 'doctor', p_owner_id: doctorId }),
           supabase.rpc('is_currently_verified', {
             p_owner_type: 'clinic',
             p_owner_id: (doctorData as DoctorWithClinic).clinic_id,
           }),
+          supabase.rpc('get_doctor_rating', { p_doctor_id: doctorId }),
         ]);
         setDoctorVerified(!!docVerified);
         setClinicVerified(!!clinicVerifiedData);
+        const rating = (ratingRows ?? [])[0] as RatingSummary | undefined;
+        setDoctorRating(rating ?? { avg_rating: null, review_count: 0, percent_positive: null });
       }
     })();
   }, [doctorId]);
@@ -127,6 +133,13 @@ export default function DoctorPage() {
                 <VerifiedBadge verified={doctorVerified} ownerType="doctor" />
               </div>
               {doctor.specialty && <p className="text-sm font-medium text-brand-600">{doctor.specialty}</p>}
+              <RatingBadge
+                className="mt-1"
+                avgRating={doctorRating.avg_rating}
+                reviewCount={doctorRating.review_count}
+                percentPositive={doctorRating.percent_positive}
+                variant="full"
+              />
             </div>
           </div>
           <div className="mt-3 flex items-center gap-1.5">
@@ -138,6 +151,8 @@ export default function DoctorPage() {
             ₹{doctor.consultation_fee} consultation fee
           </span>
         </Card>
+
+        <ReviewsList doctorId={doctor.id} />
 
         {/* Picked FIRST, before date/slot - booking is per member (schema.sql
             section 47), and the duplicate check the server enforces is keyed

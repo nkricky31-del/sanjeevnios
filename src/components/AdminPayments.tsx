@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
-import { computePayouts, type PayoutPaymentRow } from '../lib/payouts';
 import { supabase } from '../lib/supabaseClient';
 import AdminRejectForm from './AdminRejectForm';
 import Button from './ui/Button';
@@ -65,26 +64,6 @@ export default function AdminPayments() {
     load();
   }, []);
 
-  const payouts = computePayouts(payments as unknown as PayoutPaymentRow[]);
-
-  const markPayoutPaid = async (clinicId: string) => {
-    setActionError(null);
-    const { data: appts } = await supabase.from('appointments').select('id').eq('clinic_id', clinicId);
-    const apptIds = (appts ?? []).map((a) => a.id);
-    if (apptIds.length === 0) return;
-    const { error } = await supabase
-      .from('payments')
-      .update({ payout_status: 'paid' })
-      .in('appointment_id', apptIds)
-      .eq('status', 'captured')
-      .eq('payout_status', 'pending');
-    if (error) {
-      setActionError(error.message);
-      return;
-    }
-    load();
-  };
-
   const reversePayment = async (payment: PaymentRow, reason: string) => {
     setActionError(null);
     if (!session) return;
@@ -120,28 +99,9 @@ export default function AdminPayments() {
       </div>
       {actionError && <p className="mt-2 text-sm text-red-600">{actionError}</p>}
 
-      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Clinic payouts</p>
-      <p className="text-xs text-slate-400">Online payments collected, minus platform fee. COD is paid to the clinic directly.</p>
-      <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
-        {!loading && payouts.length === 0 && <p className="text-sm text-slate-400">No captured payments yet.</p>}
-        {payouts.map((p) => (
-          <Card key={p.clinicId}>
-            <p className="font-semibold text-slate-900">{p.clinicName}</p>
-            <p className="text-sm text-slate-600">Collected: ₹{p.collected.toLocaleString()}</p>
-            <p className="text-sm text-slate-600">Platform fee: ₹{p.fee.toLocaleString()}</p>
-            <p className="text-sm font-semibold text-emerald-700">Owed to clinic: ₹{p.owed.toLocaleString()}</p>
-            <p className="mt-1 text-xs text-slate-400">
-              {p.pendingPayoutCount} payment{p.pendingPayoutCount === 1 ? '' : 's'} pending payout ·{' '}
-              {p.paidPayoutCount} already paid
-            </p>
-            {p.pendingPayoutCount > 0 && (
-              <Button className="mt-2" onClick={() => markPayoutPaid(p.clinicId)}>
-                Mark payout as paid
-              </Button>
-            )}
-          </Card>
-        ))}
+      <div className="mt-3 rounded-2xl bg-brand-50 p-3 text-xs text-brand-800">
+        Clinic payouts moved to the <strong>Settlements</strong> tab - a payment is only released to a clinic once
+        its visit is completed, with a running ledger of what's eligible, released, and settled.
       </div>
 
       <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-slate-400">Recent payments</p>
@@ -158,8 +118,7 @@ export default function AdminPayments() {
               {p.appointments?.clinics?.name} · {p.appointments?.family_members?.name}
             </p>
             <p className="text-xs text-slate-400">
-              {p.appointments?.date} at {p.appointments?.slot_time?.slice(0, 5)} · {p.method} · payout:{' '}
-              {p.payout_status}
+              {p.appointments?.date} at {p.appointments?.slot_time?.slice(0, 5)} · {p.method}
             </p>
             {p.coupon_code && (
               <p className="text-xs text-emerald-600">

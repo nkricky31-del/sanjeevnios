@@ -9,6 +9,7 @@ import {
   MapPin,
   QrCode as QrCodeIcon,
   RefreshCw,
+  Star,
   Stethoscope,
   Trash2,
   UserRound,
@@ -19,6 +20,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
 import FileUpload from '../components/FileUpload';
+import ReviewForm from '../components/ReviewForm';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import IconTile from '../components/ui/IconTile';
@@ -40,6 +42,7 @@ import {
   type DoctorAvailability,
   type Prescription,
   type QueueStatusRow,
+  type Review,
   type Visit,
 } from '../lib/types';
 
@@ -136,6 +139,11 @@ export default function BookingStatus() {
   const [doctorVerified, setDoctorVerified] = useState(false);
   const [clinicVerified, setClinicVerified] = useState(false);
   const [options, setOptions] = useState<CheckInOptions | null>(null);
+  // undefined = not checked yet, null = not reviewed, Review = already rated
+  // this visit (migration_61_reviews.sql - one review per appointment, so
+  // this is also what gates whether ReviewForm shows at all).
+  const [myReview, setMyReview] = useState<Review | null | undefined>(undefined);
+  const [showReviewForm, setShowReviewForm] = useState(false);
   const alerted = useRef({ thirty: false, next: false });
 
   const loadBooking = async () => {
@@ -160,6 +168,12 @@ export default function BookingStatus() {
       setDoctorVerified(!!docVerified);
       setClinicVerified(!!clinicVerifiedData);
     }
+  };
+
+  const loadReview = async () => {
+    if (!appointmentId) return;
+    const { data } = await supabase.from('reviews').select('*').eq('appointment_id', appointmentId).maybeSingle();
+    setMyReview((data as Review | null) ?? null);
   };
 
   const loadVisit = async () => {
@@ -227,6 +241,7 @@ export default function BookingStatus() {
     if (!appointmentId) return;
     loadBooking();
     loadVisit();
+    loadReview();
     checkLatestNotification();
     // Paying online buys a more forgiving rescheduling window (a convenience,
     // not a queue advantage) - the clinic sets both figures.
@@ -743,6 +758,37 @@ export default function BookingStatus() {
                 }
               >
                 <CalendarPlus size={17} /> Book follow-up
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Rate this visit (migration_61_reviews.sql) - only on a COMPLETED
+            appointment (submit_review() re-checks this server-side
+            regardless), and only once - myReview !== null means a review
+            already exists for this exact appointment. */}
+        {booking.status === 'completed' && myReview !== undefined && (
+          <div className="mt-4">
+            {myReview ? (
+              <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="flex shrink-0 items-center gap-0.5">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Star key={n} size={15} className={myReview.rating >= n ? 'fill-amber-400 text-amber-400' : 'text-amber-200'} />
+                  ))}
+                </div>
+                <p className="text-sm font-semibold text-amber-800">You rated this visit</p>
+              </div>
+            ) : showReviewForm ? (
+              <ReviewForm
+                appointmentId={booking.id}
+                onSubmitted={(review) => {
+                  setMyReview(review);
+                  setShowReviewForm(false);
+                }}
+              />
+            ) : (
+              <Button variant="outline" full onClick={() => setShowReviewForm(true)}>
+                <Star size={17} /> Rate this visit
               </Button>
             )}
           </div>

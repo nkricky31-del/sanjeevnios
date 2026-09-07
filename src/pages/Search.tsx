@@ -2,6 +2,7 @@ import { ChevronRight, MapPin, SearchIcon, Stethoscope } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import RatingBadge from '../components/RatingBadge';
 import ScreenHeader from '../components/ui/ScreenHeader';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { formatDistanceKm, haversineKm } from '../lib/distance';
@@ -132,7 +133,14 @@ export default function Search() {
                       <p className="truncate font-bold text-slate-900">{r.doctor_name}</p>
                       <VerifiedBadge verified={r.doctor_verified} ownerType="doctor" />
                     </div>
-                    {r.specialty && <p className="text-sm font-medium text-brand-600">{r.specialty}</p>}
+                    <div className="flex items-center gap-2">
+                      {r.specialty && <p className="text-sm font-medium text-brand-600">{r.specialty}</p>}
+                      <RatingBadge
+                        avgRating={r.doctor_avg_rating}
+                        reviewCount={r.doctor_review_count}
+                        percentPositive={r.doctor_percent_positive}
+                      />
+                    </div>
                     <div className="mt-0.5 flex items-center gap-1.5">
                       <p className="truncate text-sm text-slate-500">{r.clinic_name}</p>
                       <VerifiedBadge verified={r.clinic_verified} ownerType="clinic" />

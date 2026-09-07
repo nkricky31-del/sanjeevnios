@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import ClinicBilling from '../components/ClinicBilling';
 import ClinicBookingMode from '../components/ClinicBookingMode';
 import ClinicCheckIn from '../components/ClinicCheckIn';
+import ClinicEarnings from '../components/ClinicEarnings';
 import ClinicHolidays from '../components/ClinicHolidays';
 import ClinicLocationPicker from '../components/ClinicLocationPicker';
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
@@ -166,7 +167,7 @@ export default function ClinicQueue() {
   // realtime broadcast is slow or the socket has dropped.
   const [queueVersion, setQueueVersion] = useState(0);
   const [view, setView] = useState<
-    'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'access'
+    'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'earnings' | 'access'
   >('today');
 
   const loadClinicAndDoctors = async () => {
@@ -550,6 +551,7 @@ export default function ClinicQueue() {
             { value: 'doctors', label: 'Doctors' },
             { value: 'booking', label: 'Booking mode' },
             { value: 'billing', label: 'Billing' },
+            { value: 'earnings', label: 'Earnings' },
             { value: 'location', label: 'Location' },
             { value: 'patients', label: 'Patients' },
             { value: 'access', label: 'Login & staff' },
@@ -664,6 +666,12 @@ export default function ClinicQueue() {
         {view === 'billing' && (
           <div className="mt-4">
             <ClinicBilling clinicId={clinic.id} />
+          </div>
+        )}
+
+        {view === 'earnings' && (
+          <div className="mt-4">
+            <ClinicEarnings clinic={clinic} />
           </div>
         )}
 

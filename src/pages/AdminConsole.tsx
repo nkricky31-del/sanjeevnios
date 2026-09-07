@@ -12,6 +12,8 @@ import AdminFraud from '../components/AdminFraud';
 import AdminNameChanges from '../components/AdminNameChanges';
 import AdminPayments from '../components/AdminPayments';
 import AdminRejectForm from '../components/AdminRejectForm';
+import AdminReviews from '../components/AdminReviews';
+import AdminSettlements from '../components/AdminSettlements';
 import AdminSubscriptions from '../components/AdminSubscriptions';
 import AdminVerificationRequirements from '../components/AdminVerificationRequirements';
 import PatientLookup from '../components/PatientLookup';
@@ -88,6 +90,7 @@ export default function AdminConsole() {
     | 'verification'
     | 'subscriptions'
     | 'payments'
+    | 'settlements'
     | 'coupons'
     | 'billing'
     | 'fraud'
@@ -96,6 +99,7 @@ export default function AdminConsole() {
     | 'conditions'
     | 'requirements'
     | 'names'
+    | 'reviews'
   >('dashboard');
   const [clinics, setClinics] = useState<PendingClinic[]>([]);
   const [doctors, setDoctors] = useState<PendingDoctor[]>([]);
@@ -270,6 +274,15 @@ export default function AdminConsole() {
       d.clinics.owner_id,
       `${d.name} has been approved and is now visible to patients.`
     );
+    // Best-effort: this status flip is one of the two gates
+    // reassign_clinic_plan_for_doctor_count() (migration 62) watches - if it
+    // just pushed the clinic over its plan's doctor limit, the DB trigger
+    // already upgraded subscriptions.plan_id; this only tries to keep the
+    // Razorpay-side subscription in step too. Never blocks the approval
+    // itself either way.
+    supabase.functions.invoke('sync-razorpay-subscription-plan', { body: { clinicId: d.clinic_id } }).catch((err) => {
+      console.error('sync-razorpay-subscription-plan failed:', err);
+    });
     loadPending();
   };
 
@@ -293,6 +306,7 @@ export default function AdminConsole() {
     { value: 'verification', label: 'Verification' },
     { value: 'subscriptions', label: 'Subscriptions' },
     { value: 'payments', label: 'Payments' },
+    { value: 'settlements', label: 'Settlements' },
     { value: 'coupons', label: 'Coupons' },
     { value: 'billing', label: 'Billing' },
     { value: 'fraud', label: 'Fraud' },
@@ -301,6 +315,7 @@ export default function AdminConsole() {
     { value: 'conditions', label: 'Conditions' },
     { value: 'requirements', label: 'Requirements' },
     { value: 'names', label: 'Name changes' },
+    { value: 'reviews', label: 'Reviews' },
   ];
 
   return (
@@ -329,6 +344,12 @@ export default function AdminConsole() {
         {view === 'payments' && (
           <div className="mt-4">
             <AdminPayments />
+          </div>
+        )}
+
+        {view === 'settlements' && (
+          <div className="mt-4">
+            <AdminSettlements />
           </div>
         )}
 
@@ -377,6 +398,12 @@ export default function AdminConsole() {
         {view === 'names' && (
           <div className="mt-4">
             <AdminNameChanges />
+          </div>
+        )}
+
+        {view === 'reviews' && (
+          <div className="mt-4">
+            <AdminReviews />
           </div>
         )}
 

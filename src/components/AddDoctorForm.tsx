@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
+import type { ClinicDoctorUsage } from '../lib/types';
 
 interface Props {
   clinicId: string;
@@ -15,6 +16,21 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
   const [fee, setFee] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<ClinicDoctorUsage | null>(null);
+
+  // An early, non-blocking heads-up (migration 62's "prompt it to upgrade")
+  // - this doctor won't actually COUNT toward the plan until an admin
+  // approves and verifies them (still 'draft' right now), so this can never
+  // be a hard block here; it's just honest advance notice of what adding
+  // one more will eventually cost once that happens.
+  useEffect(() => {
+    supabase
+      .rpc('get_clinic_doctor_usage', { p_clinic_id: clinicId })
+      .then(({ data }) => setUsage(((data ?? [])[0] as ClinicDoctorUsage | undefined) ?? null));
+  }, [clinicId]);
+
+  const wouldExceedPlan =
+    !!usage && usage.max_doctors != null && usage.doctors_used + 1 > usage.max_doctors && !!usage.next_plan_name;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -109,6 +125,15 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
       <p className="text-xs text-slate-400">
         You'll sign the onboarding agreement and upload the required documents on the next screen.
       </p>
+
+      {wouldExceedPlan && usage && (
+        <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-800">
+          Your {usage.plan_name} plan covers up to {usage.max_doctors} doctor{usage.max_doctors === 1 ? '' : 's'} - you're
+          currently using {usage.doctors_used}. Once this doctor is approved and verified, you'll be moved to{' '}
+          <strong>{usage.next_plan_name}</strong> (₹{usage.next_plan_price?.toLocaleString()}/month) starting your
+          next billing cycle. You can still add them now and upgrade from the Billing tab whenever you're ready.
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

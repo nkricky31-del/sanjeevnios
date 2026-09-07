@@ -49,6 +49,7 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
   const [clinicDocuments, setClinicDocuments] = useState<DocumentRow[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [togglingActiveFor, setTogglingActiveFor] = useState<string | null>(null);
 
   const loadDoctors = async () => {
     setLoading(true);
@@ -110,6 +111,29 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
   const hasReadyDoctor = doctors.some((d) => d.status === 'pending' || d.status === 'approved');
   const canSubmit = missingClinicDocs.length === 0 && hasMapLocation && hasReadyDoctor;
 
+  // The clinic's own "this doctor no longer works here" / "they're back"
+  // lever (migration 62's doctors.is_active) - the only way to free up a
+  // slot on the current plan short of an admin rejecting the doctor
+  // outright. Deactivating never lowers the bill until the next billing
+  // cycle (razorpay-webhook's own downgrade check); reactivating can raise
+  // it immediately if it pushes the clinic back over its plan
+  // (reassign_clinic_plan_for_doctor_count(), the same trigger a brand-new
+  // approval goes through) - the best-effort sync call after either
+  // direction is harmless when nothing actually needs to change.
+  const toggleDoctorActive = async (d: Doctor) => {
+    setTogglingActiveFor(d.id);
+    const { error } = await supabase.from('doctors').update({ is_active: !d.is_active }).eq('id', d.id);
+    setTogglingActiveFor(null);
+    if (error) {
+      setSubmitError(error.message);
+      return;
+    }
+    loadDoctors();
+    supabase.functions.invoke('sync-razorpay-subscription-plan', { body: { clinicId: clinic.id } }).catch((err) => {
+      console.error('sync-razorpay-subscription-plan failed:', err);
+    });
+  };
+
   const submitForReview = async () => {
     setSubmitError(null);
     setSubmitting(true);
@@ -168,7 +192,10 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
                   <p className="mt-1 text-xs font-medium text-red-600">Reason: {d.reject_reason}</p>
                 )}
               </div>
-              <StatusPill label={STATUS_LABEL[d.status]} tone={STATUS_TONE[d.status]} />
+              <div className="flex flex-col items-end gap-1">
+                <StatusPill label={STATUS_LABEL[d.status]} tone={STATUS_TONE[d.status]} />
+                {d.status === 'approved' && !d.is_active && <StatusPill label="Inactive" tone="neutral" />}
+              </div>
             </div>
 
             <div className="mt-2 flex flex-wrap gap-3">
@@ -184,7 +211,22 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
               >
                 {expandedDoctorId === d.id ? 'Hide availability' : 'Manage availability'}
               </button>
+              {d.status === 'approved' && (
+                <button
+                  onClick={() => toggleDoctorActive(d)}
+                  disabled={togglingActiveFor === d.id}
+                  className={`text-sm font-medium ${d.is_active ? 'text-red-600' : 'text-emerald-600'}`}
+                >
+                  {togglingActiveFor === d.id ? 'Saving...' : d.is_active ? 'Remove from clinic' : 'Restore to clinic'}
+                </button>
+              )}
             </div>
+            {d.status === 'approved' && !d.is_active && (
+              <p className="mt-1.5 text-xs text-slate-400">
+                No longer counted toward your plan or shown in patient search. Won't lower your bill until your next
+                billing cycle.
+              </p>
+            )}
 
             {expandedDoctorId === d.id && <DoctorAvailabilityForm doctorId={d.id} />}
           </Card>

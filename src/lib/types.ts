@@ -92,15 +92,38 @@ export type SubscriptionTier = 'free' | 'pro' | 'premium';
 // free/pro/premium label) is left in place for backward compatibility with
 // AdminSubscriptions.tsx's manual override, but plan_id/plans.booking_limit
 // is what enforce_clinic_booking_limit() actually reads now.
+//
+// min_doctors/max_doctors (migration 62) - the doctor-count band this plan
+// covers; max_doctors null = unlimited (the top tier). See
+// get_clinic_doctor_usage() for how a clinic's CURRENT doctor count is
+// actually counted (verified, active, approved doctors only).
 export interface Plan {
   id: string;
   name: string;
   monthly_price: number;
   booking_limit: number | null;
   per_booking_commission: number;
+  min_doctors: number;
+  max_doctors: number | null;
   razorpay_plan_id: string | null;
   active: boolean;
   created_at: string;
+}
+
+// One row from get_clinic_doctor_usage(clinic_id) (migration 62) - what
+// ClinicBilling.tsx's plan card and AddDoctorForm.tsx's upgrade prompt both
+// render from. next_plan_* is null only when the clinic is already on the
+// most expensive active plan.
+export interface ClinicDoctorUsage {
+  plan_id: string | null;
+  plan_name: string | null;
+  monthly_price: number | null;
+  min_doctors: number | null;
+  max_doctors: number | null;
+  doctors_used: number;
+  next_plan_id: string | null;
+  next_plan_name: string | null;
+  next_plan_price: number | null;
 }
 
 export type BillingStatus = 'active' | 'past_due';
@@ -202,6 +225,10 @@ export interface Clinic {
   // report - clamped to the 60-minute check-in window wherever it's actually
   // used (see lib/time.ts's reportingTimeFor). Section 40.
   report_before_minutes: number;
+  // A Razorpay Route linked/sub-merchant account id (migration 59) - null
+  // until one is provisioned on Razorpay's own dashboard for this clinic.
+  // release-clinic-payout only attempts a real transfer once this is set.
+  razorpay_fund_account_id: string | null;
   created_at: string;
 }
 
@@ -249,7 +276,8 @@ export const PAYMENT_STATUS_LABEL: Record<AppointmentPaymentStatus, string> = {
 // follow-up was recommended.
 export type FollowUpInterval = 'none' | '7' | '15' | '30';
 
-// Who funds a coupon's discount - see payouts.ts. Null when no coupon was used.
+// Who funds a coupon's discount - see migration_59_payment_settlement.sql.
+// Null when no coupon was used.
 export type CouponFundedBy = 'platform' | 'clinic';
 
 export interface Payment {
@@ -257,8 +285,8 @@ export interface Payment {
   appointment_id: string;
   // The real transactional figure - always equal to net_amount. Kept as its
   // own column (rather than renamed) so every pre-existing reader of
-  // `amount` (payouts.ts, Payments.tsx, AdminPayments.tsx) keeps working
-  // unchanged. See migration_41_coupons_and_razorpay.sql.
+  // `amount` (Payments.tsx, AdminPayments.tsx) keeps working unchanged. See
+  // migration_41_coupons_and_razorpay.sql.
   amount: number;
   method: PaymentMethod;
   status: PaymentRowStatus;
@@ -273,6 +301,43 @@ export interface Payment {
   funded_by: CouponFundedBy | null;
   razorpay_order_id: string | null;
   razorpay_payment_id: string | null;
+  created_at: string;
+}
+
+// collected -> eligible -> released -> settled, plus on_hold and refunded -
+// see migration_59_payment_settlement.sql's own header for the full state
+// machine. One row per online-paid appointment (payments.method = 'online'
+// only - COD money never passes through the platform, so there's nothing to
+// settle for it).
+export type SettlementStatus = 'collected' | 'eligible' | 'on_hold' | 'refunded' | 'released' | 'settled';
+
+export interface Settlement {
+  id: string;
+  clinic_id: string;
+  appointment_id: string;
+  payment_id: string | null;
+  // The captured amount this settlement is against (before the platform fee).
+  net_amount: number;
+  // The clinic's plan.per_booking_commission in effect when this became
+  // eligible - 0 while still 'collected' (not known yet).
+  commission_rate: number;
+  platform_fee: number;
+  status: SettlementStatus;
+  hold_reason: string | null;
+  // net_amount - platform_fee, computed and frozen the moment this is
+  // released - null before that.
+  net_payout: number | null;
+  released_by: string | null;
+  released_at: string | null;
+  settled_at: string | null;
+  razorpay_transfer_id: string | null;
+  // A stable, human-readable reference ("PO-00000123") set the moment this
+  // is released, regardless of whether Razorpay Route is configured - see
+  // migration_60_clinic_payout_reference.sql. razorpay_transfer_id, when
+  // present, is the authoritative bank-side reference; this always exists
+  // once released, so the clinic's own Earnings page always has something
+  // to show even before Route is set up.
+  payout_reference: string | null;
   created_at: string;
 }
 
@@ -308,6 +373,32 @@ export interface NameChangeRequest {
   reject_reason: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  created_at: string;
+}
+
+// A star rating + optional written feedback on one COMPLETED visit
+// (migration_61_reviews.sql) - one per appointment, never editable once
+// posted. reviewer_name is only ever meant to be SHOWN when anonymous is
+// false - it exists on the row at all (rather than only ever being read via
+// a profiles join) specifically so an opt-in identity reaches other
+// patients, not just the reviewer or an admin - see that migration's own
+// comment on why a join alone can't do this.
+export type ReviewStatus = 'visible' | 'hidden';
+
+export interface Review {
+  id: string;
+  appointment_id: string;
+  clinic_id: string;
+  doctor_id: string;
+  account_id: string;
+  reviewer_name: string | null;
+  rating: number;
+  comment: string | null;
+  anonymous: boolean;
+  status: ReviewStatus;
+  hidden_reason: string | null;
+  hidden_by: string | null;
+  hidden_at: string | null;
   created_at: string;
 }
 
@@ -430,6 +521,19 @@ export interface DoctorSearchResult {
   clinic_lng: number | null;
   doctor_verified: boolean;
   clinic_verified: boolean;
+  // migration_61_reviews.sql - null/0 means no visible ratings yet.
+  doctor_avg_rating: number | null;
+  doctor_review_count: number;
+  doctor_percent_positive: number | null;
+}
+
+// One row per get_doctor_rating()/get_clinic_rating() call (migration 61) -
+// review_count is always a number (0, never null); avg_rating/
+// percent_positive are null exactly when review_count is 0.
+export interface RatingSummary {
+  avg_rating: number | null;
+  review_count: number;
+  percent_positive: number | null;
 }
 
 export interface Doctor {
@@ -445,6 +549,11 @@ export interface Doctor {
   is_verified: boolean;
   verified_at: string | null;
   verified_by: string | null;
+  // The clinic's own "still works here" toggle (migration 62) - entirely
+  // separate from `status` (admin-controlled verification workflow). A
+  // doctor only counts toward the clinic's plan while status = 'approved'
+  // AND is_verified AND is_active are all true.
+  is_active: boolean;
   created_at: string;
 }
 
