@@ -9,5 +9,8 @@
 export function safeNext(raw: string | null): string {
   if (!raw) return '/';
   if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
+  // A backslash or control character can be read as a host by some browsers
+  // ("/\\evil.com"), so anything but a plain in-app path falls back to home.
+  if (/[\\\u0000-\u001f\u007f]/.test(raw)) return '/';
   return raw;
 }

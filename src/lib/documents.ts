@@ -1,6 +1,7 @@
 import { VERIFICATION_DOCS_BUCKET } from './storage';
 import { supabase } from './supabaseClient';
 import type { DocumentRow, OwnerType } from './types';
+import { checkUpload, safeFileName } from './fileSafety';
 
 export const MAX_DOC_BYTES = 10 * 1024 * 1024; // 10MB - matches the bucket's server-side limit
 export const ALLOWED_DOC_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
@@ -28,8 +29,10 @@ export async function uploadVerificationDocument(args: {
   if (file.size > MAX_DOC_BYTES) {
     return { error: 'File must be under 10MB.' };
   }
+  const unsafe = await checkUpload(file, ALLOWED_DOC_TYPES, MAX_DOC_BYTES);
+  if (unsafe) return { error: unsafe };
 
-  const path = `${ownerType}s/${ownerId}/${docType}/${crypto.randomUUID()}-${file.name}`;
+  const path = `${ownerType}s/${ownerId}/${docType}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
   const { error: uploadError } = await supabase.storage
     .from(VERIFICATION_DOCS_BUCKET)
     .upload(path, file, { contentType: file.type });

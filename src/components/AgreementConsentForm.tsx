@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabaseClient';
 import type { Consent } from '../lib/types';
 import Button from './ui/Button';
 import StatusPill from './ui/StatusPill';
+import { checkUpload, safeFileName } from '../lib/fileSafety';
 
 interface Props {
   doctorId: string;
@@ -60,13 +61,18 @@ export default function AgreementConsentForm({ doctorId, onSigned }: Props) {
         setError('The signed copy must be under 10MB.');
         return;
       }
+      const unsafe = await checkUpload(file, ALLOWED_TYPES, MAX_FILE_BYTES);
+      if (unsafe) {
+        setError(unsafe);
+        return;
+      }
     }
 
     setSaving(true);
 
     let fileUrl: string | null = null;
     if (file) {
-      const path = `doctors/${doctorId}/consent-signed-copy/${crypto.randomUUID()}-${file.name}`;
+      const path = `doctors/${doctorId}/consent-signed-copy/${crypto.randomUUID()}-${safeFileName(file.name)}`;
       const { error: uploadError } = await supabase.storage.from(VERIFICATION_DOCS_BUCKET).upload(path, file, {
         contentType: file.type,
       });

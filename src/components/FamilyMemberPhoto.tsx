@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { PATIENT_PHOTOS_BUCKET } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 import PatientAvatar from './ui/PatientAvatar';
+import { checkUpload, safeFileName } from '../lib/fileSafety';
 
 interface Props {
   memberId: string;
@@ -40,8 +41,15 @@ export default function FamilyMemberPhoto({ memberId, name, photoPath, onUploade
       return;
     }
 
+    const unsafe = await checkUpload(file, ALLOWED_TYPES, MAX_BYTES);
+    if (unsafe) {
+      setError(unsafe);
+      if (inputRef.current) inputRef.current.value = '';
+      return;
+    }
+
     setUploading(true);
-    const path = `${memberId}/${crypto.randomUUID()}-${file.name}`;
+    const path = `${memberId}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
     const { error: uploadError } = await supabase.storage.from(PATIENT_PHOTOS_BUCKET).upload(path, file, {
       contentType: file.type,
     });

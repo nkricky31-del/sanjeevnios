@@ -90,3 +90,35 @@ Rotation (SQL editor only, none callable from the API):
 No card field, PAN or CVV exists in the client or the edge functions
 (grep for card number / cvv / cvc returns nothing). Payment collection is
 Razorpay Checkout; we store only Razorpay order/payment ids and amounts.
+
+## 6. Web attack hardening (OWASP basics)
+
+Audit result and what was changed.
+
+| Threat | Finding / change |
+|---|---|
+| SQL injection | The app uses supabase-js / PostgREST only: every value is bound as a parameter. No `execute` with string-built SQL exists in the schema (the only `format()` calls build notification text). The one `ilike` (SuspendUserForm) only ever receives digits (`replace(/\D/g, '')`). |
+| XSS | No `dangerouslySetInnerHTML`, `innerHTML`, `eval` or `document.write` anywhere; React escapes all text. A strict **CSP** is now set in `vercel.json`: scripts only from our own origin and `checkout.razorpay.com`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`. |
+| CSRF | The session is a bearer token in an `Authorization` header (supabase-js), not a cookie, so a cross-site request carries no credentials: classic CSRF does not apply. The Razorpay webhook is authenticated by its HMAC signature. Because tokens live in browser storage, XSS is the real risk - hence the CSP. |
+| Security headers | CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP/CORP in `vercel.json`. |
+| CORS | The 10 edge functions that had `Access-Control-Allow-Origin: *` now allow only `https://www.sanjeevnios.in` (override with the `ALLOWED_ORIGIN` function secret for a dev project). **Redeploy the functions for this to take effect.** The Supabase REST/Auth API's own CORS is platform-controlled and cannot be restricted here; it is not a cookie-credentialed API, and RLS is what protects the data. |
+| Input validation | Unknown fields are rejected by PostgREST; types and formats by column types and existing constraints; **migration 73** adds server-side length and control-character limits on the tables users write directly. |
+| File uploads | Already: private buckets, 10MB (photos 5MB) and a JPG/PNG/PDF allow-list enforced by Storage on the server, signed-URL downloads only. Added: magic-byte check (declared type must match the real file), refusal of PDFs with scripts or embedded files, sanitised file names (`src/lib/fileSafety.ts`). **Not done: malware scanning** - it needs a scanning service (e.g. ClamAV or a hosted API) that is not part of this stack. |
+| SSRF / open redirect | No server code fetches a user-supplied URL (every `fetch` in the edge functions targets a fixed Razorpay / MSG91 / Resend host). The post-login `?next=` redirect is accepted only as an in-app path (`safeNext`, now also rejecting backslashes and control characters). |
+
+Tests:
+1. SQL injection: type `' OR 1=1; --` or `x'); drop table profiles;--` into any
+   search box (e.g. Admin > suspend user phone search). It is treated as plain
+   text and matches nothing (that box strips non-digits first).
+2. XSS: put `<script>alert(1)</script>` in a name / reason / note and save. It
+   displays as literal text and nothing runs. Also check the browser console
+   shows no CSP violations while booking, paying (Razorpay Checkout), viewing a
+   clinic map and uploading a file; if one appears, send it to me.
+3. Headers: `curl -sI https://www.sanjeevnios.in/ | grep -iE "content-security|x-frame|x-content|referrer|strict"`.
+4. CORS on an edge function (after redeploy):
+   `curl -si -X OPTIONS -H "Origin: https://evil.example" -H "Access-Control-Request-Method: POST" https://<project>.supabase.co/functions/v1/razorpay-create-order`
+   -> `Access-Control-Allow-Origin: https://www.sanjeevnios.in` (never the evil origin, never `*`).
+5. Uploads: rename `evil.html` to `evil.png` and upload it -> refused ("does not
+   look like a real PNG"). A PDF containing `/JavaScript` -> refused.
+6. Redirect: `https://www.sanjeevnios.in/login?next=//evil.example` and
+   `?next=/\evil.example` both land on `/`.

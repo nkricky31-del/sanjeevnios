@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { APPOINTMENT_FILES_BUCKET, openAppointmentFile } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 import type { AppointmentFile, FileCategory } from '../lib/types';
+import { checkUpload, safeFileName } from '../lib/fileSafety';
 
 interface Props {
   appointmentId: string;
@@ -56,8 +57,15 @@ export default function FileUpload({ appointmentId, memberId }: Props) {
       return;
     }
 
+    const unsafe = await checkUpload(file, ALLOWED_TYPES, MAX_BYTES);
+    if (unsafe) {
+      setError(unsafe);
+      if (inputRef.current) inputRef.current.value = '';
+      return;
+    }
+
     setUploading(true);
-    const path = `${appointmentId}/${crypto.randomUUID()}-${file.name}`;
+    const path = `${appointmentId}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
     const { error: uploadError } = await supabase.storage.from(APPOINTMENT_FILES_BUCKET).upload(path, file, {
       contentType: file.type,
     });

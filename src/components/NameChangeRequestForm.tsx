@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabaseClient';
 import type { NameChangeRequest } from '../lib/types';
 import Button from './ui/Button';
 import StatusPill from './ui/StatusPill';
+import { checkUpload, safeFileName } from '../lib/fileSafety';
 
 interface Props {
   accountId: string;
@@ -55,7 +56,7 @@ export default function NameChangeRequestForm({ accountId, memberId, currentName
     }
     setSubmitting(true);
 
-    const path = `${accountId}/${crypto.randomUUID()}-${file.name}`;
+    const path = `${accountId}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
     const { error: uploadError } = await supabase.storage.from(ID_DOCUMENTS_BUCKET).upload(path, file, {
       contentType: file.type,
     });
@@ -83,7 +84,7 @@ export default function NameChangeRequestForm({ accountId, memberId, currentName
     load();
   };
 
-  const pickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const pickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
     const f = e.target.files?.[0] ?? null;
     if (!f) {
@@ -98,6 +99,13 @@ export default function NameChangeRequestForm({ accountId, memberId, currentName
     }
     if (f.size > MAX_BYTES) {
       setError('File must be under 10MB.');
+      setFile(null);
+      e.target.value = '';
+      return;
+    }
+    const unsafe = await checkUpload(f, ALLOWED_TYPES, MAX_BYTES);
+    if (unsafe) {
+      setError(unsafe);
       setFile(null);
       e.target.value = '';
       return;
