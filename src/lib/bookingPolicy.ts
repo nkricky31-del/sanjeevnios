@@ -151,3 +151,19 @@ export function isSameDayCutoffError(message: string | undefined): boolean {
 export function isDuplicateMemberBookingError(message: string | undefined): boolean {
   return !!message && message.includes('appointments_member_clinic_day_active_unique');
 }
+
+// Migration 69: booking limits are per PATIENT. The server raises these
+// prefixed errors from enforce_patient_booking_rules(); the message after the
+// prefix is already patient-readable ("... on 12 Oct 2026 at 02:00 PM ...").
+export function isPatientSameDoctorError(message: string | undefined): boolean {
+  return !!message && message.includes('PATIENT_SAME_DOCTOR_ACTIVE');
+}
+
+export function isPatientWithin4HoursError(message: string | undefined): boolean {
+  return !!message && message.includes('PATIENT_WITHIN_4H');
+}
+
+// Strips "PATIENT_...: " so the screen shows the sentence, not the code.
+export function patientRuleMessage(message: string): string {
+  return message.replace(/^.*?PATIENT_[A-Z0-9_]+:\s*/, '');
+}

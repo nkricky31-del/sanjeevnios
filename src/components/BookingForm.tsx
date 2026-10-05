@@ -9,6 +9,9 @@ import {
   getBookingPolicy,
   getNextAvailableDay,
   isDuplicateMemberBookingError,
+  isPatientSameDoctorError,
+  isPatientWithin4HoursError,
+  patientRuleMessage,
   isFullDayError,
   isSameDayCutoffError,
   isSlotFullError,
@@ -287,6 +290,11 @@ export default function BookingForm({
       // schema.sql section 47: this MEMBER already has a still-open booking
       // at this clinic today - pick a different member (or day), not a raw
       // constraint-violation string.
+      if (isPatientSameDoctorError(apptError?.message) || isPatientWithin4HoursError(apptError?.message)) {
+        // Migration 69: the server's sentence already names the clash.
+        setError(patientRuleMessage(apptError!.message));
+        return;
+      }
       if (isDuplicateMemberBookingError(apptError?.message)) {
         setError('This patient already has an active booking at this clinic today. Pick a different family member, or a different day.');
         return;
