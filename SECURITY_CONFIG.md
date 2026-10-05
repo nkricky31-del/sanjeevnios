@@ -1,5 +1,25 @@
 # Encryption and secrets - configuration and how to verify
 
+## Status (as of 2026-10-05)
+
+| Area | State |
+|---|---|
+| HTTP -> HTTPS redirect, HSTS, TLS >= 1.2 | Done and live (verified: 308 redirect, `strict-transport-security`, TLS 1.1 refused) |
+| Security headers (`vercel.json`) | Done and live (HSTS + includeSubDomains, nosniff, X-Frame-Options, Referrer-Policy, Permissions-Policy) |
+| No hard-coded secrets in source or bundle | Done (`npm run scan:secrets` passes; planted-secret test fails as it should) |
+| Card data | Never touches our servers (Razorpay Checkout only) |
+| Field encryption, migrations 71 + 72 | Applied. New notes / diagnoses / govt IDs are encrypted on write |
+| Existing data backfill | Done: counts of unencrypted visits and govt IDs are both 0 |
+| Visit note encryption + app read-back | Verified by you (stored as `enc:v1:...`, reads fine in the app) |
+| Govt ID encryption on a NEW row | Not yet verified (no test patient with an ID) |
+| Old visits read in the app after backfill | To confirm |
+| Supabase "Enforce SSL on incoming connections" | **Open - you must switch it on** |
+| Backups present; manual dumps encrypted | **Open - confirm in the dashboard** |
+| Rotate the live Razorpay key pasted into chat earlier | **Open - cannot be verified from code** |
+| KEK rotation schedule (e.g. every 90 days) | **Open - not scheduled** |
+| Phone numbers, `prescriptions.items`, patient_conditions | **Not encrypted** (see section 3) |
+| External KMS | Not used - keys are in Supabase Vault (see section 3) |
+
 What the code does, what you must switch on in dashboards, and how to test it.
 
 ## 1. In transit (HTTPS / TLS)
