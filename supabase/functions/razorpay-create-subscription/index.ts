@@ -12,8 +12,9 @@
 // Secrets: shares RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET with the other razorpay-* functions.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { audit, authenticate, resolveClinicId } from '../_shared/authorize.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID')!;
 const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET')!;
@@ -45,8 +46,10 @@ async function razorpayFetch(path: string, body: Record<string, unknown>) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return json({ error: 'Missing Authorization header.' }, 401);
+  // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
+  const auth = await authenticate(req);
+  if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const { caller } = auth;
 
   if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
     return json({ error: 'Billing is not configured on this server yet.' }, 503);
@@ -58,20 +61,14 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: 'Invalid JSON body.' }, 400);
   }
-  const { clinicId, planId } = body;
-  if (!clinicId || !planId) return json({ error: 'clinicId and planId are required.' }, 400);
+  const { planId } = body;
+  if (!planId) return json({ error: 'planId is required.' }, 400);
 
-  // Runs as the calling user - only the clinic's own owner (or an admin) may
-  // subscribe it. is_own_clinic()/is_admin() are plain RPCs already exposed
-  // to any authenticated caller (see e.g. DoctorPage.tsx's is_currently_verified
-  // usage for the same pattern).
-  const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: isAdmin } = await callerClient.rpc('is_admin');
-  const { data: isOwnClinic } = await callerClient.rpc('is_own_clinic', { target_clinic_id: clinicId });
-  if (!isAdmin && !isOwnClinic) {
-    return json({ error: 'Only the clinic itself (or an admin) can subscribe it.' }, 403);
+  // 2 + 3. WHICH CLINIC / ALLOWED - a clinic user always subscribes its OWN
+  // clinic (any clinicId it sent is ignored); only an admin may name one.
+  const clinicId = resolveClinicId(caller, body.clinicId);
+  if (!clinicId) {
+    return json({ error: caller.isAdmin ? 'clinicId is required.' : 'This account has no clinic.' }, caller.isAdmin ? 400 : 403);
   }
 
   const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
@@ -82,6 +79,26 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (planError || !plan) return json({ error: 'Plan not found.' }, 404);
   if (!plan.active) return json({ error: 'This plan is no longer available.' }, 400);
+
+  // 5. RULES - a clinic can't pick a plan smaller than its verified, active
+  // doctor count needs (migration 62); otherwise choosing Solo with six
+  // doctors would quietly undercut the price. An admin may override.
+  if (!caller.isAdmin) {
+    const { data: requiredPlanId } = await serviceClient.rpc('plan_for_doctor_count_for_clinic', { p_clinic_id: clinicId });
+    if (requiredPlanId && requiredPlanId !== plan.id) {
+      const { data: required } = await serviceClient
+        .from('plans')
+        .select('name, monthly_price')
+        .eq('id', requiredPlanId)
+        .maybeSingle();
+      if (required && Number(plan.monthly_price) < Number(required.monthly_price)) {
+        return json(
+          { error: `Your verified doctors need at least the ${required.name} plan (₹${required.monthly_price}/month).` },
+          409
+        );
+      }
+    }
+  }
 
   // Razorpay's Plans API rejects a zero-amount item outright, and there is
   // nothing to charge for a free plan anyway - assign it directly instead
@@ -98,6 +115,7 @@ Deno.serve(async (req) => {
       .from('subscriptions')
       .upsert({ clinic_id: clinicId, plan_id: plan.id }, { onConflict: 'clinic_id' });
     if (upsertError) return json({ error: `Could not assign this plan: ${upsertError.message}` }, 500);
+    await audit(serviceClient, caller, 'subscription_plan_assigned', clinicId);
     return json({ assignedDirectly: true });
   }
 
@@ -150,5 +168,7 @@ Deno.serve(async (req) => {
     return json({ error: `Subscription created but could not be saved: ${upsertError.message}` }, 500);
   }
 
+  // 6. Audit.
+  await audit(serviceClient, caller, 'subscription_created', clinicId);
   return json({ subscriptionId: subscription.id, keyId: RAZORPAY_KEY_ID });
 });

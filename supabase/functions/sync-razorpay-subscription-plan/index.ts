@@ -19,8 +19,9 @@
 // Secrets: shares RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET with the other razorpay-* functions.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { audit, authenticate, resolveClinicId } from '../_shared/authorize.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID')!;
 const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET')!;
@@ -44,28 +45,24 @@ function basicAuthHeader(): string {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return json({ error: 'Missing Authorization header.' }, 401);
+  // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
+  const auth = await authenticate(req);
+  if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const { caller } = auth;
 
-  let body: { clinicId?: string };
+  let body: { clinicId?: string } = {};
   try {
     body = await req.json();
   } catch {
-    return json({ error: 'Invalid JSON body.' }, 400);
+    // An empty body is fine for a clinic caller - its clinic comes from its
+    // own membership below.
   }
-  const { clinicId } = body;
-  if (!clinicId) return json({ error: 'clinicId is required.' }, 400);
 
-  // The clinic itself (whose own bill this is) or an admin - same
-  // is_admin()/is_own_clinic() pattern every other admin-or-owner edge
-  // function in this project already uses.
-  const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: isAdmin } = await callerClient.rpc('is_admin');
-  const { data: isOwnClinic } = await callerClient.rpc('is_own_clinic', { target_clinic_id: clinicId });
-  if (!isAdmin && !isOwnClinic) {
-    return json({ error: 'Only the clinic itself (or an admin) can sync its subscription.' }, 403);
+  // 2 + 3. WHICH CLINIC / ALLOWED - a clinic user always syncs its OWN
+  // clinic (any clinicId it sent is ignored); only an admin may name one.
+  const clinicId = resolveClinicId(caller, body.clinicId);
+  if (!clinicId) {
+    return json({ error: caller.isAdmin ? 'clinicId is required.' : 'This account has no clinic.' }, caller.isAdmin ? 400 : 403);
   }
 
   if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
@@ -108,6 +105,8 @@ Deno.serve(async (req) => {
       const detail = await res.text();
       return json({ synced: false, error: `Razorpay subscription update failed: ${detail}` }, 502);
     }
+    // 6. Audit.
+    await audit(serviceClient, caller, 'subscription_plan_synced', clinicId);
     return json({ synced: true, appliesFrom: 'cycle_end' });
   } catch (err) {
     return json({ synced: false, error: String(err) }, 502);

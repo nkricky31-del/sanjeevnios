@@ -19,8 +19,9 @@
 //   npx supabase secrets set MSG91_AUTH_KEY=... MSG91_WHATSAPP_SENDER=... MSG91_WHATSAPP_TEMPLATE_NAME=...
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { audit, authenticate } from '../_shared/authorize.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const MSG91_AUTH_KEY = Deno.env.get('MSG91_AUTH_KEY');
@@ -47,44 +48,60 @@ function json(body: Record<string, unknown>, status = 200) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return json({ sent: false, error: 'Missing Authorization header.' }, 401);
+  // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
+  const auth = await authenticate(req);
+  if (!auth.ok) return json({ sent: false, error: auth.error }, auth.status);
+  const { caller } = auth;
 
+  // userId is still accepted for older app builds but no longer trusted: the
+  // recipient is always the appointment's own patient (step 4 below).
   let body: { userId?: string; appointmentId?: string; message?: string };
   try {
     body = await req.json();
   } catch {
     return json({ sent: false, error: 'Invalid JSON body.' }, 400);
   }
-  const { userId, appointmentId, message } = body;
-  if (!userId || !appointmentId || !message) {
-    return json({ sent: false, error: 'userId, appointmentId and message are required.' }, 400);
+  const { appointmentId, message } = body;
+  if (!appointmentId || !message) {
+    return json({ sent: false, error: 'appointmentId and message are required.' }, 400);
   }
 
-  // Runs as the calling user (their own JWT, RLS still enforced) purely to
-  // confirm they're allowed to see this appointment at all - the same
-  // ownership chain log_notification() already checked before this function
-  // was ever called. This does NOT re-derive the phone number - that needs
-  // the service-role client below, since a clinic has no RLS access to a
-  // patient's own profile.
-  const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: appointment, error: apptError } = await callerClient
+  // 4. THIS RESOURCE - loaded as the caller (row-level security), so an
+  // appointment they can't see is "not found".
+  const { data: appointment, error: apptError } = await caller.client
     .from('appointments')
-    .select('id')
+    .select('id, clinic_id, member_id')
     .eq('id', appointmentId)
     .maybeSingle();
   if (apptError || !appointment) {
-    return json({ sent: false, error: 'Appointment not visible to caller.' }, 403);
+    return json({ sent: false, error: 'Appointment not found.' }, 404);
+  }
+
+  const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+  // The recipient comes from the appointment itself - never from the request
+  // body - so this can only ever message the patient this booking is for.
+  const { data: member } = await serviceClient
+    .from('family_members')
+    .select('account_id')
+    .eq('id', appointment.member_id)
+    .maybeSingle();
+  const recipientId = member?.account_id as string | undefined;
+  if (!recipientId) {
+    return json({ sent: false, error: 'Appointment not found.' }, 404);
+  }
+
+  // 2 + 3. WHICH CLINIC / ALLOWED - the appointment's own clinic (from the
+  // caller's membership), the patient themselves, or an admin.
+  const isOwnClinic = !!caller.clinicId && caller.clinicId === appointment.clinic_id;
+  if (!caller.isAdmin && !isOwnClinic && caller.user.id !== recipientId) {
+    return json({ sent: false, error: 'Not allowed to message this patient.' }, 403);
   }
 
   if (!MSG91_AUTH_KEY || !MSG91_WHATSAPP_SENDER || !MSG91_WHATSAPP_TEMPLATE_NAME) {
     return json({ sent: false, skipped: true, reason: 'not_configured' });
   }
 
-  const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-  const { data: profile } = await serviceClient.from('profiles').select('phone').eq('id', userId).maybeSingle();
+  const { data: profile } = await serviceClient.from('profiles').select('phone').eq('id', recipientId).maybeSingle();
   const phone = profile?.phone;
   if (!phone) {
     return json({ sent: false, skipped: true, reason: 'no_phone_on_file' });
@@ -114,6 +131,8 @@ Deno.serve(async (req) => {
     if (!res.ok) {
       return json({ sent: false, error: `MSG91 responded ${res.status}` }, 502);
     }
+    // 6. Audit.
+    await audit(serviceClient, caller, 'patient_message_sent', appointmentId);
     return json({ sent: true, channel: 'whatsapp' });
   } catch (err) {
     return json({ sent: false, error: String(err) }, 502);

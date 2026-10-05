@@ -1891,3 +1891,74 @@ The clinic's own submission (draft → pending) and each doctor's submission (dr
 4. A clinic on Small sees the new price and "x / 6" on its own **Billing** tab.
 5. As a clinic owner, `select admin_save_plans('[]');` → refused: *"Only an admin can edit plans."*
 6. Put the plans back the way they were (Small 2-5 at 1499, Group 6-15) the same way.
+
+## Test 34 — Every sensitive request is authorized on the server
+
+`migration_67_server_authorization.sql` plus `supabase/functions/_shared/authorize.ts` (used by every edge function except `razorpay-webhook`, which is authenticated by Razorpay's signature instead). The browser is never trusted: these tests call the API directly, the way an attacker would.
+
+### Setup
+
+1. Run `migration_67_server_authorization.sql`, then redeploy the edge functions: `npx supabase functions deploy` (deploys all of them, including the new `_shared/authorize.ts`).
+2. You need two clinic logins (**Clinic A**, **Clinic B**), each with at least one appointment, and one patient login.
+3. Get a session token for a login: sign in on the site, open DevTools → **Application → Local Storage → https://www.sanjeevnios.in**, open the `sb-<project-ref>-auth-token` entry and copy its `access_token`. Then in a terminal:
+   ```bash
+   export URL=https://<project-ref>.supabase.co
+   export ANON=<your anon key - same as VITE_SUPABASE_ANON_KEY>
+   export TOKEN_A=<Clinic A's access_token>
+   export TOKEN_P=<the patient's access_token>
+   export B_APPT=<an appointment id that belongs to Clinic B>   # from Clinic B's queue, or the appointments table
+   export B_CLINIC=<Clinic B's clinic id>
+   ```
+
+### A. Clinic A asks for a Clinic B appointment → not found
+
+```bash
+curl -s "$URL/rest/v1/appointments?id=eq.$B_APPT&select=*" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_A"
+```
+→ `[]` - the row is filtered out by row-level security, exactly as if the ID didn't exist. The same appointment through an edge function:
+```bash
+curl -s -X POST "$URL/functions/v1/razorpay-capture-payment" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_A" \
+  -H 'Content-Type: application/json' -d "{\"appointmentId\":\"$B_APPT\"}" -w '\nHTTP %{http_code}\n'
+```
+→ `{"captured":false,"error":"Appointment not found."}`, **HTTP 404**.
+
+### B. A different clinic_id in the payload is ignored
+
+```bash
+curl -s -X POST "$URL/functions/v1/sync-razorpay-subscription-plan" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_A" \
+  -H 'Content-Type: application/json' -d "{\"clinicId\":\"$B_CLINIC\"}" -w '\nHTTP %{http_code}\n'
+select actor, action, target from audit_log order by at desc limit 1;
+```
+The function acts on **Clinic A** (the caller's own clinic from their membership) - if it gets as far as Razorpay, the audit row's `target` is Clinic A's id, never `$B_CLINIC`. Writing a row INTO Clinic B through the table API is refused outright:
+```bash
+curl -s -X POST "$URL/rest/v1/doctors" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_A" \
+  -H 'Content-Type: application/json' -d "{\"clinic_id\":\"$B_CLINIC\",\"name\":\"Sneaky\"}" -w '\nHTTP %{http_code}\n'
+```
+→ **HTTP 403** (`new row violates row-level security policy`).
+
+### C. No session → 401
+
+```bash
+curl -s "$URL/rest/v1/appointments?select=id&limit=1" -H "apikey: $ANON" -w '\nHTTP %{http_code}\n'
+curl -s -X POST "$URL/functions/v1/razorpay-create-order" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+  -H 'Content-Type: application/json' -d '{"appointmentId":"00000000-0000-0000-0000-000000000000"}' -w '\nHTTP %{http_code}\n'
+curl -s -X POST "$URL/rest/v1/rpc/qr_secret" -H "apikey: $ANON" -w '\nHTTP %{http_code}\n'
+```
+→ **HTTP 401** each time. (The second one sends the public anon key as if it were a session - exactly what the app does when nobody is signed in - and is still refused.)
+
+### D. Signed in, but not allowed → 403
+
+```bash
+curl -s -X POST "$URL/rest/v1/rpc/admin_save_plans" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_P" \
+  -H 'Content-Type: application/json' -d '{"p_plans":[]}' -w '\nHTTP %{http_code}\n'
+curl -s -X POST "$URL/functions/v1/release-clinic-payout" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_A" \
+  -H 'Content-Type: application/json' -d '{"settlementIds":["00000000-0000-0000-0000-000000000000"]}' -w '\nHTTP %{http_code}\n'
+```
+→ **HTTP 403** (`Only an admin can edit plans.` / `Only an admin can release a payout.`).
+
+### E. The holes this closed stay closed
+
+1. As the patient, add a family member using ANOTHER patient's phone number (or with an `mrn` field set to theirs). Then `GET /rest/v1/appointments` as the patient - none of the other patient's visits appear. Changing a family member's `mrn` afterwards → **403**.
+2. As a clinic, `POST /rest/v1/documents` with `"status":"verified"` → **403**. Only an admin can verify.
+3. As a suspended patient, `PATCH /rest/v1/profiles?id=eq.<own id>` with `{"suspended":false}` → **403**. As a clinic deactivated for non-payment, `PATCH /rest/v1/clinics?id=eq.<own id>` with `{"is_active":true}` → **403**.
+4. `send-patient-message` with someone else's `userId` in the body still only messages the appointment's own patient.

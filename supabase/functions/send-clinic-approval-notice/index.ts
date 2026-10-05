@@ -26,8 +26,9 @@
 //     npx supabase secrets set RESEND_API_KEY=... RESEND_FROM_EMAIL="SanjeevniOS <noreply@yourdomain>"
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { audit, authenticate } from '../_shared/authorize.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const MSG91_AUTH_KEY = Deno.env.get('MSG91_AUTH_KEY');
@@ -110,8 +111,10 @@ async function sendEmail(email: string, clinicName: string, clinicCode: string):
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return json({ error: 'Missing Authorization header.' }, 401);
+  // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
+  const auth = await authenticate(req);
+  if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const { caller } = auth;
 
   let body: { clinicId?: string };
   try {
@@ -125,11 +128,10 @@ Deno.serve(async (req) => {
   // Only an admin may trigger this - runs as the calling user's own JWT,
   // same is_admin() RPC every other admin-only edge function already checks
   // (see razorpay-create-subscription for the identical pattern).
-  const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: isAdmin } = await callerClient.rpc('is_admin');
-  if (!isAdmin) return json({ error: 'Only an admin can send this.' }, 403);
+  // 3. ALLOWED - admin only. callerClient acts AS the admin, so the RPCs
+  // below still run their own is_admin() checks too.
+  const callerClient = caller.client;
+  if (!caller.isAdmin) return json({ error: 'Only an admin can send this.' }, 403);
 
   const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const { data: clinic, error: clinicError } = await serviceClient
@@ -158,5 +160,7 @@ Deno.serve(async (req) => {
       : Promise.resolve<ChannelResult>({ sent: false, skipped: true, reason: 'no_email_on_file' }),
   ]);
 
+  // 6. Audit.
+  await audit(serviceClient, caller, 'clinic_approval_notice_sent', clinicId);
   return json({ sms, email });
 });

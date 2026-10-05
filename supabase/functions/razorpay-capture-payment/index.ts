@@ -17,8 +17,9 @@
 // Secrets: shares RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET with the other razorpay-* functions.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { audit, authenticate } from '../_shared/authorize.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID')!;
 const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET')!;
@@ -42,8 +43,10 @@ function basicAuthHeader(): string {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return json({ captured: false, error: 'Missing Authorization header.' }, 401);
+  // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
+  const auth = await authenticate(req);
+  if (!auth.ok) return json({ captured: false, error: auth.error }, auth.status);
+  const { caller } = auth;
 
   let body: { appointmentId?: string };
   try {
@@ -54,24 +57,21 @@ Deno.serve(async (req) => {
   const { appointmentId } = body;
   if (!appointmentId) return json({ captured: false, error: 'appointmentId is required.' }, 400);
 
-  // Only the clinic that owns this appointment (or an admin) may capture its
-  // payment - reuses the same is_own_clinic() check the rest of the app's
-  // clinic-only RPCs already rely on, run as the caller so it's their own
-  // membership being checked, not this function's.
-  const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: appointment, error: apptError } = await callerClient
+  // 4. THIS RESOURCE - loaded as the caller (row-level security), so another
+  // clinic's appointment id comes back as "not found".
+  const { data: appointment, error: apptError } = await caller.client
     .from('appointments')
     .select('id, clinic_id')
     .eq('id', appointmentId)
     .maybeSingle();
   if (apptError || !appointment) {
-    return json({ captured: false, error: 'Appointment not visible to caller.' }, 403);
+    return json({ captured: false, error: 'Appointment not found.' }, 404);
   }
-  const { data: isAdmin } = await callerClient.rpc('is_admin');
-  const { data: isOwnClinic } = await callerClient.rpc('is_own_clinic', { target_clinic_id: appointment.clinic_id });
-  if (!isAdmin && !isOwnClinic) {
+  // 2 + 3. WHICH CLINIC / ALLOWED - capturing is the clinic's action, for its
+  // OWN appointment: the caller's clinic comes from their membership, not
+  // from anything in the request. (The patient can see this booking too, but
+  // can't capture it.)
+  if (!caller.isAdmin && (!caller.clinicId || appointment.clinic_id !== caller.clinicId)) {
     return json({ captured: false, error: 'Only the clinic can capture this payment.' }, 403);
   }
 
@@ -107,5 +107,7 @@ Deno.serve(async (req) => {
     return json({ captured: false, error: `Razorpay capture failed: ${detail}` }, 502);
   }
 
+  // 6. Audit.
+  await audit(serviceClient, caller, 'payment_captured', appointmentId);
   return json({ captured: true });
 });

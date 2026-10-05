@@ -24,8 +24,9 @@
 // Secrets: shares RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET with the other razorpay-* functions.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { audit, authenticate } from '../_shared/authorize.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID')!;
 const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET')!;
@@ -120,8 +121,10 @@ async function attemptTransfer(serviceClient: ReturnType<typeof createClient>, r
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return json({ error: 'Missing Authorization header.' }, 401);
+  // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
+  const auth = await authenticate(req);
+  if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const { caller } = auth;
 
   let body: { settlementIds?: string[] };
   try {
@@ -136,11 +139,10 @@ Deno.serve(async (req) => {
 
   // Admin-only - same is_admin() RPC every other admin-only edge function
   // already checks (see send-clinic-approval-notice for the identical shape).
-  const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: isAdmin } = await callerClient.rpc('is_admin');
-  if (!isAdmin) return json({ error: 'Only an admin can release a payout.' }, 403);
+  // 3. ALLOWED - admin only. callerClient acts AS the admin, so the RPCs
+  // below still run their own is_admin() checks too.
+  const callerClient = caller.client;
+  if (!caller.isAdmin) return json({ error: 'Only an admin can release a payout.' }, 403);
 
   const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const { data: rows, error: rowsError } = await serviceClient
@@ -151,5 +153,7 @@ Deno.serve(async (req) => {
 
   const results = await Promise.all(((rows ?? []) as unknown as SettlementRow[]).map((row) => attemptTransfer(serviceClient, row)));
 
+  // 6. Audit.
+  await audit(serviceClient, caller, 'payouts_released', results.map((r) => r.settlementId).join(','));
   return json({ results });
 });

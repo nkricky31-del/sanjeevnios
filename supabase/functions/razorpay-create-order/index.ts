@@ -14,8 +14,9 @@
 // Secrets: npx supabase secrets set RAZORPAY_KEY_ID=... RAZORPAY_KEY_SECRET=...
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { audit, authenticate } from '../_shared/authorize.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID')!;
 const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET')!;
@@ -39,8 +40,10 @@ function basicAuthHeader(): string {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return json({ error: 'Missing Authorization header.' }, 401);
+  // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
+  const auth = await authenticate(req);
+  if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const { caller } = auth;
 
   if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
     return json({ error: 'Online payment is not configured on this server yet.' }, 503);
@@ -55,19 +58,24 @@ Deno.serve(async (req) => {
   const { appointmentId } = body;
   if (!appointmentId) return json({ error: 'appointmentId is required.' }, 400);
 
-  // Runs as the calling user - proves they can actually see this appointment
-  // (appointments_select RLS: their own booking, or their own clinic) before
-  // anything else happens.
-  const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: appointment, error: apptError } = await callerClient
+  // 4. THIS RESOURCE - loaded as the caller, so row-level security applies:
+  // a booking that isn't theirs comes back as "not found", never as data.
+  const { data: appointment, error: apptError } = await caller.client
     .from('appointments')
-    .select('id')
+    .select('id, family_members(account_id)')
     .eq('id', appointmentId)
     .maybeSingle();
   if (apptError || !appointment) {
-    return json({ error: 'Appointment not visible to caller.' }, 403);
+    return json({ error: 'Appointment not found.' }, 404);
+  }
+  // 3. ALLOWED - paying for a visit is the patient's own action. The clinic
+  // can see this booking too, but it doesn't get to pay for it.
+  // A to-one embed; PostgREST has returned it as an object or a one-item
+  // array depending on version (see AdminBilling.tsx's oneSubscription()).
+  const member = appointment.family_members as unknown as { account_id: string } | { account_id: string }[] | null;
+  const bookedBy = Array.isArray(member) ? member[0]?.account_id : member?.account_id;
+  if (!caller.isAdmin && bookedBy !== caller.user.id) {
+    return json({ error: 'Only the patient who made this booking can pay for it.' }, 403);
   }
 
   // Service role from here - reading/writing the payments row's Razorpay
@@ -128,5 +136,7 @@ Deno.serve(async (req) => {
     return json({ error: `Order created but could not be saved: ${updateError.message}` }, 500);
   }
 
+  // 6. Audit.
+  await audit(serviceClient, caller, 'payment_order_created', appointmentId);
   return json({ orderId: order.id, amount: order.amount, keyId: RAZORPAY_KEY_ID });
 });

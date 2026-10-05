@@ -27,8 +27,9 @@
 // Secrets: shares RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET with the other razorpay-* functions.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { audit, authenticate } from '../_shared/authorize.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID')!;
 const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET')!;
 
@@ -68,8 +69,10 @@ const BUSINESS_TYPES = [
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) return json({ error: 'Missing Authorization header.' }, 401);
+  // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
+  const auth = await authenticate(req);
+  if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const { caller } = auth;
   if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
     return json({ error: 'Razorpay is not configured on this server.' }, 503);
   }
@@ -93,11 +96,10 @@ Deno.serve(async (req) => {
   // admin_set_clinic_payout_account()) needs a real auth.uid(), same
   // "never a service-role client for the actual authorization check" shape
   // release-clinic-payout already uses.
-  const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: isAdmin } = await callerClient.rpc('is_admin');
-  if (!isAdmin) return json({ error: 'Only an admin can set up a clinic payout account.' }, 403);
+  // 3. ALLOWED - admin only. callerClient acts AS the admin, so the RPCs
+  // below still run their own is_admin() checks too.
+  const callerClient = caller.client;
+  if (!caller.isAdmin) return json({ error: 'Only an admin can set up a clinic payout account.' }, 403);
 
   const { data: clinic, error: clinicError } = await callerClient
     .from('clinics')
@@ -197,5 +199,7 @@ Deno.serve(async (req) => {
   });
   if (rpcError) return json({ error: rpcError.message }, 500);
 
+  // 6. Audit.
+  await audit(caller.client, caller, 'payout_account_submitted', clinicId);
   return json({ accountId, status: activationStatus, note: requirementNote, clinic: updated });
 });
