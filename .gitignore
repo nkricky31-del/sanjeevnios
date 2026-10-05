@@ -25,3 +25,13 @@ dist-ssr
 
 # Supabase CLI local cache
 supabase/.temp/
+
+# Secrets: never commit these
+.env
+.env.*
+!.env.local.example
+*.pem
+*.p12
+*.pfx
+*api_keys*.csv
+UI/*.csv
