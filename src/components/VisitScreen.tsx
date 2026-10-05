@@ -86,7 +86,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
     const { data: visitRows } = await supabase
       .from('visits')
       .select(
-        'id, diagnosis, notes, follow_up_interval, follow_up_due_date, no_prescription, consultation_started_at, consultation_ended_at, duration_minutes, waiting_time_minutes, needs_review'
+        'id, diagnosis:diagnosis_plain, notes:notes_plain, follow_up_interval, follow_up_due_date, no_prescription, consultation_started_at, consultation_ended_at, duration_minutes, waiting_time_minutes, needs_review'
       )
       .eq('appointment_id', appointmentId)
       .order('created_at', { ascending: false })

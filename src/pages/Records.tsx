@@ -81,7 +81,7 @@ export default function Records() {
           ? supabase
               .from('appointments')
               .select(
-                'id, date, slot_time, doctors(name, specialty), clinics(name), visits(id, appointment_id, notes, diagnosis, follow_up_date, no_prescription, created_at, prescriptions(id, visit_id, items, file_url, signed_by, status, created_at)), files(id, member_id, appointment_id, type, storage_path, created_at)'
+                'id, date, slot_time, doctors(name, specialty), clinics(name), visits(id, appointment_id, notes:notes_plain, diagnosis:diagnosis_plain, follow_up_date, no_prescription, created_at, prescriptions(id, visit_id, items, file_url, signed_by, status, created_at)), files(id, member_id, appointment_id, type, storage_path, created_at)'
               )
               .in('member_id', memberIds)
               .order('date', { ascending: false })

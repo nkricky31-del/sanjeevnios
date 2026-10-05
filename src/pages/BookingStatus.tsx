@@ -183,11 +183,16 @@ export default function BookingStatus() {
     // errors outright if more than one row matches.
     const { data } = await supabase
       .from('visits')
-      .select('*, prescriptions(*)')
+      .select('*, notes_plain, diagnosis_plain, prescriptions(*)')
       .eq('appointment_id', appointmentId)
       .order('created_at', { ascending: false })
       .limit(1);
-    const v = ((data ?? [])[0] as (Visit & { prescriptions: Prescription[] }) | undefined) ?? null;
+    // notes / diagnosis are stored encrypted (migration 72); the *_plain
+    // computed columns hand back the decrypted text for rows this user may read.
+    const raw = (data ?? [])[0] as
+      | (Visit & { prescriptions: Prescription[]; notes_plain?: string | null; diagnosis_plain?: string | null })
+      | undefined;
+    const v = raw ? { ...raw, notes: raw.notes_plain ?? null, diagnosis: raw.diagnosis_plain ?? null } : null;
     setVisit(v);
 
     if (v?.follow_up_due_date) {
