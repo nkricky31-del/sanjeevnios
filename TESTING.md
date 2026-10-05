@@ -1867,3 +1867,27 @@ The clinic's own submission (draft → pending) and each doctor's submission (dr
 2. Confirm it's really gone from patient-facing surfaces too: search for that doctor by name in **Search** - no longer appears; `select * from search_doctors('<doctor name>');` → no row for them.
 3. Confirm the plan does NOT change yet: `select p.name from subscriptions s join plans p on p.id = s.plan_id where s.clinic_id = '<clinic id>';` → still `Group` (5 counted doctors would actually fit `Small`, but nothing moves it down here).
 4. Simulate the next billing cycle by calling the downgrade path directly (or wait for a real `subscription.charged` webhook if Razorpay is live): `select plan_for_doctor_count_for_clinic('<clinic id>');` → the `Small` plan's id, confirming that's what the NEXT cycle would reconcile to.
+
+## Test 33 — Anonymous reviews stay anonymous, and the admin plan editor
+
+`migration_66_review_privacy_and_plan_editor.sql` stops storing a reviewer's name on an anonymous review (it used to be on every row, readable through the API even though the app never showed it), and adds `admin_save_plans()` for editing every plan's price and doctor range together.
+
+### Setup
+
+1. Run `migration_66_review_privacy_and_plan_editor.sql` (after 61 and 62).
+
+### A. An anonymous reviewer's name can't be read by other patients
+
+1. As a patient with a completed visit, leave a review with **Show my name** unchecked. `select reviewer_name, anonymous from reviews where appointment_id = '<id>';` → `null`, `true`.
+2. As a DIFFERENT patient, query the API directly: `select reviewer_name from reviews where appointment_id = '<id>';` → `null` - nothing to read. The doctor's profile still shows **Anonymous patient**.
+3. Leave another review with **Show my name** checked → `reviewer_name` is the patient's name, and the profile shows it.
+4. As **admin**, open **Reviews** - the anonymous review still shows who wrote it (read from their profile), with "(posted anonymously - not shown to other patients)".
+
+### B. Editing plans
+
+1. As **admin**, open **Billing → Plans**. Each active plan shows its monthly price and doctor range (From / To; the largest plan's To is blank = no limit).
+2. Change **Small**'s To from `5` to `6` and nothing else. A message explains Group must now start at 7, and **Save plans** stays disabled.
+3. Change **Group**'s From to `7` and Small's price to `1599`, press **Save plans** → "Plans saved." `select name, monthly_price, min_doctors, max_doctors from plans where active order by min_doctors;` → Small `1599, 2, 6`, Group `7, 15`. The Clinics list's plan dropdown shows the new prices.
+4. A clinic on Small sees the new price and "x / 6" on its own **Billing** tab.
+5. As a clinic owner, `select admin_save_plans('[]');` → refused: *"Only an admin can edit plans."*
+6. Put the plans back the way they were (Small 2-5 at 1499, Group 6-15) the same way.

@@ -390,11 +390,10 @@ export interface NameChangeRequest {
 
 // A star rating + optional written feedback on one COMPLETED visit
 // (migration_61_reviews.sql) - one per appointment, never editable once
-// posted. reviewer_name is only ever meant to be SHOWN when anonymous is
-// false - it exists on the row at all (rather than only ever being read via
-// a profiles join) specifically so an opt-in identity reaches other
-// patients, not just the reviewer or an admin - see that migration's own
-// comment on why a join alone can't do this.
+// posted. reviewer_name is only set when anonymous is false - it exists on
+// the row at all (rather than only ever being read via a profiles join) so an
+// opt-in identity reaches other patients; for an anonymous review it is null
+// (migration 66), so there's no name for another patient's query to read.
 export type ReviewStatus = 'visible' | 'hidden';
 
 export interface Review {

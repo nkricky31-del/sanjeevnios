@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
 import type { BillingStatus, Plan } from '../lib/types';
+import AdminPlans from './AdminPlans';
 import Button from './ui/Button';
 import Card from './ui/Card';
 import SectionTitle from './ui/SectionTitle';
@@ -157,6 +158,8 @@ export default function AdminBilling() {
           commissions
         </p>
       </Card>
+
+      <AdminPlans onSaved={load} />
 
       <SectionTitle className="mt-6">Clinics</SectionTitle>
       {actionError && <p className="mt-1 text-sm text-red-600">{actionError}</p>}

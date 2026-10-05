@@ -12,6 +12,10 @@ import StatusPill from './ui/StatusPill';
 interface Row extends Review {
   doctors: { name: string } | null;
   clinics: { name: string } | null;
+  // The reviewer's own profile - an anonymous review no longer carries
+  // reviewer_name on the row (migration 66), so this is how an admin still
+  // sees who wrote it. profiles_select only lets an admin read it.
+  reviewer: { name: string | null } | null;
 }
 
 const FETCH_LIMIT = 100;
@@ -35,7 +39,7 @@ export default function AdminReviews() {
 
   const load = async () => {
     setLoading(true);
-    const select = '*, doctors(name), clinics(name)';
+    const select = '*, doctors(name), clinics(name), reviewer:profiles!reviews_account_id_fkey(name)';
     const [{ data: visibleData }, { data: hiddenData }] = await Promise.all([
       supabase.from('reviews').select(select).eq('status', 'visible').order('created_at', { ascending: false }).limit(FETCH_LIMIT),
       supabase.from('reviews').select(select).eq('status', 'hidden').order('hidden_at', { ascending: false }).limit(FETCH_LIMIT),
@@ -110,7 +114,7 @@ export default function AdminReviews() {
       {r.comment && <p className="mt-2 text-sm text-slate-700">{r.comment}</p>}
 
       <p className="mt-1.5 text-xs text-slate-400">
-        {r.reviewer_name ?? 'Unnamed patient'}
+        {r.reviewer?.name ?? r.reviewer_name ?? 'Unnamed patient'}
         {r.anonymous && ' (posted anonymously - not shown to other patients)'}
       </p>
 
