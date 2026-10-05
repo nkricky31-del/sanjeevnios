@@ -2,6 +2,7 @@ import { CalendarRange, Users } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { todayISO } from '../lib/date';
+import { type PatientContact, withPatientContacts } from '../lib/patientContact';
 import { supabase } from '../lib/supabaseClient';
 import type { Clinic, ClinicMode } from '../lib/types';
 import Button from './ui/Button';
@@ -20,7 +21,9 @@ interface WaitlistRow {
   date: string;
   status: string;
   created_at: string;
-  family_members: { name: string; phone: string | null; mrn: string } | null;
+  member_id: string;
+  // Minimal patient contact (migration 68's patient_contact view).
+  family_members: PatientContact | null;
 }
 
 // How this clinic takes patients, plus the waitlist that the appointment-only
@@ -50,13 +53,13 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
   const loadWaitlist = useCallback(async () => {
     const { data } = await supabase
       .from('waitlist')
-      .select('id, date, status, created_at, family_members(name, phone, mrn)')
+      .select('id, date, status, created_at, member_id')
       .eq('clinic_id', clinic.id)
       .gte('date', todayISO())
       .in('status', ['waiting', 'offered'])
       .order('date', { ascending: true })
       .order('created_at', { ascending: true });
-    setWaitlist((data ?? []) as unknown as WaitlistRow[]);
+    setWaitlist(await withPatientContacts((data ?? []) as unknown as Omit<WaitlistRow, 'family_members'>[]));
   }, [clinic.id]);
 
   useEffect(() => {

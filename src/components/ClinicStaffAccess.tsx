@@ -13,11 +13,27 @@ interface Props {
   onClinicSaved: (patch: Partial<Clinic>) => void;
 }
 
+type StaffRole = 'receptionist' | 'doctor';
+
 interface StaffPhoneRow {
   id: string;
   phone: string;
   label: string | null;
+  role: StaffRole;
+  doctor_id: string | null;
 }
+
+interface DoctorOption {
+  id: string;
+  name: string;
+}
+
+// What each staff role can see of patients (migration 68) - shown next to
+// the role picker so the owner knows what they're granting.
+const ROLE_HELP: Record<StaffRole, string> = {
+  receptionist: 'Queue, check-in and contact details only - no clinical history, prescriptions or reports.',
+  doctor: "Full clinical record, but only for patients who have an appointment with the doctor chosen here.",
+};
 
 // A phone number stored the normalized way everywhere else in this app
 // (family_members.phone, profiles.phone - see src/lib/phone.ts) is just
@@ -38,6 +54,9 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
   const [loading, setLoading] = useState(true);
   const [newDigits, setNewDigits] = useState('');
   const [newLabel, setNewLabel] = useState('');
+  const [newRole, setNewRole] = useState<StaffRole>('receptionist');
+  const [newDoctorId, setNewDoctorId] = useState('');
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [addError, setAddError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [email, setEmail] = useState(clinic.contact_email ?? '');
@@ -47,12 +66,16 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
 
   const loadStaff = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('clinic_staff_phones')
-      .select('id, phone, label')
-      .eq('clinic_id', clinic.id)
-      .order('created_at', { ascending: true });
+    const [{ data }, { data: doctorData }] = await Promise.all([
+      supabase
+        .from('clinic_staff_phones')
+        .select('id, phone, label, role, doctor_id')
+        .eq('clinic_id', clinic.id)
+        .order('created_at', { ascending: true }),
+      supabase.from('doctors').select('id, name').eq('clinic_id', clinic.id).order('name', { ascending: true }),
+    ]);
     setStaff((data ?? []) as StaffPhoneRow[]);
+    setDoctors((doctorData ?? []) as DoctorOption[]);
     setLoading(false);
   }, [clinic.id]);
 
@@ -80,10 +103,16 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
       setAddError('Enter a 10-digit phone number.');
       return;
     }
+    if (newRole === 'doctor' && !newDoctorId) {
+      setAddError('Choose which doctor this phone belongs to.');
+      return;
+    }
     setAdding(true);
     const { error } = await supabase.rpc('add_clinic_staff_phone', {
       p_phone: newDigits,
       p_label: newLabel.trim() || null,
+      p_role: newRole,
+      p_doctor_id: newRole === 'doctor' ? newDoctorId : null,
     });
     setAdding(false);
     if (error) {
@@ -92,6 +121,8 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
     }
     setNewDigits('');
     setNewLabel('');
+    setNewRole('receptionist');
+    setNewDoctorId('');
     loadStaff();
   };
 
@@ -172,7 +203,12 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
           <div key={s.id} className="flex items-center justify-between gap-3 border-b border-slate-50 px-4 py-3 last:border-b-0">
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-slate-900">{formatPhone(s.phone)}</p>
-              {s.label && <p className="truncate text-xs text-slate-400">{s.label}</p>}
+              <p className="truncate text-xs text-slate-400">
+                {s.role === 'doctor'
+                  ? `Doctor · ${doctors.find((d) => d.id === s.doctor_id)?.name ?? 'unlinked'}`
+                  : 'Receptionist'}
+                {s.label ? ` · ${s.label}` : ''}
+              </p>
             </div>
             <button
               type="button"
@@ -207,9 +243,42 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
           className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500 sm:w-52"
         />
         <Button type="submit" disabled={adding}>
-          {adding ? 'Adding...' : 'Add'}
+          {adding ? 'Adding...' : 'Add staff'}
         </Button>
       </form>
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        <label className="flex-1 text-xs font-medium text-slate-500">
+          Role
+          <select
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value as StaffRole)}
+            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="receptionist">Receptionist</option>
+            <option value="doctor">Doctor</option>
+          </select>
+        </label>
+        {newRole === 'doctor' && (
+          <label className="flex-1 text-xs font-medium text-slate-500">
+            Which doctor
+            <select
+              value={newDoctorId}
+              onChange={(e) => setNewDoctorId(e.target.value)}
+              className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="" disabled>
+                Choose a doctor...
+              </option>
+              {doctors.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      <p className="mt-1.5 text-xs text-slate-400">{ROLE_HELP[newRole]}</p>
       {addError && <p className="mt-2 text-sm text-red-600">{addError}</p>}
 
       <SectionTitle className="mt-5">Contact email</SectionTitle>

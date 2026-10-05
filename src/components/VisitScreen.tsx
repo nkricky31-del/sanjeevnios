@@ -47,6 +47,10 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
   const [visit, setVisit] = useState<VisitRow | null>(null);
   const [attachedRx, setAttachedRx] = useState<AttachedRxRow | null>(null);
   const [loading, setLoading] = useState(true);
+  // Set when the server refuses to open this patient's clinical record for
+  // the current login (e.g. a receptionist, or a doctor this patient isn't
+  // seeing) - nothing clinical is loaded in that case.
+  const [accessError, setAccessError] = useState<string | null>(null);
 
   const [diagnosis, setDiagnosis] = useState('');
   const [notes, setNotes] = useState('');
@@ -66,6 +70,16 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
 
   const load = async () => {
     setLoading(true);
+    // Opening the record is its own audited step (migration 68): the server
+    // checks patient.health.read for this login and patient, logs it, and
+    // only then lets the reads below return anything.
+    const { error: openError } = await supabase.rpc('open_patient_health_record', { p_appointment_id: appointmentId });
+    if (openError) {
+      setAccessError(openError.message);
+      setLoading(false);
+      return;
+    }
+    setAccessError(null);
     // Defensive against duplicate visit rows from earlier testing (before
     // this screen enforced one visit per appointment): always take the most
     // recent one rather than .single()/.maybeSingle() erroring on >1 row.
@@ -202,7 +216,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
         <button onClick={onClose} className="inline-flex items-center gap-1 text-sm font-medium text-slate-500">
           <ArrowLeft size={16} /> Back to queue
         </button>
-        {!loading && (
+        {!loading && !accessError && (
           <StatusPill
             label={attachedRx ? 'Rx attached' : noPrescription ? 'No prescription' : 'Rx pending'}
             tone={attachedRx || noPrescription ? 'live' : 'warning'}
@@ -216,6 +230,10 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
 
         {loading ? (
           <p className="mt-4 text-sm text-slate-400">Loading...</p>
+        ) : accessError ? (
+          <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+            {accessError} Ask the clinic owner if you need access to this patient's clinical record.
+          </p>
         ) : (
           <>
             {/* Timed automatically off the status change (Start consultation

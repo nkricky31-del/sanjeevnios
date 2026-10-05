@@ -27,7 +27,8 @@ import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
 import { setActingMode } from '../lib/actingMode';
 import { useAuth } from '../lib/AuthContext';
-import { ageFromDob, todayISO } from '../lib/date';
+import { todayISO } from '../lib/date';
+import { type PatientContact, patientContextLine, withPatientContacts } from '../lib/patientContact';
 import { appointmentConfirmedMessage, notifyPatient } from '../lib/notify';
 import { bookingReference } from '../lib/queue';
 import { captureRazorpayPayment } from '../lib/razorpay';
@@ -66,38 +67,22 @@ interface QueueAppointment {
   slot_time: string;
   payment_status: AppointmentPaymentStatus;
   reminder_count: number;
-  family_members: {
-    name: string;
-    relation: string | null;
-    account_id: string;
-    phone: string | null;
-    gender: string | null;
-    dob: string | null;
-  } | null;
+  member_id: string;
+  // Attached by withPatientContacts() from patient_contact (migration 68) -
+  // the front desk's minimal view of a patient: account_id addresses a
+  // notification at the booking patient, phone/gender/age are the quick
+  // context line, and nothing clinical is ever fetched here.
+  family_members: PatientContact | null;
 }
 
-// account_id is needed to address a notification at the booking patient
-// (not the clinic itself) - selecting it here relies on the same
-// family_select RLS branch that already lets a clinic see a member's basic
-// info once that member has booked at their clinic. phone/gender/dob are
-// mostly populated for walk-ins (see WalkInForm.tsx) - shown as a quick
-// context line so the desk isn't just working off a bare name.
 const APPOINTMENT_COLUMNS =
-  'id, status, token_number, arrival_seq, checked_in_at, check_in_method, patient_type, date, slot_time, payment_status, reminder_count, family_members(name, relation, account_id, phone, gender, dob)';
+  'id, status, token_number, arrival_seq, checked_in_at, check_in_method, patient_type, date, slot_time, payment_status, reminder_count, member_id';
 
 // Everyone who has physically arrived and isn't finished - i.e. everyone
 // holding a live token right now.
 const LIVE_STATUSES: AppointmentStatus[] = ['checked_in', 'called', 'in_consultation'];
 const FINISHED_STATUSES: AppointmentStatus[] = ['completed', 'no_show'];
 
-function patientContextLine(m: QueueAppointment['family_members']): string | null {
-  if (!m) return null;
-  const parts: string[] = [];
-  if (m.dob) parts.push(`${ageFromDob(m.dob)}y`);
-  if (m.gender) parts.push(m.gender);
-  if (m.phone) parts.push(`+${m.phone}`);
-  return parts.length > 0 ? parts.join(' · ') : null;
-}
 
 const REMINDER_LIMIT = 5;
 
@@ -235,8 +220,13 @@ export default function ClinicQueue() {
 
     const [{ data: pendingData }, { data: dayData }] = await Promise.all([pendingQuery, dayQuery]);
 
-    setPending((pendingData ?? []) as unknown as QueueAppointment[]);
-    setDayRows((dayData ?? []) as unknown as QueueAppointment[]);
+    type Row = Omit<QueueAppointment, 'family_members'>;
+    const [pendingRows, dayRowsWithPatients] = await Promise.all([
+      withPatientContacts((pendingData ?? []) as unknown as Row[]),
+      withPatientContacts((dayData ?? []) as unknown as Row[]),
+    ]);
+    setPending(pendingRows);
+    setDayRows(dayRowsWithPatients);
   };
 
   useEffect(() => {

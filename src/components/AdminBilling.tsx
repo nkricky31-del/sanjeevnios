@@ -23,6 +23,8 @@ interface ClinicRow {
   id: string;
   name: string;
   is_active: boolean;
+  // patient.export (migration 68) - off until an admin allows it here.
+  patient_export_enabled: boolean;
   subscriptions: ClinicSubscription | ClinicSubscription[] | null;
 }
 
@@ -73,7 +75,7 @@ export default function AdminBilling() {
       await Promise.all([
         supabase
           .from('clinics')
-          .select('id, name, is_active, subscriptions(plan_id, billing_status, current_period_end, plans(name, max_doctors))')
+          .select('id, name, is_active, patient_export_enabled, subscriptions(plan_id, billing_status, current_period_end, plans(name, max_doctors))')
           .order('name', { ascending: true }),
         supabase
           .from('invoices')
@@ -131,6 +133,19 @@ export default function AdminBilling() {
     supabase.functions.invoke('sync-razorpay-subscription-plan', { body: { clinicId } }).catch((err) => {
       console.error('sync-razorpay-subscription-plan failed:', err);
     });
+  };
+
+  const toggleExport = async (clinic: ClinicRow) => {
+    setActionError(null);
+    const { error } = await supabase
+      .from('clinics')
+      .update({ patient_export_enabled: !clinic.patient_export_enabled })
+      .eq('id', clinic.id);
+    if (error) {
+      setActionError(error.message);
+      return;
+    }
+    load();
   };
 
   const subscriptionRevenue = invoices.filter((i) => i.status === 'paid').reduce((sum, i) => sum + i.amount, 0);
@@ -210,6 +225,14 @@ export default function AdminBilling() {
                   disabled={assigning === c.id || !selectedPlan[c.id] || selectedPlan[c.id] === sub?.plan_id}
                 >
                   {assigning === c.id ? 'Saving...' : 'Assign'}
+                </Button>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                <p className="text-xs text-slate-500">
+                  Patient data export: {c.patient_export_enabled ? 'allowed for the owner (every export is audited)' : 'blocked'}
+                </p>
+                <Button variant="ghost" onClick={() => toggleExport(c)} className="!px-3 !py-1.5 text-xs">
+                  {c.patient_export_enabled ? 'Block export' : 'Allow export'}
                 </Button>
               </div>
             </Card>

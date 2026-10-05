@@ -1962,3 +1962,56 @@ curl -s -X POST "$URL/functions/v1/release-clinic-payout" -H "apikey: $ANON" -H 
 2. As a clinic, `POST /rest/v1/documents` with `"status":"verified"` → **403**. Only an admin can verify.
 3. As a suspended patient, `PATCH /rest/v1/profiles?id=eq.<own id>` with `{"suspended":false}` → **403**. As a clinic deactivated for non-payment, `PATCH /rest/v1/clinics?id=eq.<own id>` with `{"is_active":true}` → **403**.
 4. `send-patient-message` with someone else's `userId` in the body still only messages the appointment's own patient.
+
+## Test 35 — Each role gets only the patient data it needs
+
+`migration_68_patient_data_minimization.sql`. Inside a clinic: the **owner** keeps full clinical access to their own clinic's patients; a **Doctor** staff login sees the full clinical record only for patients with an appointment/encounter with the doctor it's linked to; a **Receptionist** login gets queue, check-in and contact details only. Clinical reads go through an audited "open" (`open_patient_health_record()`), downloads through `authorize_patient_file_download()`, bulk export through `export_clinic_patients()` (needs an admin to allow it per clinic).
+
+### Setup
+
+1. Run `migration_68_patient_data_minimization.sql` (after 67) and deploy the site.
+2. You need four Test OTP phones: the clinic **owner**, a **receptionist**, **Dr One**, **Dr Two** - and the clinic needs two doctor profiles (Dr One, Dr Two).
+3. As the owner, open **Login & Staff** → add the receptionist's phone with role **Receptionist**, Dr One's phone with role **Doctor → Dr One**, Dr Two's phone with role **Doctor → Dr Two**. Each row shows its role.
+4. As a patient, book with **Dr One**; as the owner, accept, check in and complete that visit with notes, a diagnosis, a prescription and an uploaded lab report.
+5. Each staff member signs in with the Clinic ID + their own phone. Grab each one's `access_token` the same way as Test 34 (`TOKEN_RECEP`, `TOKEN_DR1`, `TOKEN_DR2`), plus `APPT=<that appointment id>` and `FILE=<the lab report's files.id>`.
+
+### A. The receptionist endpoint carries no clinical fields at all
+
+```bash
+curl -s "$URL/rest/v1/patient_contact?select=*&limit=1" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_RECEP"
+```
+→ objects with exactly `id, name, relation, account_id, phone, gender, age, mrn` - no `dob`, `govt_id`, `address`, `blood_group`, `has_known_conditions`. The queue:
+```bash
+curl -s -X POST "$URL/rest/v1/rpc/get_clinic_queue" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_RECEP" \
+  -H 'Content-Type: application/json' -d '{"p_doctor_id":"<Dr One id>","p_date":"<YYYY-MM-DD>"}'
+```
+→ `patient_name, phone, gender, age` + token/queue fields; nothing clinical. And the clinical tables directly:
+```bash
+for t in visits prescriptions files patient_conditions encounters family_members; do
+  printf "%-20s" $t; curl -s "$URL/rest/v1/$t?select=*&limit=5" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_RECEP"; echo; done
+```
+→ `[]` for every one. In the app, the receptionist's queue and check-in screens still show names, ages and phones; pressing **Open visit** shows *"Your role can't open this patient's clinical record."*
+
+### B. The assigned doctor's clinical record loads
+
+1. As **Dr One**, open the visit from the queue - notes, diagnosis, prescription and the lab report all load. `select actor, action, target from audit_log where action = 'patient.health.read' order by at desc limit 1;` → Dr One's user id, `patient.health.read`, the patient + appointment.
+2. Before opening it, the same data over the API is empty (no silent reads): `curl -s "$URL/rest/v1/visits?appointment_id=eq.$APPT&select=notes" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_DR1"` → `[]`; after the open (or after step 1) → the notes.
+3. As **Dr Two** (no appointment with this patient):
+   ```bash
+   curl -s -X POST "$URL/rest/v1/rpc/open_patient_health_record" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_DR2" \
+     -H 'Content-Type: application/json' -d "{\"p_appointment_id\":\"$APPT\"}" -w '\nHTTP %{http_code}\n'
+   ```
+   → **HTTP 403** *"Your role can't open this patient's clinical record."*
+
+### C. A download is refused without patient.health.download
+
+```bash
+curl -s -X POST "$URL/rest/v1/rpc/authorize_patient_file_download" -H "apikey: $ANON" -H "Authorization: Bearer $TOKEN_RECEP" \
+  -H 'Content-Type: application/json' -d "{\"p_file_id\":\"$FILE\"}" -w '\nHTTP %{http_code}\n'
+```
+→ **HTTP 403** *"Your role can't download patient reports."* (Same for `$TOKEN_DR2`.) With `$TOKEN_DR1` → `200` and the file's storage path, plus a `patient.health.download` row in `audit_log`; the **View** button on the lab report opens it. Requesting the storage file directly without that step (`$URL/storage/v1/object/sign/appointment-files/<path>` as the receptionist) → refused.
+
+### D. Bulk export needs patient.export
+
+1. As the owner: `POST $URL/rest/v1/rpc/export_clinic_patients` with `{"p_clinic_id":"<clinic id>"}` → **403**.
+2. As admin, **Billing** → that clinic → **Allow export**. Repeat as the owner → `200`: one row per patient with `mrn, name, phone, gender, age, last_visit, visits` - and a `patient.export` row in `audit_log`. As the receptionist or a doctor → still **403**.

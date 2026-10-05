@@ -147,7 +147,7 @@ export default function Records() {
                   : 'Document',
           meta: `${a.doctors?.name ?? 'Doctor'}${a.clinics?.name ? ` · ${a.clinics.name}` : ''}`,
           date: f.created_at,
-          onOpen: () => openAppointmentFile(f.storage_path),
+          onOpen: () => openAppointmentFile(f.id),
         });
       }
     }

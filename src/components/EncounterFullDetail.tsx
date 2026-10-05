@@ -104,7 +104,7 @@ export default function EncounterFullDetail({ encounter, onLoaded }: Props) {
                 {appointment.files.map((f) => (
                   <button
                     key={f.id}
-                    onClick={() => openAppointmentFile(f.storage_path)}
+                    onClick={() => openAppointmentFile(f.id)}
                     className="rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700"
                   >
                     {f.type ? FILE_LABEL[f.type] : 'File'}

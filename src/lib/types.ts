@@ -696,7 +696,8 @@ export interface CheckInLookup {
   patientName: string;
   photoPath: string | null;
   mrn: string;
-  dob: string | null;
+  // Age only - the desk never receives the date of birth (migration 68).
+  age: number | null;
   gender: Gender | null;
   status: AppointmentStatus;
   alreadyCheckedIn: boolean;

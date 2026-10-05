@@ -5,13 +5,17 @@ export const VERIFICATION_DOCS_BUCKET = 'verification-docs';
 export const PATIENT_PHOTOS_BUCKET = 'patient-photos';
 export const ID_DOCUMENTS_BUCKET = 'id-documents';
 
-// The bucket is private, so there's no plain URL to link to - this asks
-// Storage for a short-lived signed link and opens it immediately.
-export async function openAppointmentFile(path: string): Promise<string | null> {
-  const { data, error } = await supabase.storage.from(APPOINTMENT_FILES_BUCKET).createSignedUrl(path, 60);
-  if (error || !data) return null;
+// The bucket is private, so there's no plain URL to link to. A download is
+// its own permission (patient.health.download, migration 68): the server
+// checks it for this login and file, writes the audit entry, and only then
+// lets Storage sign a short-lived link - which it opens immediately.
+export async function openAppointmentFile(fileId: string): Promise<{ url: string } | { error: string }> {
+  const { data: path, error: authError } = await supabase.rpc('authorize_patient_file_download', { p_file_id: fileId });
+  if (authError || !path) return { error: authError?.message ?? 'Could not open file.' };
+  const { data, error } = await supabase.storage.from(APPOINTMENT_FILES_BUCKET).createSignedUrl(path as string, 60);
+  if (error || !data) return { error: 'Could not open file.' };
   window.open(data.signedUrl, '_blank', 'noopener');
-  return data.signedUrl;
+  return { url: data.signedUrl };
 }
 
 // Same idea, for a clinic/doctor's uploaded registration document - used by

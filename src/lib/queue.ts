@@ -1,4 +1,5 @@
 import { addDaysISO } from './date';
+import { withPatientContacts } from './patientContact';
 import { supabase } from './supabaseClient';
 import { computeSlots, formatTimeLabel, timeToMinutes } from './time';
 import type { AppointmentStatus, DoctorAvailability, QueueStatusRow } from './types';
@@ -151,6 +152,7 @@ interface AffectedAppointment {
   id: string;
   status: AppointmentStatus;
   slot_time: string;
+  member_id: string;
   family_members: { account_id: string } | null;
 }
 
@@ -173,13 +175,17 @@ export async function cancelAndRescheduleFullDay(
 ): Promise<FullDayCancelResult> {
   const { data: affectedData } = await supabase
     .from('appointments')
-    .select('id, status, slot_time, family_members(account_id)')
+    .select('id, status, slot_time, member_id')
     .eq('doctor_id', doctorId)
     .eq('date', fromDateISO)
     .in('status', ['booked', 'accepted'])
     .order('slot_time', { ascending: true });
 
-  const affected = (affectedData ?? []) as unknown as AffectedAppointment[];
+  // The patient to notify comes from patient_contact (migration 68) - clinic
+  // staff can't read family_members directly.
+  const affected: AffectedAppointment[] = await withPatientContacts(
+    (affectedData ?? []) as unknown as Omit<AffectedAppointment, 'family_members'>[]
+  );
   if (affected.length === 0) return { rescheduledCount: 0, unplacedCount: 0 };
 
   const targets = await findRescheduleTargets(doctorId, fromDateISO, affected.length);

@@ -2,7 +2,8 @@ import { Banknote, CheckCircle2, CreditCard, IdCard, QrCode as QrCodeIcon, Searc
 import { useCallback, useEffect, useState } from 'react';
 
 import { autoMarkNoShows, checkInAppointment, looksLikeBookingQr, lookupCheckIn } from '../lib/checkIn';
-import { ageFromDob, todayISO } from '../lib/date';
+import { todayISO } from '../lib/date';
+import { type PatientContact, withPatientContacts } from '../lib/patientContact';
 import { bookingReference } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
@@ -29,13 +30,10 @@ interface ExpectedRow {
   status: string;
   no_show_auto: boolean;
   payment_status: AppointmentPaymentStatus;
-  family_members: {
-    name: string;
-    phone: string | null;
-    mrn: string;
-    gender: string | null;
-    dob: string | null;
-  } | null;
+  member_id: string;
+  // The front desk's minimal view of the patient (migration 68's
+  // patient_contact) - attached by withPatientContacts().
+  family_members: PatientContact | null;
 }
 
 // Payment is shown next to the patient purely so the desk knows whether to
@@ -93,13 +91,13 @@ export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }:
     const { data } = await supabase
       .from('appointments')
       .select(
-        'id, slot_time, status, no_show_auto, payment_status, family_members(name, phone, mrn, gender, dob)'
+        'id, slot_time, status, no_show_auto, payment_status, member_id'
       )
       .eq('doctor_id', doctorId)
       .eq('date', date)
       .in('status', ['accepted', 'no_show'])
       .order('slot_time', { ascending: true });
-    const rows = (data ?? []) as unknown as ExpectedRow[];
+    const rows = await withPatientContacts((data ?? []) as unknown as Omit<ExpectedRow, 'family_members'>[]);
     setExpected(rows.filter((r) => r.status === 'accepted'));
     setNoShows(rows.filter((r) => r.status === 'no_show'));
     setLoading(false);
@@ -306,7 +304,7 @@ export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }:
               <p className="truncate font-bold text-slate-900">{preview.patientName}</p>
               <p className="truncate text-xs text-slate-400">
                 {preview.mrn}
-                {preview.dob ? ` · ${ageFromDob(preview.dob)}y` : ''}
+                {preview.age != null ? ` · ${preview.age}y` : ''}
                 {preview.gender ? ` · ${preview.gender}` : ''}
               </p>
               <p className="text-sm font-medium text-brand-600">
@@ -457,7 +455,7 @@ export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }:
                 <p className="truncate font-bold text-slate-900">{r.family_members?.name ?? 'Patient'}</p>
                 <p className="truncate text-xs text-slate-400">
                   {r.family_members?.mrn}
-                  {r.family_members?.dob ? ` · ${ageFromDob(r.family_members.dob)}y` : ''}
+                  {r.family_members?.age != null ? ` · ${r.family_members.age}y` : ''}
                   {r.family_members?.phone ? ` · +${r.family_members.phone}` : ''}
                 </p>
                 <p className="text-sm font-medium text-brand-600">

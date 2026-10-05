@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { skipToBack } from '../lib/checkIn';
 import { getDoctorConsultationStats } from '../lib/consultation';
-import { ageFromDob } from '../lib/date';
+import { patientContextLine } from '../lib/patientContact';
 import { bookingReference } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
@@ -42,7 +42,8 @@ interface QueueRow {
   account_id: string | null;
   phone: string | null;
   gender: string | null;
-  dob: string | null;
+  // Age only - get_clinic_queue() never sends the date of birth (migration 68).
+  age: number | null;
 }
 
 const STATUS_TONE: Record<string, 'live' | 'warning' | 'info' | 'neutral'> = {
@@ -58,11 +59,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 function contextLine(r: QueueRow): string | null {
-  const parts: string[] = [];
-  if (r.dob) parts.push(`${ageFromDob(r.dob)}y`);
-  if (r.gender) parts.push(r.gender);
-  if (r.phone) parts.push(`+${r.phone}`);
-  return parts.length > 0 ? parts.join(' · ') : null;
+  return patientContextLine(r);
 }
 
 // The live queue for one doctor on one day.
@@ -224,15 +221,11 @@ export default function WaitingList({
   // doctor explicitly said none is needed (visits.no_prescription).
   const complete = async (appointmentId: string) => {
     setError(null);
-    const { data: visitRows } = await supabase
-      .from('visits')
-      .select('no_prescription, prescriptions(status)')
-      .eq('appointment_id', appointmentId)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    const visit = (visitRows ?? [])[0] as { no_prescription: boolean; prescriptions: { status: string }[] } | undefined;
-    const rxComplete = !!visit && (visit.no_prescription || visit.prescriptions.some((p) => p.status === 'attached'));
-    if (!rxComplete) {
+    // Two booleans from the server, not the visit itself - so the front desk
+    // can complete a visit without ever receiving its clinical content.
+    const { data: rxRows } = await supabase.rpc('visit_rx_status', { p_appointment_id: appointmentId });
+    const rx = ((rxRows ?? []) as { has_visit: boolean; rx_complete: boolean }[])[0];
+    if (!rx?.has_visit || !rx.rx_complete) {
       setError(
         'This visit needs a prescription attached (or "No prescription needed" ticked) before it can be completed - open the visit to add one.'
       );

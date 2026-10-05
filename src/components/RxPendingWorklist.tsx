@@ -10,17 +10,16 @@ interface Props {
   onOpen: (appointmentId: string, patientName: string) => void;
 }
 
-interface RawVisitRow {
-  id: string;
+// One row of clinic_rx_worklist() (migration 68): only what this list shows -
+// never the visit's notes or diagnosis.
+interface WorklistRow {
+  visit_id: string;
   appointment_id: string;
-  no_prescription: boolean;
-  appointments: {
-    date: string;
-    slot_time: string;
-    token_number: number | null;
-    family_members: { name: string } | null;
-  } | null;
-  prescriptions: { status: string }[];
+  patient_name: string | null;
+  token_number: number | null;
+  date: string;
+  slot_time: string;
+  doctor_id: string;
 }
 
 interface IncompleteVisit {
@@ -38,23 +37,20 @@ export default function RxPendingWorklist({ doctorId, onOpen }: Props) {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('visits')
-      .select(
-        'id, appointment_id, no_prescription, appointments!inner(date, slot_time, token_number, doctor_id, family_members(name)), prescriptions(status)'
-      )
-      .eq('appointments.doctor_id', doctorId);
+    // The server already returns only visits still missing a prescription,
+    // for the caller's own clinic.
+    const { data } = await supabase.rpc('clinic_rx_worklist', { p_since: '2000-01-01' });
 
-    const raw = (data ?? []) as unknown as RawVisitRow[];
+    const raw = (data ?? []) as WorklistRow[];
     const incomplete = raw
-      .filter((v) => !v.no_prescription && !v.prescriptions.some((p) => p.status === 'attached') && v.appointments)
+      .filter((v) => v.doctor_id === doctorId)
       .map((v) => ({
-        visitId: v.id,
+        visitId: v.visit_id,
         appointmentId: v.appointment_id,
-        patientName: v.appointments?.family_members?.name ?? 'Unknown',
-        date: v.appointments!.date,
-        slotTime: v.appointments!.slot_time,
-        tokenNo: v.appointments!.token_number,
+        patientName: v.patient_name ?? 'Unknown',
+        date: v.date,
+        slotTime: v.slot_time,
+        tokenNo: v.token_number,
       }))
       .sort((a, b) => (a.date === b.date ? a.slotTime.localeCompare(b.slotTime) : b.date.localeCompare(a.date)));
 

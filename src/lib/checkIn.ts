@@ -113,7 +113,7 @@ interface LookupCheckInRow {
   patient_name: string;
   photo_path: string | null;
   mrn: string;
-  dob: string | null;
+  age: number | null;
   gender: CheckInLookup['gender'];
   status: CheckInLookup['status'];
   already_checked_in: boolean;
@@ -144,7 +144,7 @@ export async function lookupCheckIn(
     patientName: row.patient_name,
     photoPath: row.photo_path,
     mrn: row.mrn,
-    dob: row.dob,
+    age: row.age,
     gender: row.gender,
     status: row.status,
     alreadyCheckedIn: row.already_checked_in,

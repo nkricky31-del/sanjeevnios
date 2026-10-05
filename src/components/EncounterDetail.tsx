@@ -36,13 +36,20 @@ export default function EncounterDetail({ encounterId }: Props) {
   } | null>(null);
 
   useEffect(() => {
+    // Clinic staff only see a patient's clinical data after an audited open
+    // (migration 68); for a patient or admin this is a no-op. Either way the
+    // encounters read below is what decides what's actually shown.
     supabase
-      .from('encounters')
-      .select(
-        'id, encounter_no, mrn, visit_datetime, department, visit_type, reason, status, doctors(name, specialty), clinics(name), family_members(name)'
+      .rpc('open_encounter_health_record', { p_encounter_id: encounterId })
+      .then(() =>
+        supabase
+          .from('encounters')
+          .select(
+            'id, encounter_no, mrn, visit_datetime, department, visit_type, reason, status, doctors(name, specialty), clinics(name), family_members(name)'
+          )
+          .eq('id', encounterId)
+          .limit(1)
       )
-      .eq('id', encounterId)
-      .limit(1)
       .then(({ data }) => {
         setEncounter(((data ?? [])[0] as unknown as FullEncounter | undefined) ?? null);
       });
