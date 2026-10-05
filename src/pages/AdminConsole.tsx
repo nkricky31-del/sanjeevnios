@@ -11,6 +11,7 @@ import AdminDocumentReview from '../components/AdminDocumentReview';
 import AdminFraud from '../components/AdminFraud';
 import AdminNameChanges from '../components/AdminNameChanges';
 import AdminPayments from '../components/AdminPayments';
+import AdminPayoutAccounts from '../components/AdminPayoutAccounts';
 import AdminRejectForm from '../components/AdminRejectForm';
 import AdminReviews from '../components/AdminReviews';
 import AdminSettlements from '../components/AdminSettlements';
@@ -91,6 +92,7 @@ export default function AdminConsole() {
     | 'subscriptions'
     | 'payments'
     | 'settlements'
+    | 'payoutAccounts'
     | 'coupons'
     | 'billing'
     | 'fraud'
@@ -307,6 +309,7 @@ export default function AdminConsole() {
     { value: 'subscriptions', label: 'Subscriptions' },
     { value: 'payments', label: 'Payments' },
     { value: 'settlements', label: 'Settlements' },
+    { value: 'payoutAccounts', label: 'Payout accounts' },
     { value: 'coupons', label: 'Coupons' },
     { value: 'billing', label: 'Billing' },
     { value: 'fraud', label: 'Fraud' },
@@ -350,6 +353,12 @@ export default function AdminConsole() {
         {view === 'settlements' && (
           <div className="mt-4">
             <AdminSettlements />
+          </div>
+        )}
+
+        {view === 'payoutAccounts' && (
+          <div className="mt-4">
+            <AdminPayoutAccounts />
           </div>
         )}
 

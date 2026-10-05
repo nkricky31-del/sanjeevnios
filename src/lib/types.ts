@@ -311,6 +311,18 @@ export interface Payment {
 // settle for it).
 export type SettlementStatus = 'collected' | 'eligible' | 'on_hold' | 'refunded' | 'released' | 'settled';
 
+// migration_64_razorpay_route_linked_accounts.sql - a clinic's Razorpay
+// Route linked-account PRODUCT activation status (not the account's own
+// top-level status), which is what actually gates whether
+// release-clinic-payout's transfer can succeed.
+export type ClinicPayoutAccountStatus =
+  | 'not_started'
+  | 'requested'
+  | 'under_review'
+  | 'needs_clarification'
+  | 'activated'
+  | 'suspended';
+
 export interface Settlement {
   id: string;
   clinic_id: string;

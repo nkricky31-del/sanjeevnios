@@ -74,12 +74,19 @@ interface RazorpayTransferEntity {
   id: string;
   status: string; // 'processed' once it has actually reached the linked account
 }
+interface RazorpayMerchantProductEntity {
+  id: string;
+  merchant_id: string; // the linked account id - clinics.razorpay_fund_account_id
+  activation_status: string;
+  requirements?: { field_reference?: string; reason_code?: string }[];
+}
 interface WebhookPayload {
   event: string;
   payload: {
     subscription?: { entity: RazorpaySubscriptionEntity };
     payment?: { entity: RazorpayPaymentEntity };
     transfer?: { entity: RazorpayTransferEntity };
+    merchant_product?: { entity: RazorpayMerchantProductEntity };
   };
 }
 
@@ -125,6 +132,40 @@ Deno.serve(async (req) => {
       .update({ status: 'settled', settled_at: new Date().toISOString() })
       .eq('razorpay_transfer_id', transfer.id)
       .eq('status', 'released');
+    return json({ received: true });
+  }
+
+  // Route linked-account activation lifecycle (migration 64) - the PRODUCT's
+  // own activation_status, not the account's top-level status, is what
+  // actually gates whether release-clinic-payout's transfer can succeed.
+  // Written directly (service-role client - see guard_clinic_payout_account's
+  // own comment on why that's trusted here) rather than through
+  // admin_set_clinic_payout_account(), since no admin session exists inside
+  // a webhook call.
+  const merchantProduct = event.payload.merchant_product?.entity;
+  if (
+    ['product.route.under_review', 'product.route.needs_clarification', 'product.route.activated'].includes(event.event) &&
+    merchantProduct
+  ) {
+    const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    const note = (merchantProduct.requirements ?? [])
+      .map((r) => r.field_reference || r.reason_code)
+      .filter(Boolean)
+      .join(', ') || null;
+    const { data: clinic } = await serviceClient
+      .from('clinics')
+      .update({ razorpay_account_status: merchantProduct.activation_status, razorpay_account_note: note })
+      .eq('razorpay_fund_account_id', merchantProduct.merchant_id)
+      .select('id, owner_id')
+      .maybeSingle();
+    if (clinic?.owner_id && merchantProduct.activation_status === 'activated') {
+      await serviceClient.from('notifications').insert({
+        user_id: clinic.owner_id,
+        type: 'payout_account_activated',
+        message: 'Your payout account is now active - future released payments will be transferred automatically.',
+        channel: 'in_app',
+      });
+    }
     return json({ received: true });
   }
 

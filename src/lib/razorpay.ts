@@ -7,7 +7,7 @@ import { supabase } from './supabaseClient';
 // below was silently discarding that until now, which is exactly why "Edge
 // Function returned a non-2xx status code" with no further detail was all
 // that ever surfaced to a user - this reads the real body instead.
-async function describeFunctionError(error: unknown): Promise<string> {
+export async function describeFunctionError(error: unknown): Promise<string> {
   const context = (error as { context?: unknown } | null)?.context;
   if (context instanceof Response) {
     try {
