@@ -9,6 +9,7 @@ import ClinicEarnings from '../components/ClinicEarnings';
 import ClinicHolidays from '../components/ClinicHolidays';
 import ClinicLocationPicker from '../components/ClinicLocationPicker';
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
+import ClinicAuditLog from '../components/ClinicAuditLog';
 import ClinicStaffAccess from '../components/ClinicStaffAccess';
 import FullDayCancelForm from '../components/FullDayCancelForm';
 import PatientLookup from '../components/PatientLookup';
@@ -671,6 +672,7 @@ export default function ClinicQueue() {
               clinic={clinic}
               onClinicSaved={(patch) => setClinic((prev) => (prev ? { ...prev, ...patch } : prev))}
             />
+            <ClinicAuditLog clinic={clinic} />
           </div>
         )}
 

@@ -21,6 +21,7 @@ interface StaffPhoneRow {
   label: string | null;
   role: StaffRole;
   doctor_id: string | null;
+  permissions: string[];
 }
 
 interface DoctorOption {
@@ -69,7 +70,7 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
     const [{ data }, { data: doctorData }] = await Promise.all([
       supabase
         .from('clinic_staff_phones')
-        .select('id, phone, label, role, doctor_id')
+        .select('id, phone, label, role, doctor_id, permissions')
         .eq('clinic_id', clinic.id)
         .order('created_at', { ascending: true }),
       supabase.from('doctors').select('id, name').eq('clinic_id', clinic.id).order('name', { ascending: true }),
@@ -123,6 +124,16 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
     setNewLabel('');
     setNewRole('receptionist');
     setNewDoctorId('');
+    loadStaff();
+  };
+
+  // audit.read is the only per-person permission. The change is recorded in
+  // the audit trail by a database trigger (old -> new), not by this screen.
+  const toggleAuditRead = async (row: StaffPhoneRow) => {
+    const next = row.permissions.includes('audit.read')
+      ? row.permissions.filter((p) => p !== 'audit.read')
+      : [...row.permissions, 'audit.read'];
+    await supabase.from('clinic_staff_phones').update({ permissions: next }).eq('id', row.id);
     loadStaff();
   };
 
@@ -210,6 +221,14 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
                 {s.label ? ` · ${s.label}` : ''}
               </p>
             </div>
+            <label className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-slate-500">
+              <input
+                type="checkbox"
+                checked={s.permissions.includes('audit.read')}
+                onChange={() => toggleAuditRead(s)}
+              />
+              Can view audit
+            </label>
             <button
               type="button"
               onClick={() => removePhone(s.id)}

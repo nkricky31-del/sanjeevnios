@@ -8,6 +8,7 @@ import { setActingMode } from '../lib/actingMode';
 import { CLINIC_SIGNUP_INTENT_KEY } from '../lib/clinicSignupIntent';
 import { safeNext } from '../lib/loginRedirect';
 import { livePhoneDigits, normalizePhone } from '../lib/phone';
+import { logAuthEvent } from '../lib/audit';
 import { supabase } from '../lib/supabaseClient';
 
 const TRUST_BADGES = [
@@ -132,6 +133,7 @@ export default function ClinicLogin() {
     }
     setLoading(true);
     const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
+    logAuthEvent('otp.verify', verifyError ? 'failure' : 'success', phone);
     setLoading(false);
     if (verifyError) {
       setError(verifyError.message);

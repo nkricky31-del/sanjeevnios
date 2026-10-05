@@ -6,6 +6,7 @@ import BrandMark from '../components/ui/BrandMark';
 import Button from '../components/ui/Button';
 import { safeNext } from '../lib/loginRedirect';
 import { livePhoneDigits } from '../lib/phone';
+import { logAuthEvent } from '../lib/audit';
 import { supabase } from '../lib/supabaseClient';
 
 // The ADMIN login screen - its own URL, its own dark/neutral look (never
@@ -55,6 +56,7 @@ export default function AdminLogin() {
     }
     setLoading(true);
     const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
+    logAuthEvent('otp.verify', verifyError ? 'failure' : 'success', phone);
     setLoading(false);
     if (verifyError) {
       setError(verifyError.message);
