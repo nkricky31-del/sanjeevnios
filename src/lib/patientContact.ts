@@ -1,7 +1,7 @@
 import { supabase } from './supabaseClient';
 
-// What the front desk is allowed to know about a patient (migration 68's
-// patient_contact view): enough to greet, call and contact them - age, never
+// What the front desk is allowed to know about a patient (migration 68, now
+// the get_patient_contacts() function from migration 76): enough to greet, call and contact them - age, never
 // the date of birth, and nothing clinical. Clinic screens read this instead
 // of family_members, which clinic staff can no longer read directly without
 // an audited health-record grant.
@@ -24,7 +24,7 @@ export async function withPatientContacts<T extends { member_id: string }>(
 ): Promise<(T & { family_members: PatientContact | null })[]> {
   const ids = [...new Set(rows.map((r) => r.member_id))];
   if (ids.length === 0) return rows.map((r) => ({ ...r, family_members: null }));
-  const { data } = await supabase.from('patient_contact').select('*').in('id', ids);
+  const { data } = await supabase.rpc('get_patient_contacts', { p_ids: ids });
   const byId = new Map(((data ?? []) as PatientContact[]).map((p) => [p.id, p]));
   return rows.map((r) => ({ ...r, family_members: byId.get(r.member_id) ?? null }));
 }
