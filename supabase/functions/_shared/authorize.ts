@@ -35,7 +35,7 @@ export interface Caller {
   clinicId: string | null;
 }
 
-export type AuthResult = { ok: true; caller: Caller } | { ok: false; status: 401; error: string };
+export type AuthResult = { ok: true; caller: Caller } | { ok: false; status: 401 | 429; error: string };
 
 export async function authenticate(req: Request): Promise<AuthResult> {
   const authHeader = req.headers.get('Authorization') ?? '';
@@ -51,6 +51,24 @@ export async function authenticate(req: Request): Promise<AuthResult> {
   const { data, error } = await client.auth.getUser(token);
   if (error || !data.user) {
     return { ok: false, status: 401, error: 'Your session has expired. Sign in again.' };
+  }
+
+  // Per-account cap across ALL edge functions (migration 74). Fails open: if the
+  // counter itself errors we let the request through rather than block payments.
+  try {
+    const admin = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: retryAfter } = await admin.rpc('edge_rate_limit', {
+      p_bucket: `user:${data.user.id}`,
+      p_limit: 60,
+      p_window: 60,
+    });
+    if (typeof retryAfter === 'number') {
+      return { ok: false, status: 429, error: `Too many requests. Try again in ${retryAfter}s.` };
+    }
+  } catch (e) {
+    console.error('edge_rate_limit failed (allowing request):', e);
   }
 
   const [{ data: isAdmin }, { data: clinicId }] = await Promise.all([

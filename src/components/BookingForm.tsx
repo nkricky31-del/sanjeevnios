@@ -1,5 +1,7 @@
 import { ShieldAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
+import TurnstileWidget from './TurnstileWidget';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../lib/AuthContext';
@@ -25,6 +27,7 @@ import { DPDP_CONSENT_TEXT } from '../lib/dpdpConsent';
 import { bookingReceivedMessage, notifyPatient } from '../lib/notify';
 import { EMERGENCY_NOTE, PATIENT_DECLARATION_TEXT, PLATFORM_DISCLAIMER_SHORT } from '../lib/platformDisclaimer';
 import { createRazorpayOrder, loadRazorpayScript, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay';
+import { CAPTCHA_ENABLED, redeemBookingCaptcha } from '../lib/captcha';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
 import type { PaymentMethod } from '../lib/types';
@@ -83,6 +86,8 @@ export default function BookingForm({
   const [reason, setReason] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('online');
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaReset, setCaptchaReset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   // The day filled up. Not an error state - a choice between waiting for a
   // seat here or taking the next day that has one.
@@ -196,6 +201,24 @@ export default function BookingForm({
     if (dpdpStatus === 'needed' && !dpdpChecked) {
       setError('Please accept the data-sharing consent above to continue.');
       return;
+    }
+
+    // Bot check: trade the solved Turnstile token for a short-lived server-side
+    // pass; the appointments insert trigger (migration 75) requires it.
+    if (CAPTCHA_ENABLED) {
+      if (!captchaToken) {
+        setError('Please complete the bot check above.');
+        return;
+      }
+      setLoading(true);
+      const pass = await redeemBookingCaptcha(captchaToken);
+      setCaptchaToken(null);
+      setCaptchaReset((n) => n + 1);
+      if (!pass.ok) {
+        setLoading(false);
+        setError(pass.error);
+        return;
+      }
     }
 
     setLoading(true);
@@ -677,6 +700,8 @@ export default function BookingForm({
         </div>
       )}
 
+      <TurnstileWidget onToken={setCaptchaToken} resetSignal={captchaReset} />
+
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
       <div className="mt-5 flex gap-2">
@@ -684,6 +709,7 @@ export default function BookingForm({
           onClick={submit}
           disabled={
             loading ||
+            (CAPTCHA_ENABLED && !captchaToken) ||
             (declarationStatus === 'needed' && !declarationChecked) ||
             (dpdpStatus === 'needed' && !dpdpChecked)
           }

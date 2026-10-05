@@ -9,6 +9,8 @@ import { safeNext } from '../lib/loginRedirect';
 import { livePhoneDigits } from '../lib/phone';
 import { logAuthEvent } from '../lib/audit';
 import { supabase } from '../lib/supabaseClient';
+import { CAPTCHA_ENABLED } from '../lib/captcha';
+import TurnstileWidget from '../components/TurnstileWidget';
 
 const TRUST_BADGES = [
   { icon: ShieldCheck, lines: ['Secure &', 'Encrypted'] },
@@ -28,6 +30,8 @@ export default function PatientLogin() {
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaReset, setCaptchaReset] = useState(0);
 
   const phone = `+91${digits}`;
 
@@ -50,7 +54,13 @@ export default function PatientLogin() {
     // listener happens to interleave with this function. See actingMode.ts.
     setActingMode('patient');
     setLoading(true);
-    const { error: sendError } = await supabase.auth.signInWithOtp({ phone });
+    const { error: sendError } = await supabase.auth.signInWithOtp({
+      phone,
+      options: { captchaToken: captchaToken ?? undefined },
+    });
+    // A Turnstile token works once - get a fresh one for any retry.
+    setCaptchaToken(null);
+    setCaptchaReset((n) => n + 1);
     setLoading(false);
     if (sendError) {
       setError(sendError.message);
@@ -141,7 +151,9 @@ export default function PatientLogin() {
 
                 {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
-                <Button type="submit" disabled={loading} full className="mt-4">
+                <TurnstileWidget onToken={setCaptchaToken} resetSignal={captchaReset} />
+
+                <Button type="submit" disabled={loading || (CAPTCHA_ENABLED && !captchaToken)} full className="mt-4">
                   {loading ? 'Sending...' : 'Continue'}
                   {!loading && <ArrowRight size={17} />}
                 </Button>

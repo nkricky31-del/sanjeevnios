@@ -1,0 +1,3 @@
+account_id   = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+zone_id      = "YOUR_ZONE_ID"
+admin_emails = ["nkricky31@gmail.com"]
