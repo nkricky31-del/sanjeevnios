@@ -14,6 +14,7 @@ import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
 import { supabase } from './lib/supabaseClient';
 import MarketingSite from './marketing/MarketingSite';
 import AdminConsole from './pages/AdminConsole';
+import AdminMfaGate from './components/AdminMfaGate';
 import AdminLogin from './pages/AdminLogin';
 import BookingPass from './pages/BookingPass';
 import BookingStatus from './pages/BookingStatus';
@@ -141,7 +142,9 @@ export default function App() {
   if (profile.role === 'admin') {
     return (
       <div className="min-h-screen bg-canvas">
-        <AdminConsole />
+        <AdminMfaGate>
+          <AdminConsole />
+        </AdminMfaGate>
       </div>
     );
   }

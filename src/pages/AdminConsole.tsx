@@ -17,7 +17,7 @@ import AdminReviews from '../components/AdminReviews';
 import AdminSettlements from '../components/AdminSettlements';
 import AdminSubscriptions from '../components/AdminSubscriptions';
 import AdminVerificationRequirements from '../components/AdminVerificationRequirements';
-import PatientLookup from '../components/PatientLookup';
+import AdminBreakGlass from '../components/AdminBreakGlass';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
@@ -388,7 +388,7 @@ export default function AdminConsole() {
 
         {view === 'patients' && (
           <div className="mt-4">
-            <PatientLookup />
+            <AdminBreakGlass />
           </div>
         )}
 
