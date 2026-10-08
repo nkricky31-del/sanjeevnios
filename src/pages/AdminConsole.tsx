@@ -1,4 +1,7 @@
-import { Building2, Stethoscope } from 'lucide-react';
+import {
+  BadgeCheck, Banknote, Building2, CreditCard, HeartPulse, Landmark, LayoutDashboard, ListChecks, Receipt, Repeat,
+  ScrollText, Search, ShieldAlert, Star, Stethoscope, Ticket, UserPen,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -18,12 +21,11 @@ import AdminSettlements from '../components/AdminSettlements';
 import AdminSubscriptions from '../components/AdminSubscriptions';
 import AdminVerificationRequirements from '../components/AdminVerificationRequirements';
 import AdminBreakGlass from '../components/AdminBreakGlass';
-import AppHeader from '../components/ui/AppHeader';
+import ConsoleLayout, { type ConsoleTab } from '../components/shell/ConsoleLayout';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import IconTile from '../components/ui/IconTile';
 import SectionTitle from '../components/ui/SectionTitle';
-import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
@@ -303,34 +305,36 @@ export default function AdminConsole() {
 
   const signOut = () => supabase.auth.signOut();
 
-  const TABS: { value: typeof view; label: string }[] = [
-    { value: 'dashboard', label: 'Dashboard' },
-    { value: 'verification', label: 'Verification' },
-    { value: 'subscriptions', label: 'Subscriptions' },
-    { value: 'payments', label: 'Payments' },
-    { value: 'settlements', label: 'Settlements' },
-    { value: 'payoutAccounts', label: 'Payout accounts' },
-    { value: 'coupons', label: 'Coupons' },
-    { value: 'billing', label: 'Billing' },
-    { value: 'fraud', label: 'Fraud' },
-    { value: 'audit', label: 'Audit log' },
-    { value: 'patients', label: 'Patients' },
-    { value: 'conditions', label: 'Conditions' },
-    { value: 'requirements', label: 'Requirements' },
-    { value: 'names', label: 'Name changes' },
-    { value: 'reviews', label: 'Reviews' },
+  const TABS: ConsoleTab<typeof view>[] = [
+    { value: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { value: 'verification', label: 'Verification', icon: BadgeCheck },
+    { value: 'subscriptions', label: 'Subscriptions', icon: Repeat },
+    { value: 'payments', label: 'Payments', icon: CreditCard },
+    { value: 'settlements', label: 'Settlements', icon: Banknote },
+    { value: 'payoutAccounts', label: 'Payout accounts', icon: Landmark },
+    { value: 'coupons', label: 'Coupons', icon: Ticket },
+    { value: 'billing', label: 'Billing', icon: Receipt },
+    { value: 'fraud', label: 'Fraud', icon: ShieldAlert },
+    { value: 'audit', label: 'Audit log', icon: ScrollText },
+    { value: 'patients', label: 'Patients', icon: Search },
+    { value: 'conditions', label: 'Conditions', icon: HeartPulse },
+    { value: 'requirements', label: 'Requirements', icon: ListChecks },
+    { value: 'names', label: 'Name changes', icon: UserPen },
+    { value: 'reviews', label: 'Reviews', icon: Star },
   ];
 
   return (
-    <div>
-      <AppHeader
-        title="Admin"
-        subtitle="Admin console"
-        bellDot={hasUnread}
-        onBellClick={() => navigate('/notifications')}
-      />
-      <div className="mx-auto max-w-md px-4 pb-6">
-        <Segmented options={TABS} value={view} onChange={setView} variant="scroll" />
+    <ConsoleLayout
+      tag="Admin"
+      title="Admin"
+      subtitle="Admin console"
+      tabs={TABS}
+      value={view}
+      onChange={setView}
+      bellDot={hasUnread}
+      onBell={() => navigate('/notifications')}
+    >
+      <div className="pb-6">
 
         {view === 'dashboard' && (
           <div className="mt-4">
@@ -658,10 +662,10 @@ export default function AdminConsole() {
           </>
         )}
 
-        <Button variant="ghost" onClick={signOut} className="mt-6">
+        <Button variant="ghost" onClick={signOut} className="mt-6 lg:hidden">
           Sign out
         </Button>
       </div>
-    </div>
+    </ConsoleLayout>
   );
 }

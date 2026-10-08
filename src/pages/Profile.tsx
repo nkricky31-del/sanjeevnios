@@ -192,7 +192,7 @@ export default function Profile() {
     return (
       <div>
         <ScreenHeader title="Patient record" onBack={() => setViewingMrn(null)} />
-        <div className="mx-auto max-w-md px-4 py-4">
+        <div className="mx-auto max-w-3xl px-4 py-4">
           <PatientProfile mrn={viewingMrn} />
         </div>
       </div>
@@ -203,7 +203,7 @@ export default function Profile() {
     <div>
       <AppHeader title="Profile" centered bellDot={hasUnread} onBellClick={() => navigate('/notifications')} />
 
-      <div className="mx-auto max-w-md px-4 pb-6">
+      <div className="px-4 pb-6">
         {/* Identity card + stats */}
         <Card className="!p-0">
           <div className="flex items-center gap-3 p-4">

@@ -117,19 +117,19 @@ export default function TokenBoard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
+    <div className="min-h-screen bg-ground font-ui text-ink">
       <div className="flex items-center justify-between px-6 py-4">
         <button
           onClick={() => navigate('/')}
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-white/50 hover:text-white"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink/50 hover:text-ink"
         >
           <ArrowLeft size={16} /> Back to console
         </button>
-        <p className="truncate text-sm font-semibold text-white/60">{clinicName}</p>
+        <p className="truncate text-sm font-semibold text-ink/60">{clinicName}</p>
         <button
           onClick={goFullscreen}
           aria-label="Toggle fullscreen"
-          className="rounded-full p-2 text-white/50 hover:bg-white/10 hover:text-white"
+          className="rounded-full p-2 text-ink/50 hover:bg-ink/10 hover:text-ink"
         >
           <Maximize2 size={18} />
         </button>
@@ -137,13 +137,13 @@ export default function TokenBoard() {
 
       <div className="mx-auto max-w-4xl px-6 pb-10">
         {/* Now serving */}
-        <div className="rounded-[2rem] bg-gradient-to-b from-brand-600 to-brand-700 px-6 py-10 text-center shadow-2xl shadow-brand-900/40">
-          <p className="text-lg font-bold uppercase tracking-[0.2em] text-white/70">Now serving</p>
+        <div className="rounded-[2rem] bg-[var(--accent)] px-6 py-10 text-center text-ground">
+          <p className="text-lg font-bold uppercase tracking-[0.2em] text-ground/70">Now serving</p>
           <p className="mt-2 text-[9rem] font-extrabold leading-none tracking-tight">
             {nowServing ?? '—'}
           </p>
           {serving[0]?.doctors?.name && (
-            <p className="mt-2 text-xl font-semibold text-white/80">{serving[0].doctors.name}</p>
+            <p className="mt-2 text-xl font-semibold text-ground/80">{serving[0].doctors.name}</p>
           )}
         </div>
 
@@ -151,41 +151,41 @@ export default function TokenBoard() {
         {serving.length > 1 && (
           <div className="mt-4 flex flex-wrap justify-center gap-3">
             {serving.slice(1).map((r) => (
-              <div key={r.id} className="rounded-2xl bg-white/10 px-6 py-4 text-center">
+              <div key={r.id} className="rounded-2xl bg-ink/10 px-6 py-4 text-center">
                 <p className="text-4xl font-extrabold">{r.token_number}</p>
-                {r.doctors?.name && <p className="mt-1 text-sm text-white/60">{r.doctors.name}</p>}
+                {r.doctors?.name && <p className="mt-1 text-sm text-ink/60">{r.doctors.name}</p>}
               </div>
             ))}
           </div>
         )}
 
         {/* Next up */}
-        <p className="mt-10 text-center text-lg font-bold uppercase tracking-[0.2em] text-white/50">Next</p>
+        <p className="mt-10 text-center text-lg font-bold uppercase tracking-[0.2em] text-ink/50">Next</p>
         <div className="mt-4 flex flex-wrap justify-center gap-4">
-          {loading && <p className="text-white/40">Loading...</p>}
+          {loading && <p className="text-ink/40">Loading...</p>}
           {!loading && waiting.length === 0 && (
-            <p className="text-xl text-white/40">No one else waiting right now.</p>
+            <p className="text-xl text-ink/40">No one else waiting right now.</p>
           )}
           {waiting.slice(0, 6).map((r, i) => (
             <div
               key={r.id}
               className={`rounded-3xl px-8 py-6 text-center ${
-                i === 0 ? 'bg-white text-brand-700' : 'bg-white/10 text-white'
+                i === 0 ? 'bg-ink text-ground' : 'bg-ink/10 text-ink'
               }`}
             >
               <p className="text-6xl font-extrabold leading-none">{r.token_number}</p>
               {r.doctors?.name && (
-                <p className={`mt-2 text-sm ${i === 0 ? 'text-brand-600' : 'text-white/50'}`}>{r.doctors.name}</p>
+                <p className={`mt-2 text-sm ${i === 0 ? 'text-ground/70' : 'text-ink/50'}`}>{r.doctors.name}</p>
               )}
             </div>
           ))}
         </div>
 
         {waiting.length > 6 && (
-          <p className="mt-6 text-center text-white/40">+{waiting.length - 6} more waiting</p>
+          <p className="mt-6 text-center text-ink/40">+{waiting.length - 6} more waiting</p>
         )}
 
-        <p className="mt-10 text-center text-sm text-white/30">
+        <p className="mt-10 text-center text-sm text-ink/30">
           Updated {now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })} ·
           Tokens are issued in arrival order
         </p>

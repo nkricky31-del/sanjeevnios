@@ -185,7 +185,7 @@ export default function Records() {
         onBellClick={() => navigate('/notifications')}
       />
 
-      <div className="mx-auto max-w-md px-4 pb-6">
+      <div className="px-4 pb-6">
         <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-white px-3.5 py-3">
           <Search size={17} className="shrink-0 text-slate-400" />
           <input

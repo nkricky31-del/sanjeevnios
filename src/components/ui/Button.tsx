@@ -10,22 +10,22 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 // action ("Reschedule" beside "View Details"); 'danger' is the red outline
 // destructive action ("Cancel Appointment").
 const VARIANTS: Record<string, string> = {
-  primary: 'bg-brand-600 text-white shadow-sm shadow-brand-600/25 hover:bg-brand-700',
+  // Bone-coloured, like the website's buttons (the accent shows as a focus ring).
+  primary: 'bg-slate-900 text-white hover:bg-slate-800',
   secondary: 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-  outline: 'border border-brand-200 bg-white text-brand-600 hover:bg-brand-50',
-  coral: 'bg-coral-500 text-white shadow-sm shadow-coral-500/20 hover:bg-coral-600',
+  outline: 'border border-slate-200 bg-transparent text-slate-700 hover:border-brand-500 hover:text-brand-600',
+  // The clinic's old coral action, now the site's amber.
+  coral: 'bg-coral-500 text-white hover:bg-coral-600',
   danger: 'border border-red-200 bg-red-50 text-red-600 hover:bg-red-100',
-  ghost: 'text-slate-500 hover:bg-slate-100',
-  // AdminLogin.tsx's own accent - deliberately not brand/coral so the admin
-  // screen never gets mistaken for the patient or clinic ones.
-  dark: 'bg-slate-900 text-white shadow-sm shadow-slate-900/25 hover:bg-slate-800',
+  ghost: 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+  dark: 'bg-slate-900 text-white hover:bg-slate-800',
 };
 
 export default function Button({ variant = 'primary', full, className = '', ...props }: Props) {
   return (
     <button
       {...props}
-      className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold transition disabled:opacity-50 ${VARIANTS[variant]} ${full ? 'w-full' : ''} ${className}`}
+      className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 ${VARIANTS[variant]} ${full ? 'w-full' : ''} ${className}`}
     />
   );
 }

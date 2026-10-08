@@ -1,9 +1,9 @@
 import { CalendarDays, CreditCard, FileText, Home, User } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
-// The five tabs from the mockups. Doctor search lives behind Home's
-// "Book Appointment" quick action rather than taking a tab of its own.
-const TABS = [
+// The five patient tabs. On a phone this is the bottom bar; from `lg` up the
+// sidebar (Sidebar.tsx) carries the same destinations, so this hides itself.
+export const PATIENT_TABS = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/bookings', label: 'Appointments', icon: CalendarDays, end: false },
   { to: '/records', label: 'Records', icon: FileText, end: false },
@@ -13,24 +13,32 @@ const TABS = [
 
 export default function BottomTabBar() {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-100 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
-      <div className="mx-auto flex max-w-md items-stretch justify-around px-1 py-1.5">
-        {TABS.map((t) => (
+    <nav
+      aria-label="Main"
+      className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-100 bg-canvas/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-[14px] lg:hidden"
+    >
+      <div className="mx-auto flex max-w-xl items-stretch justify-around px-1 py-1.5">
+        {PATIENT_TABS.map((t) => (
           <NavLink
             key={t.to}
             to={t.to}
             end={t.end}
             className={({ isActive }) =>
-              `flex flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-1.5 text-[11px] font-semibold transition ${
+              `relative flex flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.06em] outline-none transition focus-visible:ring-2 focus-visible:ring-brand-500 ${
                 isActive ? 'text-brand-600' : 'text-slate-400'
               }`
             }
           >
-            <t.icon size={20} />
-            <span className="truncate">{t.label}</span>
+            {({ isActive }) => (
+              <>
+                {isActive && <span aria-hidden className="absolute -top-1.5 h-0.5 w-8 rounded-full bg-brand-600" />}
+                <t.icon size={19} strokeWidth={1.75} />
+                <span className="truncate">{t.label}</span>
+              </>
+            )}
           </NavLink>
         ))}
       </div>
-    </div>
+    </nav>
   );
 }

@@ -133,7 +133,7 @@ export default function Home() {
         onBellClick={() => navigate('/notifications')}
       />
 
-      <div className="mx-auto max-w-md px-4 pb-6">
+      <div className="px-4 pb-6">
         {/* Next appointment */}
         <Card className="!p-0">
           <div className="flex items-center justify-between gap-2 rounded-t-3xl bg-brand-50/70 px-4 py-3">

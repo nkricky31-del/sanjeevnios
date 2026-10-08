@@ -121,7 +121,8 @@ export default function DoctorPage() {
     <div>
       <ScreenHeader title="Doctor" back="/search" />
 
-      <div className="mx-auto max-w-md px-4 py-4">
+      <div className="mx-auto max-w-6xl px-4 py-4 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:items-start lg:gap-8">
+        <div>
         <Card>
           <div className="flex items-center gap-3">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
@@ -190,6 +191,9 @@ export default function DoctorPage() {
           clinicName={doctor.clinics?.name}
         />
 
+        </div>
+
+        <div>
         {followUpOfVisitId && (
           <div className="mt-4 flex items-start gap-3 rounded-2xl bg-emerald-50 p-3.5">
             <CalendarPlus size={18} className="mt-0.5 shrink-0 text-emerald-700" />
@@ -258,6 +262,7 @@ export default function DoctorPage() {
             }}
           />
         )}
+        </div>
       </div>
     </div>
   );

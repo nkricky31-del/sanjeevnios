@@ -18,12 +18,12 @@ interface Props {
 // screen is titled rather than personalised.
 export default function AppHeader({ title, subtitle, pill, onBellClick, bellDot, centered, action }: Props) {
   return (
-    <div className="sticky top-0 z-10 bg-canvas/95 px-4 pb-3 pt-4 backdrop-blur">
-      <div className="mx-auto flex max-w-md items-center justify-between gap-3">
+    <div className="sticky top-0 z-10 border-b border-slate-100 bg-canvas/85 px-4 pb-4 pt-5 backdrop-blur-[14px] lg:border-b-0 lg:px-4 lg:pt-8">
+      <div className="flex items-center justify-between gap-3">
         {centered && <div className="w-9" />}
         <div className={centered ? 'flex-1 text-center' : 'min-w-0 flex-1'}>
-          <p className={`truncate font-bold text-slate-900 ${centered ? 'text-base' : 'text-xl'}`}>{title}</p>
-          {subtitle && <p className="mt-0.5 truncate text-xs text-slate-500">{subtitle}</p>}
+          <p className={`truncate font-display font-bold tracking-[-0.02em] text-slate-900 ${centered ? 'text-lg' : 'text-xl lg:text-3xl'}`}>{title}</p>
+          {subtitle && <p className="mt-1 truncate text-xs text-slate-500">{subtitle}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {pill}
@@ -31,7 +31,7 @@ export default function AppHeader({ title, subtitle, pill, onBellClick, bellDot,
           {onBellClick && (
             <button
               onClick={onBellClick}
-              className="relative rounded-full p-2 text-slate-600 hover:bg-slate-100"
+              className="relative cursor-pointer rounded-full border border-slate-100 p-2 text-slate-600 outline-none transition hover:border-slate-300 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-brand-500"
               aria-label="Notifications"
             >
               <Bell size={20} />

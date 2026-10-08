@@ -438,7 +438,7 @@ export default function BookingStatus() {
     <div>
       <ScreenHeader title="Appointment Details" back={-1} />
 
-      <div className="mx-auto max-w-md px-4 py-4">
+      <div className="mx-auto max-w-3xl px-4 py-4">
         {alertMessage && (
           <div className="mb-3 rounded-2xl bg-amber-50 p-3.5 text-sm font-medium text-amber-800">{alertMessage}</div>
         )}

@@ -1,4 +1,7 @@
-import { CheckCircle2, ChevronRight, Monitor, ScanLine, UserRound } from 'lucide-react';
+import {
+  CalendarClock, CheckCircle2, ChevronRight, ClipboardList, KeyRound, MapPin, Monitor, Pill, Receipt, ScanLine, Send,
+  SlidersHorizontal, Stethoscope, UserRound, Users, Wallet,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -19,12 +22,12 @@ import RxPendingWorklist from '../components/RxPendingWorklist';
 import VisitScreen from '../components/VisitScreen';
 import WaitingList from '../components/WaitingList';
 import WalkInForm from '../components/WalkInForm';
+import ConsoleLayout, { type ConsoleTab } from '../components/shell/ConsoleLayout';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import IconTile from '../components/ui/IconTile';
 import SectionTitle from '../components/ui/SectionTitle';
-import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
 import { setActingMode } from '../lib/actingMode';
 import { useAuth } from '../lib/AuthContext';
@@ -129,6 +132,22 @@ interface OpenVisit {
   appointmentId: string;
   patientName: string;
 }
+
+const CLINIC_TABS: ConsoleTab<
+  'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'earnings' | 'access'
+>[] = [
+  { value: 'today', label: 'Today', icon: CalendarClock },
+  { value: 'queue', label: 'Bookings', icon: ClipboardList },
+  { value: 'publish', label: 'Publish day', icon: Send },
+  { value: 'rx', label: 'Rx pending', icon: Pill },
+  { value: 'doctors', label: 'Doctors', icon: Stethoscope },
+  { value: 'booking', label: 'Booking mode', icon: SlidersHorizontal },
+  { value: 'billing', label: 'Billing', icon: Receipt },
+  { value: 'earnings', label: 'Earnings', icon: Wallet },
+  { value: 'location', label: 'Location', icon: MapPin },
+  { value: 'patients', label: 'Patients', icon: Users },
+  { value: 'access', label: 'Login & staff', icon: KeyRound },
+];
 
 export default function ClinicQueue() {
   const { session } = useAuth();
@@ -480,16 +499,18 @@ export default function ClinicQueue() {
   );
 
   return (
-    <div>
-      <AppHeader
-        title={clinic.name}
-        subtitle={clinic.clinic_code ? `Clinic ID: ${clinic.clinic_code}` : 'Clinic dashboard'}
-        pill={<StatusPill label={CLINIC_STATUS_LABEL[clinic.status]} tone={CLINIC_STATUS_TONE[clinic.status]} />}
-        bellDot={hasUnread}
-        onBellClick={() => navigate('/notifications')}
-      />
-
-      <div className="mx-auto max-w-md px-4 pb-6">
+    <ConsoleLayout
+      tag="Clinic"
+      title={clinic.name}
+      subtitle={clinic.clinic_code ? `Clinic ID: ${clinic.clinic_code}` : 'Clinic dashboard'}
+      pill={<StatusPill label={CLINIC_STATUS_LABEL[clinic.status]} tone={CLINIC_STATUS_TONE[clinic.status]} />}
+      tabs={CLINIC_TABS}
+      value={view}
+      onChange={setView}
+      bellDot={hasUnread}
+      onBell={() => navigate('/notifications')}
+    >
+      <div className="pb-6">
         {clinic.status !== 'approved' && (
           <div className="mb-4 rounded-2xl bg-amber-50 p-3.5 text-sm text-amber-800">
             <p>
@@ -533,24 +554,6 @@ export default function ClinicQueue() {
           );
         })()}
 
-        <Segmented
-          options={[
-            { value: 'today', label: 'Today' },
-            { value: 'queue', label: 'Bookings' },
-            { value: 'publish', label: 'Publish day' },
-            { value: 'rx', label: 'Rx pending' },
-            { value: 'doctors', label: 'Doctors' },
-            { value: 'booking', label: 'Booking mode' },
-            { value: 'billing', label: 'Billing' },
-            { value: 'earnings', label: 'Earnings' },
-            { value: 'location', label: 'Location' },
-            { value: 'patients', label: 'Patients' },
-            { value: 'access', label: 'Login & staff' },
-          ]}
-          value={view}
-          onChange={setView}
-          variant="scroll"
-        />
 
         {/* The arrivals desk: scan or mark arrived, then work the waiting list. */}
         {view === 'today' && (
@@ -958,10 +961,10 @@ export default function ClinicQueue() {
         <Button variant="ghost" onClick={switchToPatient} className="mt-6">
           Switch to Patient app
         </Button>
-        <Button variant="ghost" onClick={signOut} className="mt-1">
+        <Button variant="ghost" onClick={signOut} className="mt-1 lg:hidden">
           Sign out
         </Button>
       </div>
-    </div>
+    </ConsoleLayout>
   );
 }

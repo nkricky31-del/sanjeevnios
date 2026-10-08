@@ -105,7 +105,7 @@ export default function EncounterDetail({ encounterId }: Props) {
         }
       />
 
-      <div className="mx-auto max-w-md px-4 py-4">
+      <div className="mx-auto max-w-3xl px-4 py-4">
         {encounter === undefined && <p className="text-sm text-slate-400">Loading encounter...</p>}
         {encounter === null && (
           <p className="text-sm text-slate-400">This encounter doesn't exist, or you don't have access to view it.</p>

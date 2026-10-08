@@ -18,10 +18,10 @@ export default function Segmented<T extends string>({ options, value, onChange, 
             key={o.value}
             type="button"
             onClick={() => onChange(o.value)}
-            className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm font-bold transition ${
+            className={`shrink-0 cursor-pointer whitespace-nowrap rounded-full border px-4 py-2 text-[13px] font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-brand-500 ${
               value === o.value
-                ? 'bg-brand-600 text-white shadow-sm shadow-brand-600/25'
-                : 'border border-slate-200 bg-white text-slate-600 hover:border-brand-200 hover:text-brand-600'
+                ? 'border-brand-600 bg-brand-50 text-brand-600'
+                : 'border-slate-200 bg-transparent text-slate-500 hover:border-slate-300 hover:text-slate-900'
             }`}
           >
             {o.label}
@@ -39,8 +39,8 @@ export default function Segmented<T extends string>({ options, value, onChange, 
             key={o.value}
             type="button"
             onClick={() => onChange(o.value)}
-            className={`flex-1 border-b-2 pb-2.5 text-sm font-bold transition ${
-              value === o.value ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-400'
+            className={`flex-1 cursor-pointer border-b-2 pb-2.5 text-sm font-semibold outline-none transition focus-visible:text-slate-900 ${
+              value === o.value ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-400 hover:text-slate-700'
             }`}
           >
             {o.label}
@@ -57,8 +57,8 @@ export default function Segmented<T extends string>({ options, value, onChange, 
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
-          className={`flex-1 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-bold transition ${
-            value === o.value ? 'bg-brand-50 text-brand-600' : 'text-slate-500'
+          className={`flex-1 cursor-pointer whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-brand-500 ${
+            value === o.value ? 'bg-brand-50 text-brand-600' : 'text-slate-500 hover:text-slate-900'
           }`}
         >
           {o.label}

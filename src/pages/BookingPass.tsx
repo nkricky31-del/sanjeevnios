@@ -259,7 +259,7 @@ export default function BookingPass() {
         />
       )}
 
-      <div className="mx-auto max-w-md px-4 py-4">
+      <div className="mx-auto max-w-3xl px-4 py-4">
         {alert && (
           <div className="mb-3 rounded-2xl bg-amber-50 p-3.5 text-sm font-semibold text-amber-800">{alert}</div>
         )}

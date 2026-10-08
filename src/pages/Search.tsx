@@ -75,9 +75,9 @@ export default function Search() {
 
   return (
     <div>
-      <ScreenHeader title="Book Appointment" back="/" />
-      <div className="mx-auto max-w-md px-4 py-4">
-        <div className="flex items-center rounded-full border border-slate-200 bg-white px-4 shadow-sm shadow-slate-200/50 focus-within:ring-2 focus-within:ring-brand-500">
+      <ScreenHeader title="Book Appointment" back="/" wide />
+      <div className="px-4 py-4">
+        <div className="flex items-center rounded-full border border-slate-200 bg-white px-4 focus-within:ring-2 focus-within:ring-brand-500">
           <SearchIcon size={17} className="text-slate-400" />
           <input
             type="text"
@@ -115,16 +115,16 @@ export default function Search() {
         </div>
         {locationError && <p className="mt-1.5 text-xs text-red-600">{locationError}</p>}
 
-        <div className="mt-5 space-y-2.5">
-          {loading && <p className="text-sm text-slate-400">Searching...</p>}
+        <div className="mt-5 grid gap-2.5 lg:grid-cols-2">
+          {loading && <p className="text-sm text-slate-400 lg:col-span-2">Searching...</p>}
           {!loading && sortedResults.length === 0 && (
-            <p className="text-sm text-slate-400">No approved clinics found.</p>
+            <p className="text-sm text-slate-400 lg:col-span-2">No approved clinics found.</p>
           )}
           {sortedResults.map((r) => {
             const dist = distanceKm(r);
             return (
               <Link key={r.doctor_id} to={`/doctors/${r.doctor_id}`} className="block">
-                <div className="flex items-center gap-3 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm shadow-slate-200/50 transition hover:shadow-md">
+                <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4 transition hover:border-slate-300">
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
                     <Stethoscope size={24} />
                   </div>

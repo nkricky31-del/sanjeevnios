@@ -74,7 +74,7 @@ export default function NotificationsList() {
         }
       />
 
-      <div className="mx-auto max-w-md px-4 py-4">
+      <div className="mx-auto max-w-3xl px-4 py-4">
         {loading && <p className="mt-3 text-sm text-slate-400">Loading...</p>}
         {!loading && rows.length === 0 && (
           <div className="mt-8 flex flex-col items-center text-center text-slate-400">

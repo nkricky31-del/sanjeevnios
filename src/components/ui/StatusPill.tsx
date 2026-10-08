@@ -30,7 +30,7 @@ const DOT_STYLES: Record<string, string> = {
 export default function StatusPill({ label, tone = 'neutral', icon: Icon, dot }: Props) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold capitalize ${TONE_STYLES[tone]}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-current/15 px-3 py-1 text-[11px] font-semibold capitalize ${TONE_STYLES[tone]}`}
     >
       {dot && <span className={`h-1.5 w-1.5 rounded-full ${DOT_STYLES[tone]}`} />}
       {Icon && <Icon size={13} />}

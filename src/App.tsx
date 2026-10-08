@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import PatientDeclarationGate from './components/PatientDeclarationGate';
 import PatientOnboardingGate from './components/PatientOnboardingGate';
 import EncounterDetail from './components/EncounterDetail';
 import NotificationsList from './components/NotificationsList';
-import BottomTabBar from './components/ui/BottomTabBar';
 import Button from './components/ui/Button';
-import PlatformFooterNote from './components/ui/PlatformFooterNote';
 import { getStoredActingMode } from './lib/actingMode';
 import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
@@ -15,7 +13,7 @@ import { supabase } from './lib/supabaseClient';
 import MarketingSite from './marketing/MarketingSite';
 import AdminConsole from './pages/AdminConsole';
 import AdminMfaGate from './components/AdminMfaGate';
-import PageTransition from './components/PageTransition';
+import PatientShell from './components/shell/PatientShell';
 import AdminLogin from './pages/AdminLogin';
 import BookingPass from './pages/BookingPass';
 import BookingStatus from './pages/BookingStatus';
@@ -33,7 +31,7 @@ import Records from './pages/Records';
 import Search from './pages/Search';
 import TokenBoard from './pages/TokenBoard';
 
-export default function App() {
+function AppContent() {
   const { session, profile, loading } = useAuth();
   const location = useLocation();
   const [signupIntent, setSignupIntent] = useState(false);
@@ -114,24 +112,25 @@ export default function App() {
   // row back or doesn't - a clinic pasting another clinic's encounter link
   // gets "not found", not a client-side redirect, since Postgres itself
   // never returns the row.
+  // These two screens are reachable by every role. A patient gets the normal
+  // sidebar/tab-bar frame around them; clinic and admin keep the plain page.
+  const framed = (node: ReactNode) =>
+    (profile.role !== 'admin' && (getStoredActingMode() ?? (profile.role === 'clinic' ? 'clinic' : 'patient')) === 'patient') ? (
+      <PatientShell>{node}</PatientShell>
+    ) : (
+      <div className="min-h-screen bg-canvas">{node}</div>
+    );
+
   const encounterMatch = location.pathname.match(/^\/encounters\/([^/]+)$/);
   if (encounterMatch) {
-    return (
-      <div className="min-h-screen bg-canvas">
-        <EncounterDetail encounterId={encounterMatch[1]} />
-      </div>
-    );
+    return framed(<EncounterDetail encounterId={encounterMatch[1]} />);
   }
 
   // Same idea as the encounter route above - reachable by any role via the
   // bell icon on every AppHeader (see useUnreadNotifications.ts), regardless
   // of which role-specific screen they're currently on.
   if (location.pathname === '/notifications') {
-    return (
-      <div className="min-h-screen bg-canvas">
-        <NotificationsList />
-      </div>
-    );
+    return framed(<NotificationsList />);
   }
 
   // Admin is checked first, unconditionally, and never joins the mode
@@ -210,8 +209,7 @@ export default function App() {
   return (
     <PatientOnboardingGate>
       <PatientDeclarationGate>
-        <div className="min-h-screen bg-canvas pb-24">
-          <PageTransition>
+        <PatientShell>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/search" element={<Search />} />
@@ -231,11 +229,37 @@ export default function App() {
                 own home - never a broken/empty page. */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-          </PageTransition>
-          <PlatformFooterNote />
-          <BottomTabBar />
-        </div>
+        </PatientShell>
       </PatientDeclarationGate>
     </PatientOnboardingGate>
   );
+}
+
+// Everything after sign-in lives inside the dark scope (index.css `.app-dark`),
+// with the accent chosen by role. The printable self-check-in poster stays
+// outside it so it still prints dark-on-light.
+export default function App() {
+  const { session, profile } = useAuth();
+  const location = useLocation();
+  useDarkBackdropWhen(Boolean(session && profile) && location.pathname !== '/poster');
+
+  if (!session || !profile || location.pathname === '/poster') return <AppContent />;
+  const role = profile.role === 'admin' ? 'admin' : (getStoredActingMode() ?? (profile.role === 'clinic' ? 'clinic' : 'patient'));
+  return (
+    <div className="app-dark min-h-screen" data-app-role={role}>
+      <AppContent />
+    </div>
+  );
+}
+
+function useDarkBackdropWhen(on: boolean) {
+  useEffect(() => {
+    if (!on) return;
+    const root = document.documentElement;
+    const previous = root.style.backgroundColor;
+    root.style.backgroundColor = '#0a0c0e';
+    return () => {
+      root.style.backgroundColor = previous;
+    };
+  }, [on]);
 }

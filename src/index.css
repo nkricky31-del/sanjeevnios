@@ -61,3 +61,127 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
+
+/* ===========================================================================
+   The signed-in app (patient, clinic and admin) in the same dark editorial
+   system as the website and the sign-in screens.
+
+   Instead of rewriting ~1,200 slate-* / brand-* / emerald-* / red-* classes
+   across 60 components, this scope RE-POINTS the colour variables those
+   utilities read. Inside `.app-dark`, "bg-white" is the card surface,
+   "text-slate-900" is the bone ink, "bg-brand-600" is the role's accent, and
+   so on; outside it (the marketing site, the printable poster) nothing changes.
+
+   Each role gets its own accent: patient = teal, clinic = amber, admin = violet.
+   =========================================================================== */
+.app-dark {
+  --accent: var(--color-teal-text);
+  color-scheme: dark;
+  background-color: #0a0c0e;
+  color: var(--color-slate-900);
+  font-family: var(--font-ui);
+
+  --color-canvas: #0a0c0e;
+  --color-white: #101317;
+  --color-paper: #ffffff;
+
+  /* neutrals, inverted: 50 is the lightest-looking panel, 900 the bone ink */
+  --color-slate-50: #14181d;
+  --color-slate-100: #1d2329;
+  --color-slate-200: #2a3138;
+  --color-slate-300: #3d454d;
+  --color-slate-400: #7a8186;
+  --color-slate-500: #9ea5a8;
+  --color-slate-600: #b7bcbc;
+  --color-slate-700: #cdd0ce;
+  --color-slate-800: #e1ddd3;
+  --color-slate-900: #ede7dc;
+  --color-slate-950: #f7f3ec;
+
+  /* the role accent, expressed as the old brand scale */
+  --color-brand-50: color-mix(in srgb, var(--accent) 9%, #101317);
+  --color-brand-100: color-mix(in srgb, var(--accent) 15%, #101317);
+  --color-brand-200: color-mix(in srgb, var(--accent) 26%, #101317);
+  --color-brand-300: color-mix(in srgb, var(--accent) 45%, #101317);
+  --color-brand-400: var(--accent);
+  --color-brand-500: var(--accent);
+  --color-brand-600: var(--accent);
+  --color-brand-700: color-mix(in srgb, var(--accent) 80%, #ffffff);
+  --color-brand-800: color-mix(in srgb, var(--accent) 55%, #ede7dc);
+  --color-brand-900: color-mix(in srgb, var(--accent) 35%, #ede7dc);
+
+  /* coral was the clinic's secondary accent: it becomes the site's amber */
+  --color-coral-50: color-mix(in srgb, var(--color-amber) 9%, #101317);
+  --color-coral-100: color-mix(in srgb, var(--color-amber) 16%, #101317);
+  --color-coral-200: color-mix(in srgb, var(--color-amber) 28%, #101317);
+  --color-coral-300: color-mix(in srgb, var(--color-amber) 50%, #101317);
+  --color-coral-400: var(--color-amber);
+  --color-coral-500: var(--color-amber);
+  --color-coral-600: #f0a35a;
+  --color-coral-700: #f4b77f;
+  --color-coral-800: #f7caa0;
+  --color-coral-900: #fadcc0;
+
+  /* status colours: dark tinted panels with light text */
+  --color-emerald-50: #0e1f18;
+  --color-emerald-100: #12301f;
+  --color-emerald-200: #1b4a34;
+  --color-emerald-300: #2f7d5a;
+  --color-emerald-400: #3fae7c;
+  --color-emerald-500: #47c28a;
+  --color-emerald-600: #5cd39a;
+  --color-emerald-700: #7fe0b2;
+  --color-emerald-800: #a3ebc9;
+  --color-emerald-900: #c6f3de;
+
+  --color-red-50: #261012;
+  --color-red-100: #361518;
+  --color-red-200: #5a1f25;
+  --color-red-300: #8c2f38;
+  --color-red-400: #c24a55;
+  --color-red-500: #e0606b;
+  --color-red-600: #f0787f;
+  --color-red-700: #f79aa0;
+  --color-red-800: #fbb9bd;
+  --color-red-900: #fdd5d7;
+
+  --color-amber-50: #231a0c;
+  --color-amber-100: #33250f;
+  --color-amber-200: #5a3f14;
+  --color-amber-300: #8c6420;
+  --color-amber-400: #c48b2a;
+  --color-amber-500: #e8a33a;
+  --color-amber-600: #f2b552;
+  --color-amber-700: #f6c87a;
+  --color-amber-800: #f9d9a0;
+  --color-amber-900: #fbe7c3;
+
+  --color-sky-50: #0d1b26;
+  --color-sky-100: #12283a;
+  --color-sky-600: #62b4ea;
+  --color-sky-700: #8cc9f0;
+
+  --color-pink-50: #25111b;
+  --color-pink-100: #371827;
+  --color-pink-600: #f08bb4;
+  --color-pink-700: #f5abc9;
+}
+
+.app-dark[data-app-role='clinic'] { --accent: var(--color-amber); }
+.app-dark[data-app-role='admin'] { --accent: var(--color-admin); }
+
+/* Headings in the display face, like the website. */
+.app-dark :where(h1, h2, h3, h4) {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+/* Map tiles are light; inside the dark app they would glare. Invert and tint
+   only the tile layer (markers and controls sit in other panes and keep their
+   colours). */
+.app-dark .leaflet-tile-pane {
+  filter: invert(0.92) hue-rotate(180deg) brightness(0.95) contrast(0.9) saturate(0.7);
+}
+.app-dark .leaflet-container {
+  background: #0a0c0e;
+}

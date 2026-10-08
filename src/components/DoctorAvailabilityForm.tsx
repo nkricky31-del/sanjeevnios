@@ -201,7 +201,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
         <button
           onClick={submit}
           disabled={saving}
-          className="mt-3 rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand-600/25 disabled:opacity-50"
+          className="mt-3 rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save availability'}
         </button>

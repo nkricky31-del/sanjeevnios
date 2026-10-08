@@ -141,7 +141,7 @@ export default function AddDoctorForm({ clinicId, onAdded, onCancel }: Props) {
         <button
           type="submit"
           disabled={loading}
-          className="rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand-600/25 disabled:opacity-50"
+          className="rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
         >
           {loading ? 'Saving...' : 'Add doctor & continue'}
         </button>

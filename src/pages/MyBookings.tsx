@@ -104,13 +104,13 @@ export default function MyBookings() {
         onBellClick={() => navigate('/notifications')}
       />
 
-      <div className="mx-auto max-w-md px-4 pb-6">
+      <div className="px-4 pb-6">
         <Segmented options={TABS} value={tab} onChange={setTab} variant="underline" />
 
-        <div className="mt-4 space-y-3">
-          {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {loading && <p className="text-sm text-slate-400 lg:col-span-2">Loading...</p>}
           {!loading && visible.length === 0 && (
-            <Card className="text-center">
+            <Card className="text-center lg:col-span-2">
               <p className="text-sm text-slate-500">
                 {tab === 'upcoming' ? 'No upcoming appointments.' : `Nothing in ${tab}.`}
               </p>

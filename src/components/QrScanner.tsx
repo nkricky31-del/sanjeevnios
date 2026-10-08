@@ -99,8 +99,8 @@ export default function QrScanner({ onScan, onClose, hint }: Props) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/95 backdrop-blur">
-      <div className="flex items-center justify-between px-4 py-4 text-white">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0c0e]/95 backdrop-blur">
+      <div className="flex items-center justify-between px-4 py-4 text-ink">
         <p className="text-base font-bold">Scan patient QR</p>
         <button onClick={onClose} aria-label="Close scanner" className="rounded-full p-2 hover:bg-white/10">
           <X size={22} />
@@ -109,8 +109,8 @@ export default function QrScanner({ onScan, onClose, hint }: Props) {
 
       <div className="flex flex-1 flex-col items-center justify-center px-5">
         {error ? (
-          <div className="flex flex-col items-center gap-3 text-center text-white">
-            <CameraOff size={36} className="text-white/70" />
+          <div className="flex flex-col items-center gap-3 text-center text-ink">
+            <CameraOff size={36} className="text-ink/70" />
             <p className="max-w-xs text-sm">{error}</p>
           </div>
         ) : (
@@ -121,14 +121,14 @@ export default function QrScanner({ onScan, onClose, hint }: Props) {
               <div className="h-48 w-48 rounded-2xl border-4 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
             </div>
             {!ready && (
-              <p className="absolute inset-0 flex items-center justify-center text-sm text-white/80">
+              <p className="absolute inset-0 flex items-center justify-center text-sm text-ink/80">
                 Starting camera...
               </p>
             )}
           </div>
         )}
 
-        <p className="mt-4 max-w-xs text-center text-sm text-white/70">
+        <p className="mt-4 max-w-xs text-center text-sm text-ink/70">
           {hint ?? "Point the camera at the QR code on the patient's booking screen."}
         </p>
       </div>

@@ -747,7 +747,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         <button
           type="submit"
           disabled={saving || availLoading}
-          className="rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand-600/25 disabled:opacity-50"
+          className="rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
         >
           {saving ? 'Adding...' : slotFree ? 'Add to queue' : 'Add to waitlist'}
         </button>

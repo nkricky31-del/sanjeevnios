@@ -74,7 +74,7 @@ export default function Payments() {
     <div>
       <AppHeader title="Bill & Payments" centered bellDot={hasUnread} onBellClick={() => navigate('/notifications')} />
 
-      <div className="mx-auto max-w-md px-4 pb-6">
+      <div className="px-4 pb-6">
         {/* Total */}
         <Card>
           <div className="flex items-start gap-3">

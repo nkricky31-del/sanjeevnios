@@ -88,7 +88,7 @@ export default function DoctorOnboardingScreen({ doctorId, doctorName, onClose }
         {status && <StatusPill label={STATUS_LABEL[status]} tone={STATUS_TONE[status]} />}
       </div>
 
-      <div className="mx-auto max-w-md px-4 py-6">
+      <div className="mx-auto max-w-3xl px-4 py-6">
         <h1 className="text-xl font-bold text-slate-900">{doctorName}</h1>
         <p className="text-sm text-slate-500">Onboarding checklist</p>
 

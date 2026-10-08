@@ -24,7 +24,7 @@ const TONES: Record<IconTone, string> = {
 
 const SIZES = {
   sm: { box: 'h-9 w-9 rounded-xl', icon: 16 },
-  md: { box: 'h-11 w-11 rounded-2xl', icon: 19 },
+  md: { box: 'h-11 w-11 rounded-xl', icon: 19 },
   lg: { box: 'h-14 w-14 rounded-2xl', icon: 24 },
 };
 
