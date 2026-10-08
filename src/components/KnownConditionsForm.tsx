@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -119,7 +120,7 @@ export default function KnownConditionsForm({ patientId, onSaved }: Props) {
     onSaved?.();
   };
 
-  if (loading) return <p className="text-sm text-slate-400">Loading...</p>;
+  if (loading) return <p className="text-sm text-slate-400"><Loading /></p>;
 
   return (
     <div className="rounded-2xl border border-slate-200 p-4">

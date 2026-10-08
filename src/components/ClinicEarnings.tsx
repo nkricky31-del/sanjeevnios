@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { Clock3, Download, IndianRupee, Printer, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -209,7 +210,7 @@ export default function ClinicEarnings({ clinic }: Props) {
       )}
 
       {loading ? (
-        <p className="mt-3 text-sm text-slate-400">Loading...</p>
+        <p className="mt-3 text-sm text-slate-400"><Loading /></p>
       ) : (
         <>
           <div className="mt-4 grid grid-cols-3 gap-2">

@@ -2,34 +2,54 @@ import { Bell } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 
+import HeroBand from './HeroBand';
+
 interface Props {
   title: string;
   subtitle?: string;
   pill?: ReactNode;
   onBellClick?: () => void;
   bellDot?: boolean;
-  /** Centres the title and drops the greeting layout - used by tab roots
-      that are titled rather than personalised ("My Health Records"). */
+  /** Kept for the callers that pass it; every banner is left-aligned now. */
   centered?: boolean;
   action?: ReactNode;
 }
 
-// Tab-root header: a big left-aligned greeting ("Hello, Rahul 👋" with the
-// MRN under it) plus the notification bell, or a centred title when the
-// screen is titled rather than personalised.
-export default function AppHeader({ title, subtitle, pill, onBellClick, bellDot, centered, action }: Props) {
+// "Hello, Nikhil 👋": the hand waves, every few seconds.
+function Title({ text }: { text: string }) {
+  const i = text.indexOf('👋');
+  if (i < 0) return <>{text}</>;
   return (
-    <div className="sticky top-0 z-10 border-b border-slate-100 bg-canvas/85 px-4 pb-4 pt-5 backdrop-blur-[14px] lg:border-b-0 lg:px-4 lg:pt-8">
+    <>
+      {text.slice(0, i)}
+      <motion.span
+        className="inline-block origin-[70%_75%]"
+        animate={{ rotate: [0, 16, -8, 16, -4, 10, 0] }}
+        transition={{ duration: 1.7, repeat: Infinity, repeatDelay: 3, ease: 'easeInOut' }}
+      >
+        👋
+      </motion.span>
+      {text.slice(i + 2)}
+    </>
+  );
+}
+
+// The banner at the top of each tab-root screen: the title (in the display face)
+// and a subtitle, with the notification bell as a glass button.
+export default function AppHeader({ title, subtitle, pill, onBellClick, bellDot, action }: Props) {
+  return (
+    <HeroBand>
       <div className="flex items-center justify-between gap-3">
-        {centered && <div className="w-9" />}
         <motion.div
-          className={centered ? 'flex-1 text-center' : 'min-w-0 flex-1'}
-          initial={{ opacity: 0, y: -10 }}
+          className="min-w-0 flex-1"
+          initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
         >
-          <p className={`truncate font-display font-bold tracking-[-0.02em] text-slate-900 ${centered ? 'text-lg' : 'text-xl lg:text-3xl'}`}>{title}</p>
-          {subtitle && <p className="mt-1 truncate text-xs text-slate-500">{subtitle}</p>}
+          <p className="truncate font-display text-2xl font-bold tracking-[-0.02em] sm:text-3xl lg:text-4xl">
+            <Title text={title} />
+          </p>
+          {subtitle && <p className="mt-1.5 truncate text-xs text-white/75 sm:text-sm">{subtitle}</p>}
         </motion.div>
         <div className="flex shrink-0 items-center gap-2">
           {pill}
@@ -39,7 +59,7 @@ export default function AppHeader({ title, subtitle, pill, onBellClick, bellDot,
               onClick={onBellClick}
               whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.92 }}
-              className="relative cursor-pointer rounded-full border border-slate-100 p-2 text-slate-600 outline-none transition hover:border-slate-300 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-brand-500"
+              className="relative cursor-pointer rounded-full bg-white/15 p-2.5 text-white ring-1 ring-white/25 backdrop-blur outline-none transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white"
               aria-label="Notifications"
             >
               <motion.span
@@ -50,15 +70,15 @@ export default function AppHeader({ title, subtitle, pill, onBellClick, bellDot,
                 <Bell size={20} />
               </motion.span>
               {bellDot && (
-                <span className="absolute right-1.5 top-1.5 flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-coral-500 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-coral-500 ring-2 ring-canvas" />
+                <span className="absolute right-1.5 top-1.5 flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-75" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-300 ring-2 ring-white/40" />
                 </span>
               )}
             </motion.button>
           )}
         </div>
       </div>
-    </div>
+    </HeroBand>
   );
 }

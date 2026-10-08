@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { ArrowLeft, Maximize2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useState } from 'react';
@@ -174,7 +175,7 @@ export default function TokenBoard() {
         {/* Next up */}
         <p className="mt-10 text-center text-lg font-bold uppercase tracking-[0.2em] text-ink/50">Next</p>
         <div className="mt-4 flex flex-wrap justify-center gap-4">
-          {loading && <p className="text-ink/40">Loading...</p>}
+          {loading && <p className="text-ink/40"><Loading /></p>}
           {!loading && waiting.length === 0 && (
             <p className="text-xl text-ink/40">No one else waiting right now.</p>
           )}

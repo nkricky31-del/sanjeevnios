@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { FileText, User, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -113,7 +114,7 @@ export default function AdminNameChanges() {
         Pending name changes
       </SectionTitle>
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && pending.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
         {pending.map((r) => {
           const who = r.member ? r.member.name : (r.account?.name ?? 'Unnamed patient');

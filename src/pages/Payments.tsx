@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { CheckCircle2, CreditCard, Headphones, Receipt, Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -102,7 +103,7 @@ export default function Payments() {
         {/* History */}
         <SectionTitle className="mt-6">Payment History</SectionTitle>
         <Card className="mt-2 !p-0">
-          {loading && <p className="px-4 py-5 text-sm text-slate-400">Loading...</p>}
+          {loading && <p className="px-4 py-5 text-sm text-slate-400"><Loading /></p>}
           {!loading && rows.length === 0 && (
             <p className="px-4 py-5 text-sm text-slate-400">No payments yet.</p>
           )}

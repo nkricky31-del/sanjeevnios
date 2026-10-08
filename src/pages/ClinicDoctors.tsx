@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { useEffect, useState } from 'react';
 
 import AddDoctorForm from '../components/AddDoctorForm';
@@ -175,7 +176,7 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
       )}
 
       <div className="mt-3 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && doctors.length === 0 && (
           <p className="text-sm text-slate-400">No doctors added yet. Add another doctor to continue.</p>
         )}

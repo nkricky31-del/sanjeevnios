@@ -27,20 +27,20 @@ export default function ScreenHeader({ title, back, onBack, action, wide }: Prop
   };
 
   return (
-    <div className="sticky top-0 z-10 border-b border-slate-100 bg-canvas/85 backdrop-blur-[14px]">
+    <div className="sticky top-0 z-10 text-white shadow-lg shadow-slate-900/10" style={{ background: 'var(--band-bg)' }}>
       <div className={`mx-auto flex h-14 items-center gap-2 px-4 ${wide ? '' : 'max-w-3xl'}`}>
         <div className="flex w-10 justify-start">
           {showBack && (
             <button
               onClick={handleBack}
               aria-label="Go back"
-              className="-ml-1 cursor-pointer rounded-full p-1.5 text-slate-700 outline-none transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-brand-500"
+              className="-ml-1 cursor-pointer rounded-full bg-white/15 p-1.5 text-white ring-1 ring-white/25 outline-none transition hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white"
             >
               <ArrowLeft size={20} />
             </button>
           )}
         </div>
-        <p className="flex-1 truncate text-center font-display text-base font-bold tracking-[-0.02em] text-slate-900">{title}</p>
+        <p className="flex-1 truncate text-center font-display text-base font-bold tracking-[-0.02em] text-white">{title}</p>
         <div className="flex w-10 justify-end">{action}</div>
       </div>
     </div>

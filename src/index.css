@@ -90,8 +90,10 @@ body {
   --sidebar-bg: linear-gradient(185deg, #0a1240 0%, #16258a 52%, #2a44a8 100%);
   --sidebar-light: #a9bcff;
   --sidebar-glow: rgba(124, 150, 255, 0.5);
+  --band-bg: linear-gradient(118deg, #16258a 0%, #3b5bdb 55%, #6384f5 100%);
 }
 .app-scope[data-app-role='clinic'] {
+  --band-bg: linear-gradient(118deg, #065f46 0%, #0b8f68 55%, #22b988 100%);
   --sidebar-bg: linear-gradient(185deg, #04261d 0%, #065f46 55%, #0b7f5c 100%);
   --sidebar-light: #6ee7b7;
   --sidebar-glow: rgba(52, 211, 153, 0.45);
@@ -100,6 +102,7 @@ body {
   --sidebar-bg: linear-gradient(185deg, #04060c 0%, #0f1729 55%, #1f2e47 100%);
   --sidebar-light: #8fd8ff;
   --sidebar-glow: rgba(125, 211, 252, 0.32);
+  --band-bg: linear-gradient(118deg, #0b1220 0%, #1c2a42 55%, #34496b 100%);
 }
 
 /* Clinics get the warmer Nunito Sans for body text. */

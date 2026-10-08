@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { FileText, FlaskConical, HeartPulse, Lock, Pill, ScanLine, Search, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -252,7 +253,7 @@ export default function Records() {
           {activeCategory ? CATEGORY_META[activeCategory].label : 'Recent Records'}
         </SectionTitle>
         <Card className="mt-2 !p-0">
-          {loading && <p className="px-4 py-5 text-sm text-slate-400">Loading...</p>}
+          {loading && <p className="px-4 py-5 text-sm text-slate-400"><Loading /></p>}
           {!loading && visible.length === 0 && (
             <p className="px-4 py-5 text-sm text-slate-400">
               {query ? 'Nothing matches that search.' : 'No records here yet.'}

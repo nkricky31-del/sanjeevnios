@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -127,7 +128,7 @@ export default function AdminBreakGlass() {
     await load();
   };
 
-  if (role === undefined) return <p className="text-sm text-slate-500">Loading...</p>;
+  if (role === undefined) return <p className="text-sm text-slate-500"><Loading /></p>;
   if (role === null) {
     return (
       <Card>

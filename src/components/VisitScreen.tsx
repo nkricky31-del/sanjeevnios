@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { ArrowLeft, Clock } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -229,7 +230,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
         <p className="text-sm text-slate-500">Visit</p>
 
         {loading ? (
-          <p className="mt-4 text-sm text-slate-400">Loading...</p>
+          <p className="mt-4 text-sm text-slate-400"><Loading /></p>
         ) : accessError ? (
           <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
             {accessError} Ask the clinic owner if you need access to this patient's clinical record.

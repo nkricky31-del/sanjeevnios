@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import {
   BadgeCheck, Banknote, Building2, CreditCard, HeartPulse, Landmark, LayoutDashboard, ListChecks, Receipt, Repeat,
   ScrollText, Search, ShieldAlert, Star, Stethoscope, Ticket, UserPen,
@@ -444,7 +445,7 @@ export default function AdminConsole() {
               Pending clinics
             </SectionTitle>
             <div className="mt-2 space-y-2">
-              {loading && <p className="text-sm text-slate-400">Loading...</p>}
+              {loading && <p className="text-sm text-slate-400"><Loading /></p>}
               {!loading && clinics.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
               {clinics.map((c) => (
                 <Card key={c.id}>
@@ -512,7 +513,7 @@ export default function AdminConsole() {
 
             <SectionTitle className="mt-6">Pending doctors</SectionTitle>
             <div className="mt-2 space-y-2">
-              {loading && <p className="text-sm text-slate-400">Loading...</p>}
+              {loading && <p className="text-sm text-slate-400"><Loading /></p>}
               {!loading && doctors.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
               {doctors.map((d) => (
                 <Card key={d.id}>

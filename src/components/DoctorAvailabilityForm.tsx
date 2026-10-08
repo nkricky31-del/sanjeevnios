@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { WEEKDAY_LABELS } from '../lib/date';
@@ -104,7 +105,7 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
     <div className="mt-3 space-y-4 rounded-xl border border-slate-200 p-4">
       <div>
         <p className="text-sm font-medium text-slate-700">Current weekly availability</p>
-        {loading && <p className="mt-1 text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="mt-1 text-sm text-slate-400"><Loading /></p>}
         {!loading && windows.length === 0 && (
           <p className="mt-1 text-sm text-slate-400">No availability set - patients can't book this doctor yet.</p>
         )}

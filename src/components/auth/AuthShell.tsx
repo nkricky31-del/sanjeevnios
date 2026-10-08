@@ -22,12 +22,14 @@ const PARTICLES = Array.from({ length: 26 }, (_, i) => ({
 // slow radar sweep, glowing rings, glass icons on three orbits, floating
 // particles, and the word. All motion transforms, so prefers-reduced-motion
 // (MotionConfig in main.tsx) holds the whole thing still.
-function Stage({ theme }: { theme: AuthTheme }) {
+// The moving picture itself, positioned around the centre of whatever contains
+// it. Used full-size on a laptop and scaled down in the phone's top band.
+function StageArt({ theme }: { theme: AuthTheme }) {
   const { stage } = theme;
   const ringStyle = theme.ring === 'solid' ? 'border-solid' : theme.ring === 'dashed' ? 'border-dashed' : 'border-dotted';
   const glow = `0 0 22px ${stage.light}66, inset 0 0 12px ${stage.light}22`;
   return (
-    <div className="relative hidden min-h-screen flex-1 overflow-hidden lg:block" style={{ background: stage.bg }} aria-hidden>
+    <>
       {/* drifting colour */}
       <motion.div
         className="absolute -left-32 -top-32 h-[34rem] w-[34rem] rounded-full blur-3xl"
@@ -129,6 +131,15 @@ function Stage({ theme }: { theme: AuthTheme }) {
           transition={{ duration: pt.duration, delay: pt.delay, repeat: Infinity, ease: 'linear', times: [0, 0.1, 0.85, 1] }}
         />
       ))}
+    </>
+  );
+}
+
+function Stage({ theme }: { theme: AuthTheme }) {
+  const { stage } = theme;
+  return (
+    <div className="relative hidden min-h-screen flex-1 overflow-hidden lg:block" style={{ background: stage.bg }} aria-hidden>
+      <StageArt theme={theme} />
 
       {/* the word at the centre */}
       <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center text-center">
@@ -169,6 +180,42 @@ function Stage({ theme }: { theme: AuthTheme }) {
   );
 }
 
+// The phone version of the stage: the same picture, scaled to fit a band across
+// the top of the screen, with the word and tagline over it.
+function MobileBand({ theme }: { theme: AuthTheme }) {
+  const { stage } = theme;
+  return (
+    <div className="relative h-[17.5rem] shrink-0 overflow-hidden lg:hidden" style={{ background: stage.bg }}>
+      <div aria-hidden className="absolute left-[66%] top-1/2 -ml-[350px] -mt-[350px] h-[700px] w-[700px] scale-[0.5] sm:left-[60%] sm:scale-[0.6]">
+        <StageArt theme={theme} />
+      </div>
+      <div className="absolute inset-x-5 top-5 flex items-center justify-between">
+        <Link to="/" className="font-display text-[15px] font-bold tracking-[-0.02em] text-white" aria-label="SanjeevniOS home">
+          SanjeevniOS<span style={{ color: stage.light }}>.</span>
+        </Link>
+        <span className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 font-ui text-[10px] font-medium uppercase tracking-[0.16em] text-white/85 ring-1 ring-white/20 backdrop-blur">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: stage.light }} />
+          {theme.tag}
+        </span>
+      </div>
+      <motion.div
+        className="absolute inset-x-5 bottom-14"
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8, delay: 0.2, ease: EASE }}
+      >
+        <p className="font-display text-5xl font-extrabold leading-none tracking-[-0.03em] text-white drop-shadow-[0_6px_24px_rgba(0,0,0,0.35)]">
+          {theme.word}
+          <span style={{ color: stage.light }}>.</span>
+        </p>
+        <p className="mt-2 max-w-xs font-ui text-sm leading-snug text-white/80">
+          {theme.headline[0]} <span style={{ color: stage.light }}>{theme.headline[1]}</span>
+        </p>
+      </motion.div>
+    </div>
+  );
+}
+
 // Shared frame for the patient, clinic and admin sign-in screens: the animated
 // stage on the left (desktop), the form column on the right. The role decides
 // the accent, words, icons and ring style - everything else is identical.
@@ -186,15 +233,17 @@ export default function AuthShell({
   useDarkBackdrop();
   return (
     <div
-      className="flex min-h-screen bg-ground font-ui text-ink"
+      className="flex min-h-screen flex-col bg-ground font-ui text-ink lg:flex-row"
       style={{ '--accent': theme.accent } as CSSProperties}
       data-auth-role={role}
     >
+      <MobileBand theme={theme} />
       <Stage theme={theme} />
 
-      <main className="flex w-full flex-col justify-center px-5 py-10 sm:px-10 lg:w-[34rem] lg:flex-none xl:w-[38rem] xl:px-16">
+      <main className="relative z-10 -mt-8 flex w-full flex-1 flex-col justify-start rounded-t-[2rem] bg-ground px-5 pb-10 pt-8 sm:px-10 lg:mt-0 lg:w-[34rem] lg:flex-none lg:justify-center lg:rounded-none lg:py-10 xl:w-[38rem] xl:px-16">
         <div className="mx-auto w-full max-w-sm">
           <motion.div
+            className="hidden lg:block"
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: EASE }}

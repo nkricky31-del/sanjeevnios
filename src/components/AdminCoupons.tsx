@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -393,7 +394,7 @@ export default function AdminCoupons() {
         All coupons
       </SectionTitle>
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && coupons.length === 0 && <p className="text-sm text-slate-400">No coupons yet.</p>}
         {coupons.map((c) => (
           <Card key={c.id}>
@@ -437,7 +438,7 @@ export default function AdminCoupons() {
       </SectionTitle>
       <p className="mt-0.5 text-xs text-slate-400">Who used what, and who's funding the discount.</p>
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && redemptions.length === 0 && <p className="text-sm text-slate-400">No redemptions yet.</p>}
         {redemptions.map((r) => (
           <Card key={r.id}>

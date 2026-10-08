@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { CalendarPlus, Stethoscope } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
@@ -114,7 +115,7 @@ export default function DoctorPage() {
     })();
   }, [doctorId]);
 
-  if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
+  if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
   if (!doctor) return <p className="p-6 text-slate-400">Doctor not found.</p>;
 
   return (
@@ -161,7 +162,7 @@ export default function DoctorPage() {
         <Card className="mt-4">
           <p className="text-sm font-semibold text-slate-700">Who is this booking for?</p>
           {membersLoading ? (
-            <p className="mt-1 text-sm text-slate-400">Loading...</p>
+            <p className="mt-1 text-sm text-slate-400"><Loading /></p>
           ) : members.length === 0 ? (
             <>
               <p className="mt-1 text-sm text-red-600">No family members yet — add one on your profile first.</p>

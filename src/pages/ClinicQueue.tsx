@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import {
   CalendarClock, CheckCircle2, ChevronRight, ClipboardList, KeyRound, MapPin, Monitor, Pill, Receipt, ScanLine, Send,
   SlidersHorizontal, Stethoscope, UserRound, Users, Wallet,
@@ -414,7 +415,7 @@ export default function ClinicQueue() {
     navigate('/', { replace: true });
   };
 
-  if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
+  if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
 
   if (!clinic) {
     return (

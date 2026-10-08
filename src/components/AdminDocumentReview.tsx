@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { todayISO } from '../lib/date';
@@ -140,7 +141,7 @@ export default function AdminDocumentReview({ ownerType, ownerId, notifyUserId, 
     <div className="mt-3 rounded-2xl border border-slate-200 p-3">
       <p className="text-sm font-bold text-slate-900">{label}</p>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
-      {loading && <p className="mt-2 text-xs text-slate-400">Loading...</p>}
+      {loading && <p className="mt-2 text-xs text-slate-400"><Loading /></p>}
 
       {ownerType === 'doctor' && !loading && (
         <div className="mt-2 rounded-xl bg-slate-50 p-2.5">

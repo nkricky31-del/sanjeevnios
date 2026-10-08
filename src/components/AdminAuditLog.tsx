@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -44,7 +45,7 @@ export default function AdminAuditLog() {
       <p className="mt-1 text-xs text-slate-400">Every admin decision - who did what, and when.</p>
 
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && rows.length === 0 && <p className="text-sm text-slate-400">No entries yet.</p>}
         {rows.map((r) => (
           <Card key={r.id}>

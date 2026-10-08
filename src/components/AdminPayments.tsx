@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { recordAdminDecision } from '../lib/audit';
@@ -106,7 +107,7 @@ export default function AdminPayments() {
 
       <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-slate-400">Recent payments</p>
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && payments.length === 0 && <p className="text-sm text-slate-400">No payments yet.</p>}
         {payments.slice(0, 30).map((p) => (
           <Card key={p.id}>

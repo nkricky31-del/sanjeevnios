@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { CheckCircle2, Clock, MapPin, QrCode as QrCodeIcon, RefreshCw, ScanLine, Users } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -239,7 +240,7 @@ export default function BookingPass() {
     await loadBooking();
   };
 
-  if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
+  if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
 
   const inQueue = LIVE_STATUSES.includes(booking.status);

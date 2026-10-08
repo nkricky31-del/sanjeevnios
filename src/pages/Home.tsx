@@ -1,3 +1,5 @@
+import CtaButton from '../components/ui/CtaButton';
+import Loading from '../components/ui/Loading';
 import { useStaggerIn } from '../lib/motionKit';
 import {
   CalendarDays,
@@ -149,7 +151,7 @@ export default function Home() {
           </div>
 
           {loading ? (
-            <p className="px-4 py-6 text-sm text-slate-400">Loading...</p>
+            <p className="px-4 py-6 text-sm text-slate-400"><Loading /></p>
           ) : next ? (
             <div className="px-4 pb-4 pt-3">
               <div className="flex items-start justify-between gap-3">
@@ -197,9 +199,9 @@ export default function Home() {
             having an appointment never means the account is "done booking"
             for the day, so this stays a separate action from the card
             above rather than living inside it. */}
-        <Button className="mt-3" full onClick={() => navigate('/search')}>
+        <CtaButton className="mt-3" onClick={() => navigate('/search')}>
           Book Appointment
-        </Button>
+        </CtaButton>
 
         {/* Quick actions */}
         <SectionTitle className="mt-6">Quick Actions</SectionTitle>
@@ -208,9 +210,9 @@ export default function Home() {
             <Link
               key={a.label}
               to={a.to}
-              className="flex flex-col items-center gap-2 rounded-2xl border border-slate-100 bg-white p-2.5 text-center transition hover:border-brand-200"
+              className="group flex flex-col items-center gap-2 rounded-2xl border border-slate-100 bg-white p-2.5 text-center outline-none transition duration-300 hover:-translate-y-1 hover:border-brand-200 hover:shadow-lg hover:shadow-brand-600/10 focus-visible:ring-2 focus-visible:ring-brand-500"
             >
-              <IconTile icon={a.icon} tone={a.tone} size="sm" />
+              <IconTile icon={a.icon} tone={a.tone} size="sm" className="transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-110" />
               <span className="text-[11px] font-semibold leading-tight text-slate-700">{a.label}</span>
             </Link>
           ))}
@@ -221,7 +223,7 @@ export default function Home() {
           Recent Encounters
         </SectionTitle>
         <Card className="mt-2 !p-0">
-          {loading && <p className="px-4 py-5 text-sm text-slate-400">Loading...</p>}
+          {loading && <p className="px-4 py-5 text-sm text-slate-400"><Loading /></p>}
           {!loading && encounters.length === 0 && (
             <p className="px-4 py-5 text-sm text-slate-400">No visits recorded yet.</p>
           )}
@@ -229,7 +231,7 @@ export default function Home() {
             <Link
               key={e.id}
               to={`/encounters/${e.id}`}
-              className="flex items-center gap-3 border-b border-slate-50 px-4 py-3 last:border-b-0 hover:bg-slate-50"
+              className="group flex items-center gap-3 border-b border-slate-50 px-4 py-3 outline-none transition-colors last:border-b-0 hover:bg-slate-50 focus-visible:bg-slate-50"
             >
               <IconTile icon={UserRound} tone={AVATAR_TONES[i % AVATAR_TONES.length]} />
               <div className="min-w-0 flex-1">
@@ -246,7 +248,7 @@ export default function Home() {
               <span className="rounded-xl border border-brand-100 px-2.5 py-1.5 text-xs font-bold text-brand-600">
                 View Record
               </span>
-              <ChevronRight size={16} className="shrink-0 text-slate-300" />
+              <ChevronRight size={16} className="shrink-0 text-slate-300 transition-transform duration-300 group-hover:translate-x-1 group-hover:text-brand-600" />
             </Link>
           ))}
         </Card>

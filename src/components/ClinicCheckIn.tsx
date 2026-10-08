@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useStaggerIn } from '../lib/motionKit';
 import { Banknote, CheckCircle2, CreditCard, IdCard, QrCode as QrCodeIcon, Search, UserCheck, UserX } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -441,7 +442,7 @@ export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }:
       </div>
 
       <div ref={listRef} className="mt-3 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && expected.length === 0 && (
           <p className="text-sm text-slate-400">Nobody left to check in for this date.</p>
         )}

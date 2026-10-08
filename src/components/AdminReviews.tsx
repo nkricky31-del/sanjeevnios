@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { Star, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -184,7 +185,7 @@ export default function AdminReviews() {
       </div>
 
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && tab === 'visible' && visible.length === 0 && <p className="text-sm text-slate-400">No reviews yet.</p>}
         {!loading && tab === 'hidden' && hidden.length === 0 && <p className="text-sm text-slate-400">Nothing hidden.</p>}
         {!loading && tab === 'visible' && visible.map((r) => card(r, false))}

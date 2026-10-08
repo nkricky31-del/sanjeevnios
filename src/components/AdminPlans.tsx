@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -128,7 +129,7 @@ export default function AdminPlans({ onSaved }: { onSaved?: () => void }) {
       </p>
 
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading &&
           plans.map((p) => {
             const d = drafts[p.id];

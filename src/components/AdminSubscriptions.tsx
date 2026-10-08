@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { recordAdminDecision } from '../lib/audit';
@@ -109,7 +110,7 @@ export default function AdminSubscriptions() {
       {actionError && <p className="mt-2 text-sm text-red-600">{actionError}</p>}
 
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && clinics.length === 0 && <p className="text-sm text-slate-400">No clinics yet.</p>}
         {clinics.map((c) => {
           const sub = firstSubscription(c.subscriptions);

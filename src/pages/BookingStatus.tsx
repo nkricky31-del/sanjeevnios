@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import {
   Banknote,
   CalendarClock,
@@ -382,7 +383,7 @@ export default function BookingStatus() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking?.status, booking?.date, booking?.id, booking?.slot_time, options?.reportingTime]);
 
-  if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
+  if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
 
   const confirmed = ['accepted', 'checked_in', 'called', 'in_consultation', 'completed'].includes(booking.status);

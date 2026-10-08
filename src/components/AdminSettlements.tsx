@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { AlertTriangle, CheckCircle2, IndianRupee, PauseCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -239,7 +240,7 @@ export default function AdminSettlements() {
         />
       </div>
 
-      {loading && <p className="mt-3 text-sm text-slate-400">Loading...</p>}
+      {loading && <p className="mt-3 text-sm text-slate-400"><Loading /></p>}
 
       {!loading && view === 'eligible' && (
         <>

@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { ArrowDown, ArrowUp, Coffee, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -314,7 +315,7 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
       </p>
 
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && rows.length === 0 && !published && (
           <p className="text-sm text-slate-400">No booked patients for this day yet.</p>
         )}

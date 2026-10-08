@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { ArrowLeft, Maximize2, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -74,7 +75,7 @@ export default function ClinicPoster() {
     else document.documentElement.requestFullscreen?.();
   };
 
-  if (loading) return <p className="p-6 text-slate-400">Loading...</p>;
+  if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
 
   return (
     <div className="min-h-screen bg-white">

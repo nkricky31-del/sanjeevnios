@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -70,7 +71,7 @@ export default function AdminConditions() {
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
 
       <div className="mt-4 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && conditions.length === 0 && <p className="text-sm text-slate-400">No conditions yet.</p>}
         {conditions.map((c) => (
           <div key={c.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3">

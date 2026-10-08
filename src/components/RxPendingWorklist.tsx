@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -74,7 +75,7 @@ export default function RxPendingWorklist({ doctorId, onOpen }: Props) {
       <p className="mt-1 text-xs text-slate-400">Visits still missing an e-prescription or a "no prescription" note.</p>
 
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && rows.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
         {rows.map((r) => (
           <Card key={r.visitId}>

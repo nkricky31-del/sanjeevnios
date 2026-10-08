@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { Banknote, CheckCircle2, Clock, ShieldAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -210,7 +211,7 @@ export default function AdminPayoutAccounts() {
 
       {note && <p className="mt-2 text-sm font-semibold text-emerald-600">{note}</p>}
 
-      {loading && <p className="mt-3 text-sm text-slate-400">Loading...</p>}
+      {loading && <p className="mt-3 text-sm text-slate-400"><Loading /></p>}
 
       <div className="mt-3 space-y-3">
         {clinics.map((c) => {

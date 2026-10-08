@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { Copy, ShieldCheck, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
@@ -206,7 +207,7 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
           </span>
           <p className="text-sm text-slate-500">The phone this clinic was originally registered with.</p>
         </div>
-        {loading && <p className="px-4 py-4 text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="px-4 py-4 text-sm text-slate-400"><Loading /></p>}
         {!loading && staff.length === 0 && (
           <p className="px-4 py-4 text-sm text-slate-400">No additional staff phones added yet.</p>
         )}

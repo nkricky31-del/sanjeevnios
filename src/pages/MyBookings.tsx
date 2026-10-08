@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { useStaggerIn } from '../lib/motionKit';
 import { Bell, CalendarDays, ChevronRight, Clock, MapPin } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -110,7 +111,7 @@ export default function MyBookings() {
         <Segmented options={TABS} value={tab} onChange={setTab} variant="underline" />
 
         <div ref={listRef} className="mt-4 grid gap-3 lg:grid-cols-2">
-          {loading && <p className="text-sm text-slate-400 lg:col-span-2">Loading...</p>}
+          {loading && <p className="text-sm text-slate-400 lg:col-span-2"><Loading /></p>}
           {!loading && visible.length === 0 && (
             <Card className="text-center lg:col-span-2">
               <p className="text-sm text-slate-500">

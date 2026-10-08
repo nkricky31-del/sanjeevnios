@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { ShieldAlert } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -115,7 +116,7 @@ export default function PatientOnboardingGate({ children }: Props) {
   if (loadingMember || declaration.status === 'loading') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-slate-400"><Loading /></p>
       </div>
     );
   }

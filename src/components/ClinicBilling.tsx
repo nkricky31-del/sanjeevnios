@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { useAuth } from '../lib/AuthContext';
@@ -126,7 +127,7 @@ export default function ClinicBilling({ clinicId }: Props) {
     });
   };
 
-  if (loading) return <p className="text-sm text-slate-400">Loading...</p>;
+  if (loading) return <p className="text-sm text-slate-400"><Loading /></p>;
 
   return (
     <div>

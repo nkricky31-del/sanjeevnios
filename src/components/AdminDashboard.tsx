@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { Building2, CalendarCheck, IndianRupee, Stethoscope, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -79,7 +80,7 @@ export default function AdminDashboard() {
       </div>
 
       {loading ? (
-        <p className="mt-3 text-sm text-slate-400">Loading...</p>
+        <p className="mt-3 text-sm text-slate-400"><Loading /></p>
       ) : (
         <>
           <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Clinics</p>

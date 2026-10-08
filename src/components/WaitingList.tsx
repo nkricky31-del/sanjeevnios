@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useStaggerIn } from '../lib/motionKit';
 import { BellRing, PlayCircle, SkipForward, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -268,7 +269,7 @@ export default function WaitingList({
       )}
 
       <div ref={listRef} className="mt-3 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && rows.length === 0 && <p className="text-sm text-slate-400">Nobody has checked in yet.</p>}
 
         {rows.map((r) => (

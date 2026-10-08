@@ -32,7 +32,7 @@ export default function Card({ children, className = '' }: PropsWithChildren<{ c
     <div
       ref={ref}
       style={reduce ? undefined : { opacity: 0 }}
-      className={`rounded-2xl border border-slate-100 bg-white p-4 ${className}`}
+      className={`rounded-2xl border border-slate-100 bg-white p-4 ${/hover:/.test(className) ? 'transition duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/5' : ''} ${className}`}
     >
       {children}
     </div>

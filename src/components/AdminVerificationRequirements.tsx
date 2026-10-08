@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { docTypesFor } from '../lib/documentTypes';
@@ -57,7 +58,7 @@ export default function AdminVerificationRequirements() {
       </p>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      {loading && <p className="mt-3 text-sm text-slate-400">Loading...</p>}
+      {loading && <p className="mt-3 text-sm text-slate-400"><Loading /></p>}
 
       {(['clinic', 'doctor'] as OwnerType[]).map((ownerType) => (
         <div key={ownerType} className="mt-4">

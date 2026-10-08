@@ -1,3 +1,4 @@
+import Loading from '../components/ui/Loading';
 import { CountUp } from '../lib/motionKit';
 import {
   BadgeCheck,
@@ -409,7 +410,7 @@ export default function Profile() {
               ) : (
                 <>
                   <div className="grid grid-cols-3 gap-3">
-                    {loadingMembers && <p className="col-span-3 text-sm text-slate-400">Loading...</p>}
+                    {loadingMembers && <p className="col-span-3 text-sm text-slate-400"><Loading /></p>}
                     {!loadingMembers && members.length === 0 && (
                       <p className="col-span-3 text-sm text-slate-400">No family members yet.</p>
                     )}

@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useCallback, useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -105,7 +106,7 @@ export default function ClinicAuditLog({ clinic }: { clinic: Clinic }) {
       </div>
 
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && rows.length === 0 && <p className="text-sm text-slate-400">No entries match.</p>}
         {rows.map((r) => (
           <Card key={r.id}>

@@ -43,7 +43,7 @@ export function InstallBanner() {
     <div
       role="dialog"
       aria-label="Install SanjeevniOS"
-      className="fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-40 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg shadow-slate-900/10 lg:hidden"
+      className="fixed inset-x-3 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg shadow-slate-900/10 lg:hidden"
     >
       <button
         type="button"

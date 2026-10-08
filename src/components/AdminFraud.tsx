@@ -1,3 +1,4 @@
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { FRAUD_THRESHOLDS, isFlagged, type ClinicFraudStats } from '../lib/fraud';
@@ -86,7 +87,7 @@ export default function AdminFraud() {
       </p>
 
       <div className="mt-2 space-y-2">
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && stats.length === 0 && <p className="text-sm text-slate-400">No rejections, no-shows, or refunds recorded yet.</p>}
         {stats.map((s) => (
           <Card key={s.clinicId}>
