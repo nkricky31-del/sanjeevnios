@@ -1,10 +1,9 @@
-import { Bell } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
-import { useRef, useState, type ReactNode } from 'react';
+import { Bell, Menu } from 'lucide-react';
+import { motion } from 'motion/react';
+import { useState, type ReactNode } from 'react';
 
 import HeroBand from '../ui/HeroBand';
-import Segmented from '../ui/Segmented';
-import Sidebar, { type NavItem } from './Sidebar';
+import Sidebar, { MobileDrawer, type NavItem } from './Sidebar';
 
 export interface ConsoleTab<T extends string> {
   value: T;
@@ -30,24 +29,28 @@ export default function ConsoleLayout<T extends string>({
   children: ReactNode;
 }) {
   const active = tabs.find((t) => t.value === value);
-  // Which way did we move? Tabs further down / to the right slide in from the right.
-  const index = tabs.findIndex((t) => t.value === value);
   const [tick, setTick] = useState(0);
-  const previous = useRef(index);
-  const direction = index >= previous.current ? 1 : -1;
-  previous.current = index;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const navItems = tabs.map((t) => ({ key: t.value, label: t.label, icon: t.icon, onSelect: () => onChange(t.value), active: t.value === value }));
+  const goHome = () => { onChange(tabs[0].value); setTick((n) => n + 1); };
   return (
     <div className="min-h-screen bg-canvas lg:pl-64">
-      <Sidebar
-        tag={tag}
-        onHome={() => { onChange(tabs[0].value); setTick((t) => t + 1); }}
-        items={tabs.map((t) => ({ key: t.value, label: t.label, icon: t.icon, onSelect: () => onChange(t.value), active: t.value === value }))}
-      />
+      <Sidebar tag={tag} onHome={goHome} items={navItems} />
+      <MobileDrawer open={menuOpen} onClose={() => setMenuOpen(false)} tag={tag} items={navItems} onHome={goHome} />
       <main className="mx-auto w-full max-w-7xl pb-10 lg:px-6">
         <HeroBand>
           <div className="flex items-center justify-between gap-3">
+            <motion.button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              aria-label="Open menu"
+              whileTap={{ scale: 0.9 }}
+              className="relative -ml-1 shrink-0 cursor-pointer rounded-full bg-white/15 p-2.5 text-white ring-1 ring-white/25 backdrop-blur outline-none transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white lg:hidden"
+            >
+              <Menu size={20} />
+            </motion.button>
             <motion.div
-              className="min-w-0"
+              className="min-w-0 flex-1 lg:flex-none"
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
@@ -86,20 +89,16 @@ export default function ConsoleLayout<T extends string>({
         </HeroBand>
 
         <div className="px-4">
-          <div className="mt-5 lg:hidden">
-            <Segmented options={tabs.map((t) => ({ value: t.value, label: t.label }))} value={value} onChange={onChange} variant="scroll" />
-          </div>
           {active && <p className="mt-6 hidden text-[10.5px] font-medium uppercase tracking-[0.14em] text-slate-500 lg:block">{active.label}</p>}
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={`${value}-${tick}`}
-              initial={{ opacity: 0, x: 36 * direction, y: 8 }}
-              animate={{ opacity: 1, x: 0, y: 0, transition: { type: 'spring', stiffness: 260, damping: 26 } }}
-              exit={{ opacity: 0, x: -24 * direction, transition: { duration: 0.14 } }}
-            >
-              {children}
-            </motion.div>
-          </AnimatePresence>
+          <motion.div
+            key={`${value}-${tick}`}
+            className="min-h-[60vh]"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {children}
+          </motion.div>
         </div>
       </main>
     </div>

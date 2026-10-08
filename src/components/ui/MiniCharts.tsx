@@ -23,9 +23,9 @@ export function Bars({ data, className = '' }: { data: ChartDatum[]; className?:
           <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
             <motion.div
               className="h-full rounded-full"
-              style={{ background: d.color ?? colorAt(i) }}
-              initial={{ width: 0 }}
-              animate={{ width: `${(d.value / max) * 100}%` }}
+              style={{ background: d.color ?? colorAt(i), width: `${(d.value / max) * 100}%`, transformOrigin: 'left' }}
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
               transition={{ duration: 0.9, delay: 0.1 + i * 0.07, ease: [0.22, 1, 0.36, 1] }}
             />
           </div>
@@ -45,9 +45,9 @@ export function Columns({ data, height = 96, color = '#6366f1' }: { data: ChartD
           <span className="text-[10px] font-bold tabular-nums text-slate-500">{d.value || ''}</span>
           <motion.div
             className="w-full rounded-t-md"
-            style={{ background: `linear-gradient(180deg, ${color}, ${color}66)`, minHeight: 3 }}
-            initial={{ height: 0 }}
-            animate={{ height: Math.max(3, (d.value / max) * height) }}
+            style={{ background: `linear-gradient(180deg, ${color}, ${color}66)`, height: Math.max(3, (d.value / max) * height), transformOrigin: 'bottom' }}
+            initial={{ scaleY: 0 }}
+            animate={{ scaleY: 1 }}
             transition={{ duration: 0.8, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
           />
           <span className="w-full truncate text-center text-[9px] text-slate-400">{d.label}</span>

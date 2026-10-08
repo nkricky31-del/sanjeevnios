@@ -87,9 +87,10 @@ export default function Home() {
   const [encounters, setEncounters] = useState<RecentEncounter[]>([]);
   const [loading, setLoading] = useState(true);
   const [acts, setActs] = useState<{ date: string; status: string }[]>([]);
+  const [actsLoaded, setActsLoaded] = useState(false);
 
   useEffect(() => {
-    supabase.from('appointments').select('date, status').limit(1000).then(({ data }) => setActs((data ?? []) as { date: string; status: string }[]));
+    supabase.from('appointments').select('date, status').limit(1000).then(({ data }) => { setActs((data ?? []) as { date: string; status: string }[]); setActsLoaded(true); });
   }, []);
 
   useEffect(() => {
@@ -225,7 +226,7 @@ export default function Home() {
         </div>
 
         {/* Recent encounters */}
-        <HomeCharts rows={acts} />
+        <div style={{ minHeight: actsLoaded ? undefined : 300 }}><HomeCharts rows={acts} /></div>
 
         <SectionTitle className="mt-6" actionLabel="View All" actionTo="/records">
           Recent Encounters

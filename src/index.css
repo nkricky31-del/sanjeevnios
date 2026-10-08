@@ -300,15 +300,17 @@ body {
 }
 
 /* white cards: rise in one after another, lift and take a coloured edge on hover */
+.app-scope main .bg-white[class*='rounded-'].border:not([data-card]) {
+  animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
 .app-scope main .bg-white[class*='rounded-'].border {
-  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
   transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease, border-color 0.25s ease;
 }
-.app-scope main .bg-white[class*='rounded-'].border:nth-child(2) { animation-delay: 0.05s; }
-.app-scope main .bg-white[class*='rounded-'].border:nth-child(3) { animation-delay: 0.1s; }
-.app-scope main .bg-white[class*='rounded-'].border:nth-child(4) { animation-delay: 0.15s; }
-.app-scope main .bg-white[class*='rounded-'].border:nth-child(5) { animation-delay: 0.2s; }
-.app-scope main .bg-white[class*='rounded-'].border:nth-child(n+6) { animation-delay: 0.25s; }
+.app-scope main .bg-white[class*='rounded-'].border:not([data-card]):nth-child(2) { animation-delay: 0.05s; }
+.app-scope main .bg-white[class*='rounded-'].border:not([data-card]):nth-child(3) { animation-delay: 0.1s; }
+.app-scope main .bg-white[class*='rounded-'].border:not([data-card]):nth-child(4) { animation-delay: 0.15s; }
+.app-scope main .bg-white[class*='rounded-'].border:not([data-card]):nth-child(5) { animation-delay: 0.2s; }
+.app-scope main .bg-white[class*='rounded-'].border:not([data-card]):nth-child(n+6) { animation-delay: 0.25s; }
 @media (hover: hover) {
   .app-scope main .bg-white[class*='rounded-'].border:hover {
     transform: translateY(-2px);
@@ -405,3 +407,13 @@ body {
 [data-open='true']:active { transform: scale(0.99) !important; }
 .settle-row { transition: background-color 0.2s ease, transform 0.2s ease; }
 .settle-row:hover { background-color: color-mix(in srgb, var(--accent, #4f46e5) 8%, transparent); transform: translateX(3px); }
+
+/* ---- Phones: keep the frame steady and the page cheap to paint ---- */
+.app-scope { overflow-x: clip; }
+@media (max-width: 1023px) {
+  /* big blurred colour blobs are the most expensive thing on a phone GPU */
+  .app-scope [class*='blur-3xl'] { filter: blur(28px) !important; }
+  .blob { filter: blur(34px); animation-duration: 22s; }
+  .app-scope main .bg-white[class*='rounded-'].border:not([data-card]) { animation: none; }
+  .app-scope main [class*='rounded-full'][class*='px-'][class*='text-xs'] { animation: none; }
+}

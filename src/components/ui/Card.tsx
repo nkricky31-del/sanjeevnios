@@ -36,6 +36,7 @@ export default function Card({
   return (
     <div
       ref={ref}
+      data-card="true"
       data-open={onOpen ? 'true' : undefined}
       role={onOpen ? 'link' : undefined}
       tabIndex={onOpen ? 0 : undefined}

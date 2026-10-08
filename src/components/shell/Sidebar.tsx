@@ -1,5 +1,6 @@
 import { LogOut, type LucideIcon } from 'lucide-react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 
 import BrandMark from '../ui/BrandMark';
@@ -74,14 +75,14 @@ function Inner({ it, active, hue }: { it: NavItem; active: boolean; hue: string 
 // The laptop-and-up navigation. A deep gradient in the role's colour, a glow
 // that drifts slowly behind it, items that slide in, and a highlight that glides
 // between them. Phones use the bottom bar (patient) or scrolling pills.
-export default function Sidebar({ tag, items, onHome }: { tag: string; items: NavItem[]; /** Called when the logo is clicked, to go back to the first screen. */ onHome?: () => void }) {
+export default function Sidebar({ tag, items, onHome, mobile = false }: { tag: string; items: NavItem[]; /** Called when the logo is clicked, to go back to the first screen. */ onHome?: () => void; /** Render as the slide-in menu panel on a phone instead of the fixed laptop sidebar. */ mobile?: boolean }) {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const who = profile?.name || (profile?.phone ? `+${profile.phone}` : 'Signed in');
 
   return (
     <aside
-      className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col overflow-hidden lg:flex"
+      className={mobile ? 'relative flex h-full w-72 max-w-[85vw] flex-col overflow-hidden shadow-2xl shadow-black/50' : 'fixed inset-y-0 left-0 z-30 hidden w-64 flex-col overflow-hidden lg:flex'}
       style={{ background: 'var(--sidebar-bg)' }}
     >
       {/* ambient light */}
@@ -156,5 +157,52 @@ export default function Sidebar({ tag, items, onHome }: { tag: string; items: Na
         </motion.button>
       </div>
     </aside>
+  );
+}
+
+// The same menu as the laptop sidebar, as a panel that slides in from the left on
+// a phone. Tapping an item, the logo or the dim background closes it; swiping it
+// left, or pressing Escape, does too.
+export function MobileDrawer({
+  open, onClose, tag, items, onHome,
+}: { open: boolean; onClose: () => void; tag: string; items: NavItem[]; onHome?: () => void }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [open, onClose]);
+
+  const closing = items.map((it) => ({ ...it, onSelect: it.onSelect ? () => { it.onSelect?.(); onClose(); } : undefined }));
+  return (
+    <AnimatePresence>
+      {open && (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+          <motion.div
+            className="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={onClose}
+          />
+          <motion.div
+            className="absolute inset-y-0 left-0"
+            initial={{ x: '-100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '-100%' }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={{ left: 0.4, right: 0 }}
+            onDragEnd={(_, info) => { if (info.offset.x < -70 || info.velocity.x < -400) onClose(); }}
+          >
+            <Sidebar mobile tag={tag} items={closing} onHome={() => { onHome?.(); onClose(); }} />
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 }

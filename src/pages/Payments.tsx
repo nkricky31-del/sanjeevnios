@@ -101,7 +101,7 @@ export default function Payments() {
           )}
         </Card>
 
-        <div className="mt-4"><PaymentsCharts rows={rows} /></div>
+        <div className={`mt-4 ${loading ? 'min-h-[440px] sm:min-h-[230px]' : ''}`}><PaymentsCharts rows={rows} /></div>
 
         {/* History */}
         <SectionTitle className="mt-6">Payment History</SectionTitle>
