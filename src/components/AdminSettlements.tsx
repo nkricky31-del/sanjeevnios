@@ -268,7 +268,7 @@ export default function AdminSettlements() {
 
           <div className="mt-3 space-y-3">
             {eligibleGroups.map((g) => (
-              <Card key={g.clinicId}>
+              <Card key={g.clinicId} onOpen={() => setDrill({ kind: 'payout', clinicId: g.clinicId })} accent="#10b981">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2.5">
                     <IconTile icon={IndianRupee} size="sm" tone="emerald" />
@@ -276,7 +276,6 @@ export default function AdminSettlements() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <p className="text-sm font-extrabold text-emerald-700">₹{g.total.toLocaleString()}</p>
-                    <button onClick={() => setDrill({ kind: 'payout', clinicId: g.clinicId })} className="text-xs font-bold text-brand-600">View details</button>
                   </div>
                 </div>
                 <Button
@@ -293,7 +292,7 @@ export default function AdminSettlements() {
                   {g.rows.map((r) => {
                     const net = round2(r.net_amount - r.platform_fee);
                     return (
-                      <div key={r.id} className="py-2.5">
+                      <div key={r.id} className="settle-row -mx-2 cursor-pointer rounded-xl px-2 py-2.5" onClick={(e) => { if (!(e.target as HTMLElement).closest('button, a, input, select, textarea')) setDrill({ kind: 'settlement', id: r.id }); }}>
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-slate-800">{patientLabel(r)}</p>
@@ -317,7 +316,6 @@ export default function AdminSettlements() {
                           <Button variant="ghost" onClick={() => setHoldFormFor((prev) => (prev === r.id ? null : r.id))}>
                             {holdFormFor === r.id ? 'Cancel' : 'Put on hold'}
                           </Button>
-                          <button onClick={() => setDrill({ kind: 'settlement', id: r.id })} className="text-xs font-bold text-brand-600">View details</button>
                         </div>
                         {holdFormFor === r.id && (
                           <AdminRejectForm
@@ -340,7 +338,7 @@ export default function AdminSettlements() {
         <div className="mt-3 space-y-2">
           {onHold.length === 0 && <p className="text-sm text-slate-400">Nothing on hold.</p>}
           {onHold.map((r) => (
-            <Card key={r.id}>
+            <Card key={r.id} onOpen={() => setDrill({ kind: 'settlement', id: r.id })} accent="#f59e0b">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <IconTile icon={PauseCircle} size="sm" tone="amber" />
@@ -353,7 +351,6 @@ export default function AdminSettlements() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <p className="text-sm font-bold text-slate-900">₹{r.net_amount.toLocaleString()}</p>
-                  <button onClick={() => setDrill({ kind: 'settlement', id: r.id })} className="text-xs font-bold text-brand-600">View details</button>
                 </div>
               </div>
               {r.hold_reason && (

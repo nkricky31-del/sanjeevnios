@@ -1,6 +1,6 @@
 import { Bell } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useRef, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 
 import HeroBand from '../ui/HeroBand';
 import Segmented from '../ui/Segmented';
@@ -32,6 +32,7 @@ export default function ConsoleLayout<T extends string>({
   const active = tabs.find((t) => t.value === value);
   // Which way did we move? Tabs further down / to the right slide in from the right.
   const index = tabs.findIndex((t) => t.value === value);
+  const [tick, setTick] = useState(0);
   const previous = useRef(index);
   const direction = index >= previous.current ? 1 : -1;
   previous.current = index;
@@ -39,6 +40,7 @@ export default function ConsoleLayout<T extends string>({
     <div className="min-h-screen bg-canvas lg:pl-64">
       <Sidebar
         tag={tag}
+        onHome={() => { onChange(tabs[0].value); setTick((t) => t + 1); }}
         items={tabs.map((t) => ({ key: t.value, label: t.label, icon: t.icon, onSelect: () => onChange(t.value), active: t.value === value }))}
       />
       <main className="mx-auto w-full max-w-7xl pb-10 lg:px-6">
@@ -90,7 +92,7 @@ export default function ConsoleLayout<T extends string>({
           {active && <p className="mt-6 hidden text-[10.5px] font-medium uppercase tracking-[0.14em] text-slate-500 lg:block">{active.label}</p>}
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
-              key={value}
+              key={`${value}-${tick}`}
               initial={{ opacity: 0, x: 36 * direction, y: 8 }}
               animate={{ opacity: 1, x: 0, y: 0, transition: { type: 'spring', stiffness: 260, damping: 26 } }}
               exit={{ opacity: 0, x: -24 * direction, transition: { duration: 0.14 } }}

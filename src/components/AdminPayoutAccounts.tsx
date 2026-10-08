@@ -221,7 +221,7 @@ export default function AdminPayoutAccounts() {
         {clinics.map((c) => {
           const icon = c.razorpay_account_status === 'activated' ? CheckCircle2 : c.razorpay_account_status === 'needs_clarification' || c.razorpay_account_status === 'suspended' ? ShieldAlert : c.razorpay_account_status === 'not_started' ? Banknote : Clock;
           return (
-            <Card key={c.id}>
+            <Card key={c.id} onOpen={() => setDrill({ kind: 'payout', clinicId: c.id })} accent={c.razorpay_account_status === 'activated' ? '#10b981' : '#0ea5e9'}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <IconTile icon={icon} size="sm" tone={c.razorpay_account_status === 'activated' ? 'emerald' : c.razorpay_account_status === 'needs_clarification' || c.razorpay_account_status === 'suspended' ? 'pink' : 'slate'} />
@@ -229,7 +229,6 @@ export default function AdminPayoutAccounts() {
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusPill label={STATUS_LABEL[c.razorpay_account_status]} tone={STATUS_TONE[c.razorpay_account_status]} />
-                  <button onClick={() => setDrill({ kind: 'payout', clinicId: c.id })} className="text-xs font-bold text-brand-600">View details</button>
                 </div>
               </div>
               {c.razorpay_fund_account_id && (

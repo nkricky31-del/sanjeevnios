@@ -115,12 +115,11 @@ export default function AdminPayments() {
         {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && payments.length === 0 && <p className="text-sm text-slate-400">No payments yet.</p>}
         {payments.slice(0, 30).map((p) => (
-          <Card key={p.id}>
+          <Card key={p.id} onOpen={() => setDrill({ kind: 'payment', id: p.id })} accent={p.status === 'captured' ? '#10b981' : p.status === 'refunded' ? '#8b5cf6' : p.status === 'hold' ? '#f43f5e' : '#f59e0b'}>
             <div className="flex items-center justify-between">
               <p className="font-semibold text-slate-900">₹{p.amount}</p>
               <div className="flex items-center gap-2">
                 <StatusPill label={p.status} tone={STATUS_TONE[p.status]} />
-                <button onClick={() => setDrill({ kind: 'payment', id: p.id })} className="text-xs font-bold text-brand-600">View details</button>
               </div>
             </div>
             <p className="text-sm text-slate-500">

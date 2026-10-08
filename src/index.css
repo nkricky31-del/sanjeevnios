@@ -382,3 +382,26 @@ body {
 
 /* checkboxes and radios take the role's colour */
 .app-scope input[type='checkbox'], .app-scope input[type='radio'] { accent-color: var(--accent, #4f46e5); width: 1.1rem; height: 1.1rem; cursor: pointer; }
+
+/* Clickable cards: they glow in their own colour, and an "Open" tag slides in. */
+.open-hint {
+  position: absolute;
+  right: 0.9rem;
+  bottom: 0.7rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent, #4f46e5);
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+.open-hint::after { content: ' \2192'; }
+[data-open='true']:hover > .open-hint, [data-open='true']:focus-visible > .open-hint { opacity: 1; transform: none; }
+[data-open='true']:focus-visible { outline: 2px solid var(--accent, #4f46e5); outline-offset: 2px; }
+[data-open='true']:active { transform: scale(0.99) !important; }
+.settle-row { transition: background-color 0.2s ease, transform 0.2s ease; }
+.settle-row:hover { background-color: color-mix(in srgb, var(--accent, #4f46e5) 8%, transparent); transform: translateX(3px); }

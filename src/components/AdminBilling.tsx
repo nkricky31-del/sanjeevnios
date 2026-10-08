@@ -191,11 +191,10 @@ export default function AdminBilling() {
           const used = doctorCounts[c.id] ?? 0;
           const overLimit = sub?.plans?.max_doctors != null && used > sub.plans.max_doctors;
           return (
-            <Card key={c.id}>
+            <Card key={c.id} onOpen={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} accent="#0ea5e9">
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-slate-900">{c.name}</p>
                 <div className="flex items-center gap-1.5">
-                  <button onClick={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} className="text-xs font-bold text-brand-600">View details</button>
                   <StatusPill label={c.is_active ? 'Active' : 'Inactive'} tone={c.is_active ? 'live' : 'neutral'} />
                   {sub?.billing_status === 'past_due' && <StatusPill label="Past due" tone="danger" />}
                 </div>

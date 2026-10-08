@@ -94,12 +94,11 @@ export default function AdminFraud() {
         {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && stats.length === 0 && <p className="text-sm text-slate-400">No rejections, no-shows, or refunds recorded yet.</p>}
         {stats.map((s) => (
-          <Card key={s.clinicId}>
+          <Card key={s.clinicId} onOpen={() => setDrill({ kind: 'fraud', clinicId: s.clinicId })} accent={s.flagged ? '#f59e0b' : '#6366f1'}>
             <div className="flex items-center justify-between">
               <p className="font-semibold text-slate-900">{s.clinicName}</p>
               <div className="flex items-center gap-2">
                 {s.flagged && <StatusPill label="Flagged" tone="warning" />}
-                <button onClick={() => setDrill({ kind: 'fraud', clinicId: s.clinicId })} className="text-xs font-bold text-brand-600">View details</button>
               </div>
             </div>
             <p className="text-sm text-slate-600">

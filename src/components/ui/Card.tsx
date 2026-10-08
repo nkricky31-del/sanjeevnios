@@ -6,7 +6,12 @@ import { EASE_OUT } from '../../lib/motionKit';
 // The surface everything is built on: a hairline border on the card ground, no
 // shadow. On entering it rises into place; cards lower on the screen start a
 // moment later, so a page of cards cascades in instead of appearing at once.
-export default function Card({ children, className = '' }: PropsWithChildren<{ className?: string }>) {
+// Anything inside the card that already does something on click keeps doing it.
+const INTERACTIVE = 'button, a, input, select, textarea, label, [role="switch"], [role="button"]';
+
+export default function Card({
+  children, className = '', onOpen, accent,
+}: PropsWithChildren<{ className?: string; /** Makes the whole card a link to its detail page. */ onOpen?: () => void; /** The colour its hover glow takes. */ accent?: string }>) {
   const ref = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
 
@@ -31,10 +36,16 @@ export default function Card({ children, className = '' }: PropsWithChildren<{ c
   return (
     <div
       ref={ref}
-      style={reduce ? undefined : { opacity: 0 }}
-      className={`rounded-2xl border border-slate-100 bg-white p-4 ${/hover:/.test(className) ? 'transition duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/5' : ''} ${className}`}
+      data-open={onOpen ? 'true' : undefined}
+      role={onOpen ? 'link' : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onClick={onOpen ? (e) => { if (!(e.target as HTMLElement).closest(INTERACTIVE)) onOpen(); } : undefined}
+      onKeyDown={onOpen ? (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen(); } } : undefined}
+      style={{ ...(reduce ? {} : { opacity: 0 }), ...(accent ? ({ '--accent': accent } as React.CSSProperties) : {}) }}
+      className={`${onOpen ? 'group/open relative cursor-pointer ' : ''}rounded-2xl border border-slate-100 bg-white p-4 ${/hover:/.test(className) ? 'transition duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/5' : ''} ${className}`}
     >
       {children}
+      {onOpen && <span aria-hidden className="open-hint">Open</span>}
     </div>
   );
 }

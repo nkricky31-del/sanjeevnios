@@ -125,12 +125,11 @@ export default function AdminSubscriptions() {
           const status = usageStatus(tier, bookingsUsed);
 
           return (
-            <Card key={c.id}>
+            <Card key={c.id} onOpen={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} accent={c.status === 'approved' ? '#10b981' : c.status === 'pending' ? '#f59e0b' : '#f43f5e'}>
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-slate-900">{c.name}</p>
                 <div className="flex items-center gap-2">
                   <StatusPill label={c.status} tone={c.status === 'approved' ? 'live' : 'neutral'} />
-                  <button onClick={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} className="text-xs font-bold text-brand-600">View details</button>
                 </div>
               </div>
 

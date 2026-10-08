@@ -1,6 +1,6 @@
 import { LogOut, type LucideIcon } from 'lucide-react';
 import { motion } from 'motion/react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 
 import BrandMark from '../ui/BrandMark';
 import Wordmark from '../ui/Wordmark';
@@ -74,7 +74,8 @@ function Inner({ it, active, hue }: { it: NavItem; active: boolean; hue: string 
 // The laptop-and-up navigation. A deep gradient in the role's colour, a glow
 // that drifts slowly behind it, items that slide in, and a highlight that glides
 // between them. Phones use the bottom bar (patient) or scrolling pills.
-export default function Sidebar({ tag, items }: { tag: string; items: NavItem[] }) {
+export default function Sidebar({ tag, items, onHome }: { tag: string; items: NavItem[]; /** Called when the logo is clicked, to go back to the first screen. */ onHome?: () => void }) {
+  const navigate = useNavigate();
   const { profile } = useAuth();
   const who = profile?.name || (profile?.phone ? `+${profile.phone}` : 'Signed in');
 
@@ -100,7 +101,7 @@ export default function Sidebar({ tag, items }: { tag: string; items: NavItem[] 
       />
 
       <div className="relative px-6 pb-2 pt-8">
-        <Link to="/" className="flex items-center gap-2.5 font-display text-lg font-bold tracking-[-0.02em] text-white outline-none focus-visible:underline">
+        <Link to="/" onClick={onHome ? (e) => { e.preventDefault(); onHome(); navigate('/'); window.scrollTo({ top: 0, behavior: 'smooth' }); } : undefined} className="flex items-center gap-2.5 font-display text-lg font-bold tracking-[-0.02em] text-white outline-none focus-visible:underline">
           <BrandMark size={32} tone="light" />
           <Wordmark dotClassName="text-[var(--sidebar-light)]" />
         </Link>

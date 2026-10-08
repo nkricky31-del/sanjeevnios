@@ -453,13 +453,13 @@ export default function AdminConsole() {
               {loading && <p className="text-sm text-slate-400"><Loading /></p>}
               {!loading && clinics.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
               {clinics.map((c) => (
-                <Card key={c.id}>
+                <Card key={c.id} onOpen={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} accent={'#f59e0b'}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2.5">
                       <IconTile icon={Building2} size="sm" />
                       <p className="truncate font-bold text-slate-900">{c.name}</p>
                     </div>
-                    <div className="flex items-center gap-2"><button onClick={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} className="text-xs font-bold text-brand-600">View details</button><StatusPill label="Pending" tone="warning" /></div>
+                    <div className="flex items-center gap-2"><StatusPill label="Pending" tone="warning" /></div>
                   </div>
                   <p className="mt-2 text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
                   {c.address && <p className="text-xs text-slate-400">{c.address}</p>}
@@ -521,13 +521,13 @@ export default function AdminConsole() {
               {loading && <p className="text-sm text-slate-400"><Loading /></p>}
               {!loading && doctors.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
               {doctors.map((d) => (
-                <Card key={d.id}>
+                <Card key={d.id} onOpen={() => setDrill({ kind: 'doctor', id: d.id })} accent={'#f59e0b'}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2.5">
                       <IconTile icon={Stethoscope} size="sm" />
                       <p className="truncate font-bold text-slate-900">{d.name}</p>
                     </div>
-                    <div className="flex items-center gap-2"><button onClick={() => setDrill({ kind: 'doctor', id: d.id })} className="text-xs font-bold text-brand-600">View details</button><StatusPill label="Pending" tone="warning" /></div>
+                    <div className="flex items-center gap-2"><StatusPill label="Pending" tone="warning" /></div>
                   </div>
                   {d.specialty && <p className="mt-2 text-sm font-medium text-brand-600">{d.specialty}</p>}
                   <p className="text-sm text-slate-500">Reg. {d.reg_no ?? '—'}</p>
@@ -597,13 +597,13 @@ export default function AdminConsole() {
                 <p className="text-sm text-slate-400">No approved clinics yet.</p>
               )}
               {approvedClinics.map((c) => (
-                <Card key={c.id}>
+                <Card key={c.id} onOpen={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} accent={'#10b981'}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2.5">
                       <IconTile icon={Building2} size="sm" tone={c.is_verified ? 'emerald' : 'slate'} />
                       <p className="truncate font-bold text-slate-900">{c.name}</p>
                     </div>
-                    <div className="flex items-center gap-2"><button onClick={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} className="text-xs font-bold text-brand-600">View details</button><StatusPill label={c.is_verified ? 'Verified' : 'Not verified'} tone={c.is_verified ? 'live' : 'neutral'} /></div>
+                    <div className="flex items-center gap-2"><StatusPill label={c.is_verified ? 'Verified' : 'Not verified'} tone={c.is_verified ? 'live' : 'neutral'} /></div>
                   </div>
                   <p className="mt-2 text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
                   <div className="mt-2">
@@ -634,13 +634,13 @@ export default function AdminConsole() {
                 <p className="text-sm text-slate-400">No approved doctors yet.</p>
               )}
               {approvedDoctors.map((d) => (
-                <Card key={d.id}>
+                <Card key={d.id} onOpen={() => setDrill({ kind: 'doctor', id: d.id })} accent={'#10b981'}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2.5">
                       <IconTile icon={Stethoscope} size="sm" tone={d.is_verified ? 'emerald' : 'slate'} />
                       <p className="truncate font-bold text-slate-900">{d.name}</p>
                     </div>
-                    <div className="flex items-center gap-2"><button onClick={() => setDrill({ kind: 'doctor', id: d.id })} className="text-xs font-bold text-brand-600">View details</button><StatusPill label={d.is_verified ? 'Verified' : 'Not verified'} tone={d.is_verified ? 'live' : 'neutral'} /></div>
+                    <div className="flex items-center gap-2"><StatusPill label={d.is_verified ? 'Verified' : 'Not verified'} tone={d.is_verified ? 'live' : 'neutral'} /></div>
                   </div>
                   {d.specialty && <p className="mt-2 text-sm font-medium text-brand-600">{d.specialty}</p>}
                   <p className="text-xs text-slate-400">{d.clinics?.name}</p>
