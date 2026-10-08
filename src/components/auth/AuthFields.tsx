@@ -7,7 +7,7 @@ import { livePhoneDigits } from '../../lib/phone';
 
 // Building blocks for the three sign-in screens. They read the screen's accent
 // from the --accent CSS variable AuthShell sets, so one set of components
-// serves patient (teal), clinic (amber) and admin (violet).
+// serves patient (indigo), clinic (emerald) and admin (deep slate).
 
 // The input's border follows the pointer (a soft accent glow that only exists
 // inside a 2px frame) and goes fully accent while the field has focus.
@@ -159,12 +159,10 @@ export function AuthSubmit({
       type="submit"
       whileTap={props.disabled ? undefined : { scale: 0.98 }}
       {...props}
-      className="relative mt-5 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-ground outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-ground-2 enabled:hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+      className="relative mt-5 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-ground-2 enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {loading ? loadingLabel : children}
       {!loading && <ArrowRight size={16} />}
-      {/* the accent only ever appears as a rule */}
-      <span aria-hidden className="absolute inset-x-4 -bottom-px h-0.5 rounded-full bg-[var(--accent)]" />
     </motion.button>
   );
 }

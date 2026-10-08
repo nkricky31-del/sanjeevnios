@@ -28,7 +28,7 @@ export default function MarketingFooter() {
                   <Link
                     key={l.to}
                     to={l.to}
-                    className="w-fit font-ui text-sm text-ink-2 outline-none transition-colors hover:text-amber focus-visible:text-amber"
+                    className="w-fit font-ui text-sm text-ink-2 outline-none transition-colors hover:text-primary focus-visible:text-primary"
                   >
                     {l.label}
                   </Link>

@@ -1,12 +1,12 @@
 <svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#4a1fc9" />
-      <stop offset="1" stop-color="#7d55f3" />
+      <stop stop-color="#2f4ab8" />
+      <stop offset="1" stop-color="#3b5bdb" />
     </linearGradient>
     <linearGradient id="heart" x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#fbfaff" />
-      <stop offset="1" stop-color="#e4dcff" />
+      <stop stop-color="#ffffff" />
+      <stop offset="1" stop-color="#e0ebff" />
     </linearGradient>
   </defs>
 
@@ -20,13 +20,13 @@
       />
       <path
         d="M28.4 17.6h7.2v7.2h7.2v7.2h-7.2v7.2h-7.2v-7.2h-7.2v-7.2h7.2v-7.2Z"
-        fill="#4a1fc9"
+        fill="#3b5bdb"
       />
     </g>
   </g>
 
   <text x="90" y="330" font-family="Arial, Helvetica, sans-serif" font-size="76" font-weight="800" fill="#ffffff">SanjeevniOS</text>
-  <text x="90" y="385" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="600" fill="#e9e2ff">Your Health, Our Priority</text>
+  <text x="90" y="385" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="600" fill="#e0ebff">Your Health, Our Priority</text>
 
   <text x="90" y="460" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#ffffff">Clinic bookings, queues, and records</text>
   <text x="90" y="500" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#ffffff">— for patients and clinics, in one place.</text>

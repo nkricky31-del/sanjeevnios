@@ -25,14 +25,14 @@ export default function ForClinics() {
     <div>
       <PageHead
         eyebrow="For clinics"
-        accent="amber"
+        accent="primary"
         title="Bring your clinic online."
         lede="Registration takes a few minutes to start. Nothing goes live to patients until an admin verifies your clinic and every doctor on it."
       >
         <PillButton to="/clinic/login?mode=register">Register your clinic</PillButton>
       </PageHead>
-      <RuleList items={STEPS} accent="amber" />
-      <Checklist title="What you get" items={BENEFITS} accent="amber" />
+      <RuleList items={STEPS} accent="primary" />
+      <Checklist title="What you get" items={BENEFITS} accent="primary" />
       <div className="mx-auto max-w-6xl px-5 py-16">
         <PillButton to="/clinic/login?mode=register">Register your clinic</PillButton>
       </div>

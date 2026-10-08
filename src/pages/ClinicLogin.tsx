@@ -174,7 +174,7 @@ export default function ClinicLogin() {
               placeholder="Clinic's mobile number"
             />
             {error && <AuthError>{error}</AuthError>}
-            <TurnstileWidget onToken={setCaptchaToken} resetSignal={captchaReset} theme="dark" />
+            <TurnstileWidget onToken={setCaptchaToken} resetSignal={captchaReset} theme="light" />
             <AuthSubmit loading={loading} loadingLabel="Sending..." disabled={loading || (CAPTCHA_ENABLED && !captchaToken)}>
               Continue
             </AuthSubmit>

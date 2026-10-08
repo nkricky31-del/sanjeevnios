@@ -110,7 +110,7 @@ export default function PatientLogin() {
           <form onSubmit={sendOtp} className="mt-6">
             <PhoneField label="Mobile number" value={digits} onChange={setDigits} placeholder="Enter your mobile number" />
             {error && <AuthError>{error}</AuthError>}
-            <TurnstileWidget onToken={setCaptchaToken} resetSignal={captchaReset} theme="dark" />
+            <TurnstileWidget onToken={setCaptchaToken} resetSignal={captchaReset} theme="light" />
             <AuthSubmit loading={loading} loadingLabel="Sending..." disabled={loading || (CAPTCHA_ENABLED && !captchaToken)}>
               Continue
             </AuthSubmit>

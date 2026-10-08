@@ -67,7 +67,7 @@ export default function Roster() {
   return (
     <section className="bg-ground py-24" aria-labelledby="roster-heading">
       <div className="mx-auto max-w-6xl px-5">
-        <Reveal><Label accent="teal">The network, live</Label></Reveal>
+        <Reveal><Label accent="leaf">The network, live</Label></Reveal>
         <Reveal delay={0.08}>
           <h2 id="roster-heading" className="mt-5 max-w-xl font-display text-[clamp(28px,4vw,52px)] font-extrabold leading-[1.05] tracking-[-0.03em] text-ink">
             Who is on SanjeevniOS today.
@@ -77,7 +77,7 @@ export default function Roster() {
           {rows.map((r, i) => (
             <Reveal key={r.key} delay={i * 0.05} y={14}>
               <div className="flex items-baseline gap-4 border-b border-hairline py-5 sm:gap-8 sm:py-6">
-                <Label accent={r.tag === 'Network' ? 'amber' : 'teal'} className="w-20 shrink-0 sm:w-28">{r.tag}</Label>
+                <Label accent={r.tag === 'Network' ? 'primary' : 'leaf'} className="w-20 shrink-0 sm:w-28">{r.tag}</Label>
                 <p className="flex-1 font-display text-xl font-bold tracking-[-0.02em] text-ink sm:text-3xl">{r.name}</p>
                 <p className="font-display text-xl font-bold tabular-nums text-ink sm:text-3xl">
                   {stats ? <Count value={stats[r.key] as number} /> : '-'}

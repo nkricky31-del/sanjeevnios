@@ -25,11 +25,11 @@ export default function StatementFold() {
 
       <div className="relative mx-auto w-full max-w-6xl px-5 py-24">
         <Reveal>
-          <Label accent="teal">The problem</Label>
+          <Label accent="leaf">The problem</Label>
         </Reveal>
         <Reveal delay={0.08}>
           <p className="mt-6 max-w-[22ch] font-display text-[clamp(24px,3.6vw,52px)] font-bold leading-[1.12] tracking-[-0.02em] text-ink">
-            A clinic's front desk and a patient's phone should show <span className="text-amber">the same queue.</span>
+            A clinic's front desk and a patient's phone should show <span className="text-primary">the same queue.</span>
           </p>
         </Reveal>
         <Reveal delay={0.16}>
@@ -40,7 +40,7 @@ export default function StatementFold() {
         </Reveal>
         <p
           aria-hidden
-          className="mt-14 select-none font-display text-[clamp(96px,16vw,220px)] font-extrabold leading-none tracking-[-0.04em] text-transparent [-webkit-text-stroke:1px_rgb(237_231_220/0.35)]"
+          className="mt-14 select-none font-display text-[clamp(96px,16vw,220px)] font-extrabold leading-none tracking-[-0.04em] text-transparent [-webkit-text-stroke:1px_rgb(17_24_39/0.22)]"
         >
           01
         </p>

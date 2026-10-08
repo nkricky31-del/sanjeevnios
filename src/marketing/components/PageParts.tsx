@@ -5,8 +5,8 @@ import { Label, Reveal } from './motionKit';
 
 // Shared pieces for the inner marketing pages, in the same dark label style as
 // the home page. Pages sit under the fixed 58px nav, hence the top padding.
-export function PageHead({ eyebrow, accent = 'teal', title, lede, children }: {
-  eyebrow: string; accent?: 'amber' | 'teal'; title: ReactNode; lede?: string; children?: ReactNode;
+export function PageHead({ eyebrow, accent = 'leaf', title, lede, children }: {
+  eyebrow: string; accent?: 'primary' | 'leaf'; title: ReactNode; lede?: string; children?: ReactNode;
 }) {
   return (
     <header className="mx-auto max-w-6xl px-5 pb-14 pt-[calc(58px+4.5rem)]">
@@ -27,7 +27,7 @@ export function PageHead({ eyebrow, accent = 'teal', title, lede, children }: {
 }
 
 // Hairline-ruled rows: index, display title, body.
-export function RuleList({ items, accent = 'teal' }: { items: { title: string; body: string }[]; accent?: 'amber' | 'teal' }) {
+export function RuleList({ items, accent = 'leaf' }: { items: { title: string; body: string }[]; accent?: 'primary' | 'leaf' }) {
   return (
     <div className="mx-auto max-w-6xl px-5">
       <div className="border-t border-hairline">
@@ -45,7 +45,7 @@ export function RuleList({ items, accent = 'teal' }: { items: { title: string; b
   );
 }
 
-export function Checklist({ title, items, accent = 'teal' }: { title: string; items: string[]; accent?: 'amber' | 'teal' }) {
+export function Checklist({ title, items, accent = 'leaf' }: { title: string; items: string[]; accent?: 'primary' | 'leaf' }) {
   return (
     <section className="mt-20 bg-ground-2 py-20">
       <div className="mx-auto max-w-6xl px-5">
@@ -54,7 +54,7 @@ export function Checklist({ title, items, accent = 'teal' }: { title: string; it
           {items.map((b, i) => (
             <Reveal key={b} delay={i * 0.04} y={10}>
               <li className="flex gap-4 border-b border-hairline py-4 font-ui text-sm leading-relaxed text-ink-2">
-                <span aria-hidden className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${accent === 'amber' ? 'bg-amber' : 'bg-teal-text'}`} />
+                <span aria-hidden className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${accent === 'primary' ? 'bg-primary' : 'bg-leaf-text'}`} />
                 {b}
               </li>
             </Reveal>
@@ -68,8 +68,8 @@ export function Checklist({ title, items, accent = 'teal' }: { title: string; it
 export function PillButton({ to, children, tone = 'light' }: { to: string; children: ReactNode; tone?: 'light' | 'outline' }) {
   const navigate = useNavigate();
   const cls = tone === 'light'
-    ? 'bg-ink text-ground hover:bg-white focus-visible:ring-amber'
-    : 'border border-ink/40 text-ink hover:border-amber hover:text-amber focus-visible:ring-amber';
+    ? 'bg-primary text-white hover:bg-primary-dark focus-visible:ring-primary'
+    : 'border border-ink/40 text-ink hover:border-primary hover:text-primary focus-visible:ring-primary';
   return (
     <button type="button" onClick={() => navigate(to)}
       className={`cursor-pointer rounded-full px-7 py-3.5 font-ui text-sm font-semibold outline-none transition focus-visible:ring-2 ${cls}`}>

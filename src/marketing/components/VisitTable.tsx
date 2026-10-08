@@ -16,7 +16,7 @@ export default function VisitTable() {
   return (
     <section className="bg-ground-2 py-24" aria-labelledby="visit-heading">
       <div className="mx-auto max-w-6xl px-5">
-        <Reveal><Label accent="amber">How a visit runs</Label></Reveal>
+        <Reveal><Label accent="primary">How a visit runs</Label></Reveal>
         <Reveal delay={0.08}>
           <h2 id="visit-heading" className="mt-5 font-display text-[clamp(28px,4vw,52px)] font-extrabold leading-[1.05] tracking-[-0.03em] text-ink">
             From search to record.

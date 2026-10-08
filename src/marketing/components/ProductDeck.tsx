@@ -9,22 +9,22 @@ interface DeckCard {
   code: string;
   title: string;
   who: string;
-  tone: 'amber' | 'teal';
+  tone: 'primary' | 'leaf';
   body: string;
   icon: LucideIcon;
 }
 
 // Only what the product actually does today - no invented numbers or quotes.
 const CARDS: DeckCard[] = [
-  { code: '01', title: 'Book', who: 'Patients', tone: 'teal', icon: CalendarCheck,
+  { code: '01', title: 'Book', who: 'Patients', tone: 'leaf', icon: CalendarCheck,
     body: 'Search verified clinics, pick a doctor and a slot, or simply walk in. Either way you hold a place in the queue.' },
-  { code: '02', title: 'Queue', who: 'Clinics & patients', tone: 'amber', icon: Ticket,
+  { code: '02', title: 'Queue', who: 'Clinics & patients', tone: 'primary', icon: Ticket,
     body: 'A live token issued in arrival order. Paying online buys convenience, never a place ahead of anyone.' },
-  { code: '03', title: 'Consult', who: 'Doctors', tone: 'teal', icon: ClipboardList,
+  { code: '03', title: 'Consult', who: 'Doctors', tone: 'leaf', icon: ClipboardList,
     body: 'Visit notes and prescriptions written once and saved to the patient\'s record, encrypted at rest.' },
-  { code: '04', title: 'Pay', who: 'Patients & clinics', tone: 'amber', icon: Banknote,
+  { code: '04', title: 'Pay', who: 'Patients & clinics', tone: 'primary', icon: Banknote,
     body: 'Pay online or at the counter. Each visit\'s payment is tracked, and clinics are paid out per completed visit.' },
-  { code: '05', title: 'Verify', who: 'Admin team', tone: 'teal', icon: BadgeCheck,
+  { code: '05', title: 'Verify', who: 'Admin team', tone: 'leaf', icon: BadgeCheck,
     body: 'Every clinic and doctor is document-reviewed before they ever appear in patient search.' },
 ];
 
@@ -99,7 +99,7 @@ export default function ProductDeck() {
     <section className="overflow-x-clip bg-ground-2 py-24" aria-labelledby="deck-heading">
       <div className="mx-auto grid max-w-6xl items-center gap-14 px-5 lg:grid-cols-2">
         <div>
-          <Reveal><Label accent="amber">The product</Label></Reveal>
+          <Reveal><Label accent="primary">The product</Label></Reveal>
           <Reveal delay={0.08}>
             <h2 id="deck-heading" className="mt-5 font-display text-[clamp(32px,5vw,64px)] font-extrabold leading-[1.02] tracking-[-0.03em] text-ink">
               One visit.<br />Everything in sync.
@@ -113,11 +113,11 @@ export default function ProductDeck() {
           </Reveal>
           <Reveal delay={0.24} className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button type="button" onClick={() => navigate('/login')}
-              className="cursor-pointer rounded-full bg-ink px-6 py-3 font-ui text-sm font-semibold text-ground outline-none transition hover:bg-white focus-visible:ring-2 focus-visible:ring-teal-text focus-visible:ring-offset-2 focus-visible:ring-offset-ground-2">
+              className="cursor-pointer rounded-full bg-primary px-6 py-3 font-ui text-sm font-semibold text-white outline-none transition hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-leaf-text focus-visible:ring-offset-2 focus-visible:ring-offset-ground-2">
               Book a visit
             </button>
             <button type="button" onClick={() => navigate('/clinic/login?mode=register')}
-              className="cursor-pointer rounded-full border border-ink/40 px-6 py-3 font-ui text-sm font-semibold text-ink outline-none transition hover:border-amber hover:text-amber focus-visible:ring-2 focus-visible:ring-amber">
+              className="cursor-pointer rounded-full border border-ink/40 px-6 py-3 font-ui text-sm font-semibold text-ink outline-none transition hover:border-primary hover:text-primary focus-visible:ring-2 focus-visible:ring-primary">
               Register your clinic
             </button>
           </Reveal>
@@ -135,7 +135,7 @@ export default function ProductDeck() {
             onPointerMove={onMove}
             onPointerUp={onUp}
             onPointerCancel={onUp}
-            className="relative aspect-square w-[calc(100%-3.5rem)] max-w-[420px] sm:mx-auto sm:w-full cursor-grab touch-pan-y select-none rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-amber focus-visible:ring-offset-8 focus-visible:ring-offset-ground-2 active:cursor-grabbing"
+            className="relative aspect-square w-[calc(100%-3.5rem)] max-w-[420px] sm:mx-auto sm:w-full cursor-grab touch-pan-y select-none rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-8 focus-visible:ring-offset-ground-2 active:cursor-grabbing"
           >
             {CARDS.map((card, id) => {
               const pos = order.indexOf(id);
@@ -161,7 +161,7 @@ export default function ProductDeck() {
                 <motion.article
                   key={card.code}
                   aria-hidden={!isTop}
-                  className="absolute inset-0 flex flex-col justify-between rounded-2xl border border-hairline bg-ground p-6 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.65)]"
+                  className="absolute inset-0 flex flex-col justify-between rounded-2xl border border-hairline bg-ground p-6 shadow-[0_18px_40px_-14px_rgba(17,24,39,0.28)]"
                   style={{ zIndex: CARDS.length - pos, pointerEvents: isTop ? 'auto' : 'none' }}
                   animate={target}
                   transition={snap ? { duration: 0 } : isThrown ? { duration: THROW_MS / 1000, ease: [0.4, 0, 0.6, 1] } : { type: 'spring', stiffness: 260, damping: 26 }}
@@ -173,7 +173,7 @@ export default function ProductDeck() {
                   <div>
                     <Icon size={26} strokeWidth={1.5} className="text-ink" />
                     <h3 className="mt-4 font-display text-4xl font-extrabold tracking-[-0.03em] text-ink">
-                      {card.title}<span className={card.tone === 'amber' ? 'text-amber' : 'text-teal-text'}>.</span>
+                      {card.title}<span className={card.tone === 'primary' ? 'text-primary' : 'text-leaf-text'}>.</span>
                     </h3>
                     <p className="mt-3 font-ui text-sm leading-relaxed text-ink-2">{card.body}</p>
                   </div>
@@ -186,16 +186,16 @@ export default function ProductDeck() {
             <p className="font-ui text-xs text-muted">Drag, or use ← → keys</p>
             <div className="flex items-center gap-3">
               <button type="button" aria-label="Previous card" onClick={previous}
-                className="cursor-pointer rounded-full border border-hairline p-2 text-ink-2 outline-none transition hover:border-ink/40 hover:text-ink focus-visible:ring-2 focus-visible:ring-amber">
+                className="cursor-pointer rounded-full border border-hairline p-2 text-ink-2 outline-none transition hover:border-ink/40 hover:text-ink focus-visible:ring-2 focus-visible:ring-primary">
                 <ChevronLeft size={16} />
               </button>
               <ul className="flex items-center gap-1.5" aria-label={`Card ${topId + 1} of ${CARDS.length}`}>
                 {CARDS.map((c, i) => (
-                  <li key={c.code} className={`h-1.5 rounded-full transition-all ${i === topId ? 'w-5 bg-amber' : 'w-1.5 bg-ink/25'}`} />
+                  <li key={c.code} className={`h-1.5 rounded-full transition-all ${i === topId ? 'w-5 bg-primary' : 'w-1.5 bg-ink/25'}`} />
                 ))}
               </ul>
               <button type="button" aria-label="Next card" onClick={() => throwTop(1)}
-                className="cursor-pointer rounded-full border border-hairline p-2 text-ink-2 outline-none transition hover:border-ink/40 hover:text-ink focus-visible:ring-2 focus-visible:ring-amber">
+                className="cursor-pointer rounded-full border border-hairline p-2 text-ink-2 outline-none transition hover:border-ink/40 hover:text-ink focus-visible:ring-2 focus-visible:ring-primary">
                 <ChevronRight size={16} />
               </button>
             </div>

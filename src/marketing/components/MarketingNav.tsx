@@ -11,8 +11,8 @@ const LINKS = [
 ];
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
-  `font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] transition-colors hover:text-amber focus-visible:text-amber ${
-    isActive ? 'text-amber' : 'text-ink-2'
+  `font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] transition-colors hover:text-primary focus-visible:text-primary ${
+    isActive ? 'text-primary' : 'text-ink-2'
   }`;
 
 // Fixed 58px bar on a translucent ground: 14px backdrop blur, bottom hairline,
@@ -32,7 +32,7 @@ export default function MarketingNav() {
           onClick={() => setOpen(false)}
           className="font-display text-[15px] font-bold tracking-[-0.02em] text-ink outline-none focus-visible:underline"
         >
-          SanjeevniOS<span className="text-amber">.</span>
+          SanjeevniOS<span className="text-primary">.</span>
         </Link>
 
         <nav className="hidden items-center gap-8 md:flex" aria-label="Main">
@@ -47,14 +47,14 @@ export default function MarketingNav() {
           <button
             type="button"
             onClick={() => navigate('/login')}
-            className="cursor-pointer rounded-full border border-ink/30 px-4 py-1.5 font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink outline-none transition-colors hover:bg-ink hover:text-ground focus-visible:ring-2 focus-visible:ring-amber"
+            className="cursor-pointer rounded-full border border-ink/30 px-4 py-1.5 font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink outline-none transition-colors hover:bg-primary hover:text-white focus-visible:ring-2 focus-visible:ring-primary"
           >
             Sign in
           </button>
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
-            className="cursor-pointer rounded-full p-2 text-ink outline-none focus-visible:ring-2 focus-visible:ring-amber md:hidden"
+            className="cursor-pointer rounded-full p-2 text-ink outline-none focus-visible:ring-2 focus-visible:ring-primary md:hidden"
             aria-label={open ? 'Close menu' : 'Open menu'}
             aria-expanded={open}
           >
@@ -85,7 +85,7 @@ export default function MarketingNav() {
                   setOpen(false);
                   navigate('/clinic/login?mode=register');
                 }}
-                className="cursor-pointer text-left font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] text-amber"
+                className="cursor-pointer text-left font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] text-primary"
               >
                 Register your clinic
               </button>

@@ -24,13 +24,13 @@ export interface AuthTheme {
 }
 
 // Same layout, same components, same motion - three different accents, words,
-// icon sets and ring styles. Patient = teal, clinic = amber, admin = violet.
+// icon sets and ring styles. Patient = indigo, clinic = emerald, admin = deep slate.
 export const AUTH_THEMES: Record<AuthRole, AuthTheme> = {
   patient: {
     role: 'patient',
     word: 'Patients',
     tag: 'Patient sign-in',
-    accent: 'var(--color-teal-text)',
+    accent: 'var(--color-primary)',
     headline: ['Your visits,', 'in one place.'],
     blurb: 'Book a verified doctor, follow your live token, and keep every prescription and record together.',
     orbits: [
@@ -49,7 +49,7 @@ export const AUTH_THEMES: Record<AuthRole, AuthTheme> = {
     role: 'clinic',
     word: 'Clinics',
     tag: 'Clinic console',
-    accent: 'var(--color-amber)',
+    accent: 'var(--color-leaf-text)',
     headline: ['Run the', 'whole visit.'],
     blurb: 'Check-in, the live queue, consultation notes and prescriptions from the front desk to the doctor.',
     orbits: [

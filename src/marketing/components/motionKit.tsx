@@ -24,7 +24,7 @@ export function Reveal({
 }
 
 // Small uppercase label used across the page (tracking .12em-.15em).
-export function Label({ children, accent, className = '' }: { children: ReactNode; accent?: 'amber' | 'teal'; className?: string }) {
-  const color = accent === 'amber' ? 'text-amber' : accent === 'teal' ? 'text-teal-text' : 'text-ink-2';
+export function Label({ children, accent, className = '' }: { children: ReactNode; accent?: 'primary' | 'leaf'; className?: string }) {
+  const color = accent === 'primary' ? 'text-primary' : accent === 'leaf' ? 'text-leaf-text' : 'text-ink-2';
   return <p className={`font-ui text-[10.5px] font-medium uppercase tracking-[0.14em] ${color} ${className}`}>{children}</p>;
 }

@@ -3,16 +3,16 @@ interface Props {
   className?: string;
 }
 
-// The SanjeevniOS mark: a violet gradient heart with a white medical cross
+// The SanjeevniOS mark: a heart that follows the screen's accent (indigo by default) with a white medical cross
 // punched out of it. Inline SVG rather than an asset so it scales cleanly
-// and picks up the brand gradient at any size.
+// and picks up the accent at any size.
 export default function BrandMark({ size = 64, className = '' }: Props) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" className={className} aria-label="SanjeevniOS">
       <defs>
         <linearGradient id="sanjeevni-heart" x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#7d55f3" />
-          <stop offset="1" stopColor="#4a1fc9" />
+          <stop style={{ stopColor: 'var(--accent, #3b5bdb)' }} />
+          <stop offset="1" style={{ stopColor: 'color-mix(in srgb, var(--accent, #3b5bdb) 78%, #111827)' }} />
         </linearGradient>
       </defs>
       <path

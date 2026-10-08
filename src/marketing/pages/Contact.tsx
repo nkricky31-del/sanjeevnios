@@ -24,9 +24,9 @@ export default function Contact() {
           {CONTACTS.map((c, i) => (
             <Reveal key={c.label} delay={i * 0.05} y={12}>
               <div className="grid gap-1 border-b border-hairline py-6 md:grid-cols-[10rem_1fr] md:gap-8">
-                <Label accent="amber" className="pt-1.5">{c.label}</Label>
+                <Label accent="primary" className="pt-1.5">{c.label}</Label>
                 {c.href ? (
-                  <a href={c.href} className="w-fit font-display text-xl font-bold tracking-[-0.02em] text-ink outline-none transition-colors hover:text-amber focus-visible:text-amber sm:text-2xl">
+                  <a href={c.href} className="w-fit font-display text-xl font-bold tracking-[-0.02em] text-ink outline-none transition-colors hover:text-primary focus-visible:text-primary sm:text-2xl">
                     {c.value}
                   </a>
                 ) : (

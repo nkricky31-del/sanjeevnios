@@ -10,8 +10,8 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 // action ("Reschedule" beside "View Details"); 'danger' is the red outline
 // destructive action ("Cancel Appointment").
 const VARIANTS: Record<string, string> = {
-  // Bone-coloured, like the website's buttons (the accent shows as a focus ring).
-  primary: 'bg-slate-900 text-white hover:bg-slate-800',
+  // The role's accent: indigo for patients, emerald for clinics, deep slate for admin.
+  primary: 'bg-brand-600 text-white hover:bg-brand-700',
   secondary: 'bg-slate-100 text-slate-700 hover:bg-slate-200',
   outline: 'border border-slate-200 bg-transparent text-slate-700 hover:border-brand-500 hover:text-brand-600',
   // The clinic's old coral action, now the site's amber.

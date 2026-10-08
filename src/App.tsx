@@ -235,9 +235,9 @@ function AppContent() {
   );
 }
 
-// Everything after sign-in lives inside the dark scope (index.css `.app-dark`),
+// Everything after sign-in lives inside the app scope (index.css `.app-scope`),
 // with the accent chosen by role. The printable self-check-in poster stays
-// outside it so it still prints dark-on-light.
+// outside it so it prints exactly as designed.
 export default function App() {
   const { session, profile } = useAuth();
   const location = useLocation();
@@ -246,7 +246,7 @@ export default function App() {
   if (!session || !profile || location.pathname === '/poster') return <AppContent />;
   const role = profile.role === 'admin' ? 'admin' : (getStoredActingMode() ?? (profile.role === 'clinic' ? 'clinic' : 'patient'));
   return (
-    <div className="app-dark min-h-screen" data-app-role={role}>
+    <div className="app-scope min-h-screen" data-app-role={role}>
       <AppContent />
     </div>
   );
@@ -257,7 +257,7 @@ function useDarkBackdropWhen(on: boolean) {
     if (!on) return;
     const root = document.documentElement;
     const previous = root.style.backgroundColor;
-    root.style.backgroundColor = '#0a0c0e';
+    root.style.backgroundColor = '#fafbfc';
     return () => {
       root.style.backgroundColor = previous;
     };
