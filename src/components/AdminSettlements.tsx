@@ -1,4 +1,5 @@
 import Loading from './ui/Loading';
+import AdminDrill, { type DrillView } from './AdminDrill';
 import { AlertTriangle, CheckCircle2, IndianRupee, PauseCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -85,6 +86,7 @@ type ConfirmTarget =
 export default function AdminSettlements() {
   const [rows, setRows] = useState<SettlementRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [drill, setDrill] = useState<DrillView | null>(null);
   const [view, setView] = useState<'eligible' | 'on_hold' | 'released' | 'settled'>('eligible');
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
   const [releasing, setReleasing] = useState(false);
@@ -195,6 +197,8 @@ export default function AdminSettlements() {
   const visitLabel = (r: SettlementRow) =>
     r.appointments ? `${r.appointments.date} at ${r.appointments.slot_time?.slice(0, 5)}` : '';
 
+  if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -270,7 +274,10 @@ export default function AdminSettlements() {
                     <IconTile icon={IndianRupee} size="sm" tone="emerald" />
                     <p className="truncate font-bold text-slate-900">{g.clinicName}</p>
                   </div>
-                  <p className="shrink-0 text-sm font-extrabold text-emerald-700">₹{g.total.toLocaleString()}</p>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <p className="text-sm font-extrabold text-emerald-700">₹{g.total.toLocaleString()}</p>
+                    <button onClick={() => setDrill({ kind: 'payout', clinicId: g.clinicId })} className="text-xs font-bold text-brand-600">View details</button>
+                  </div>
                 </div>
                 <Button
                   className="mt-2"
@@ -310,6 +317,7 @@ export default function AdminSettlements() {
                           <Button variant="ghost" onClick={() => setHoldFormFor((prev) => (prev === r.id ? null : r.id))}>
                             {holdFormFor === r.id ? 'Cancel' : 'Put on hold'}
                           </Button>
+                          <button onClick={() => setDrill({ kind: 'settlement', id: r.id })} className="text-xs font-bold text-brand-600">View details</button>
                         </div>
                         {holdFormFor === r.id && (
                           <AdminRejectForm
@@ -343,7 +351,10 @@ export default function AdminSettlements() {
                     <p className="text-xs text-slate-400">{visitLabel(r)}</p>
                   </div>
                 </div>
-                <p className="shrink-0 text-sm font-bold text-slate-900">₹{r.net_amount.toLocaleString()}</p>
+                <div className="flex shrink-0 items-center gap-2">
+                  <p className="text-sm font-bold text-slate-900">₹{r.net_amount.toLocaleString()}</p>
+                  <button onClick={() => setDrill({ kind: 'settlement', id: r.id })} className="text-xs font-bold text-brand-600">View details</button>
+                </div>
               </div>
               {r.hold_reason && (
                 <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700">

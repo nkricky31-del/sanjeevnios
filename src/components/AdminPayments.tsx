@@ -1,4 +1,5 @@
 import Present from './ui/Present';
+import AdminDrill, { type DrillView } from './AdminDrill';
 import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
@@ -47,6 +48,7 @@ const FETCH_LIMIT = 500;
 export default function AdminPayments() {
   const { session } = useAuth();
   const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const [drill, setDrill] = useState<DrillView | null>(null);
   const [loading, setLoading] = useState(true);
   const [refundOpenFor, setRefundOpenFor] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -91,6 +93,8 @@ export default function AdminPayments() {
     load();
   };
 
+  if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -114,7 +118,10 @@ export default function AdminPayments() {
           <Card key={p.id}>
             <div className="flex items-center justify-between">
               <p className="font-semibold text-slate-900">₹{p.amount}</p>
-              <StatusPill label={p.status} tone={STATUS_TONE[p.status]} />
+              <div className="flex items-center gap-2">
+                <StatusPill label={p.status} tone={STATUS_TONE[p.status]} />
+                <button onClick={() => setDrill({ kind: 'payment', id: p.id })} className="text-xs font-bold text-brand-600">View details</button>
+              </div>
             </div>
             <p className="text-sm text-slate-500">
               {p.appointments?.clinics?.name} · {p.appointments?.family_members?.name}

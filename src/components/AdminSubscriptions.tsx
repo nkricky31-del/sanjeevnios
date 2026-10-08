@@ -1,4 +1,6 @@
 import Loading from './ui/Loading';
+import AdminDrill, { type DrillView } from './AdminDrill';
+import Toggle from './ui/Toggle';
 import { useEffect, useState } from 'react';
 
 import { recordAdminDecision } from '../lib/audit';
@@ -41,6 +43,7 @@ const USAGE_LABEL: Record<'ok' | 'near_limit' | 'over_limit', string> = {
 export default function AdminSubscriptions() {
   const { session } = useAuth();
   const [clinics, setClinics] = useState<ClinicRow[]>([]);
+  const [drill, setDrill] = useState<DrillView | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -97,6 +100,8 @@ export default function AdminSubscriptions() {
     load();
   };
 
+  if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -123,9 +128,9 @@ export default function AdminSubscriptions() {
             <Card key={c.id}>
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-slate-900">{c.name}</p>
-                <div className="flex gap-1">
+                <div className="flex items-center gap-2">
                   <StatusPill label={c.status} tone={c.status === 'approved' ? 'live' : 'neutral'} />
-                  <StatusPill label={c.is_active ? 'Active' : 'Inactive'} tone={c.is_active ? 'live' : 'neutral'} />
+                  <button onClick={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} className="text-xs font-bold text-brand-600">View details</button>
                 </div>
               </div>
 
@@ -142,12 +147,9 @@ export default function AdminSubscriptions() {
                     </option>
                   ))}
                 </select>
-                <button
-                  onClick={() => toggleActive(c)}
-                  className={`ml-auto text-xs font-semibold ${c.is_active ? 'text-red-600' : 'text-emerald-600'}`}
-                >
-                  {c.is_active ? 'Deactivate' : 'Activate'}
-                </button>
+                <span className="ml-auto">
+                  <Toggle checked={c.is_active} onChange={() => toggleActive(c)} label={`${c.name} active`} />
+                </span>
               </div>
 
               <div className="mt-2 flex items-center gap-2">

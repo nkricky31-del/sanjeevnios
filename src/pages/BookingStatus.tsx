@@ -10,6 +10,7 @@ import {
   MapPin,
   QrCode as QrCodeIcon,
   RefreshCw,
+  ScanLine,
   Star,
   Stethoscope,
   Trash2,
@@ -31,7 +32,9 @@ import ScreenHeader from '../components/ui/ScreenHeader';
 import StatusPill from '../components/ui/StatusPill';
 import VerifiedBadge from '../components/VerifiedBadge';
 import VisitDetails from '../components/VisitDetails';
-import { getCheckInOptions, type CheckInOptions } from '../lib/checkIn';
+import { getCheckInOptions, getCurrentCoords, issueBookingQr, looksLikeClinicQr, selfCheckIn, type CheckInOptions } from '../lib/checkIn';
+import QrCode from '../components/ui/QrCode';
+import QrScanner from '../components/QrScanner';
 import { getDoctorConsultationStats } from '../lib/consultation';
 import { notifyPatient, reportingTimeReminderMessage, REPORTING_REMINDER_LEAD_MINUTES } from '../lib/notify';
 import { bookingReference, computeNowServing, countAhead } from '../lib/queue';
@@ -140,6 +143,11 @@ export default function BookingStatus() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [qr, setQr] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [selfBusy, setSelfBusy] = useState(false);
+  const [selfError, setSelfError] = useState<string | null>(null);
   const [doctorVerified, setDoctorVerified] = useState(false);
   const [clinicVerified, setClinicVerified] = useState(false);
   const [options, setOptions] = useState<CheckInOptions | null>(null);
@@ -386,6 +394,23 @@ export default function BookingStatus() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking?.status, booking?.date, booking?.id, booking?.slot_time, options?.reportingTime]);
 
+  const bookingId = booking?.id;
+  const acceptedNow = booking?.status === 'accepted';
+  useEffect(() => {
+    if (!acceptedNow || !bookingId) return;
+    let live = true;
+    const mint = async () => {
+      const result = await issueBookingQr(bookingId);
+      if (!live) return;
+      if ('error' in result) { setQrError(result.error); setQr(null); } else { setQrError(null); setQr(result.code); }
+    };
+    void mint();
+    const refresh = window.setInterval(mint, 4 * 60 * 1000);
+    const watch = window.setInterval(() => loadBooking(), 8000);
+    return () => { live = false; window.clearInterval(refresh); window.clearInterval(watch); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acceptedNow, bookingId]);
+
   if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
 
@@ -436,6 +461,24 @@ export default function BookingStatus() {
     navigate(`/doctors/${booking.doctor_id}`);
   };
 
+  // Once the clinic has accepted, the check-in code lives right here. A fresh
+  // signed code is minted every few minutes, and the page watches for the desk
+  // checking the patient in so the token appears without leaving the screen.
+  const handleSelfScan = async (raw: string) => {
+    if (!looksLikeClinicQr(raw)) {
+      setSelfError("That isn't the clinic's check-in code. Scan the code on the screen at reception.");
+      return;
+    }
+    setScanning(false);
+    setSelfBusy(true);
+    setSelfError(null);
+    const coords = options?.requiresLocation ? await getCurrentCoords() : null;
+    const result = await selfCheckIn(raw, coords);
+    setSelfBusy(false);
+    if (!result.ok) { setSelfError(result.error ?? 'Could not check in.'); return; }
+    loadBooking();
+  };
+
   const mapsHref =
     booking.clinics?.lat != null && booking.clinics?.lng != null
       ? `https://www.google.com/maps/search/?api=1&query=${booking.clinics.lat},${booking.clinics.lng}`
@@ -444,6 +487,9 @@ export default function BookingStatus() {
   return (
     <div>
       <ScreenHeader title="Appointment Details" back={-1} />
+      {scanning && (
+        <QrScanner onScan={handleSelfScan} onClose={() => setScanning(false)} hint="Point the camera at the check-in code on the screen at reception." />
+      )}
 
       <div className="mx-auto max-w-3xl px-4 py-4">
         {alertMessage && (
@@ -613,9 +659,61 @@ export default function BookingStatus() {
                 </p>
               </>
             )}
-            <Button full className="mt-4" onClick={() => navigate(`/bookings/${booking.id}/pass`)}>
-              <QrCodeIcon size={17} /> Show this at reception
-            </Button>
+            {/* the check-in code, right on this page */}
+            <div className="mt-4 flex justify-center">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 220, damping: 16 }}
+                className="relative rounded-3xl bg-gradient-to-br from-indigo-500 via-sky-500 to-emerald-400 p-1.5 shadow-xl"
+              >
+                <motion.span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 rounded-3xl ring-4 ring-indigo-300/60"
+                  animate={{ scale: [1, 1.08], opacity: [0.7, 0] }}
+                  transition={{ duration: 2.2, repeat: Infinity, ease: 'easeOut' }}
+                />
+                <div className="relative rounded-[1.2rem] bg-white p-3">
+                  {qr ? (
+                    <QrCode value={qr} size={200} />
+                  ) : (
+                    <div className="flex h-[200px] w-[200px] items-center justify-center rounded-2xl bg-slate-50 px-3 text-sm text-slate-400">
+                      {qrError ?? 'Preparing your code...'}
+                    </div>
+                  )}
+                  <motion.span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-3 h-0.5 rounded-full bg-emerald-400/80 shadow-[0_0_10px_2px_rgba(52,211,153,0.7)]"
+                    animate={{ top: ['8%', '88%', '8%'] }}
+                    transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                </div>
+              </motion.div>
+            </div>
+            <p className="mt-3 text-sm font-semibold text-slate-700">
+              {isPaid ? 'Already paid. One scan and you are checked in.' : 'Show this code at the reception desk'}
+            </p>
+            <p className="text-xs text-slate-500">
+              Booking ref <span className="font-mono font-bold text-brand-700">{bookingReference(booking.id)}</span> · the code refreshes every few minutes.
+            </p>
+            {options?.canSelfCheckIn && (
+              <div className="mt-3">
+                <Button full onClick={() => setScanning(true)} disabled={selfBusy}>
+                  <ScanLine size={17} /> {selfBusy ? 'Checking you in...' : 'Scan reception code to check in'}
+                </Button>
+                {selfError && <p className="mt-2 text-sm text-red-600">{selfError}</p>}
+                <p className="mt-1.5 text-xs text-slate-400">
+                  It puts you in the queue at the time you arrive. It does not move you up it.
+                </p>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => navigate(`/bookings/${booking.id}/pass`)}
+              className="mx-auto mt-3 flex items-center gap-1.5 text-xs font-bold text-brand-600"
+            >
+              <QrCodeIcon size={14} /> Open full-screen pass
+            </button>
             <div className="mt-4 text-left">
               <InfoNote
                 title="When you arrive"
@@ -642,7 +740,7 @@ export default function BookingStatus() {
               </div>
             )}
             <p className="text-sm font-semibold text-slate-500">Your Token Number</p>
-            <p className="mt-1 text-6xl font-extrabold leading-none text-brand-600">{booking.token_number}</p>
+            <motion.p key={booking.token_number} initial={{ scale: 0.3, opacity: 0, rotate: -8 }} animate={{ scale: 1, opacity: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 200, damping: 12 }} className="mt-1 bg-gradient-to-r from-indigo-600 via-sky-500 to-emerald-500 bg-clip-text text-7xl font-extrabold leading-none text-transparent">{booking.token_number}</motion.p>
             <p className="mt-2 text-sm text-slate-500">
               {booking.status === 'in_consultation'
                 ? 'You are with the doctor now.'

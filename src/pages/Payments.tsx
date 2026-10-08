@@ -1,4 +1,5 @@
 import Loading from '../components/ui/Loading';
+import { PaymentsCharts } from '../components/Insights';
 import { CheckCircle2, CreditCard, Headphones, Receipt, Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -99,6 +100,8 @@ export default function Payments() {
             </div>
           )}
         </Card>
+
+        <div className="mt-4"><PaymentsCharts rows={rows} /></div>
 
         {/* History */}
         <SectionTitle className="mt-6">Payment History</SectionTitle>

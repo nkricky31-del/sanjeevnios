@@ -1,4 +1,5 @@
 import Loading from './ui/Loading';
+import AdminDrill, { type DrillView } from './AdminDrill';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -58,6 +59,7 @@ const FETCH_LIMIT = 200;
 export default function AdminBilling() {
   const [clinics, setClinics] = useState<ClinicRow[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [drill, setDrill] = useState<DrillView | null>(null);
   const [commissions, setCommissions] = useState<CommissionRow[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   // clinic_id -> count of approved+verified+active doctors (migration 62) -
@@ -153,6 +155,8 @@ export default function AdminBilling() {
   const commissionRevenue = commissions.reduce((sum, c) => sum + c.platform_fee, 0);
   const totalRevenue = subscriptionRevenue + commissionRevenue;
 
+  if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -190,7 +194,8 @@ export default function AdminBilling() {
             <Card key={c.id}>
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-slate-900">{c.name}</p>
-                <div className="flex gap-1">
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} className="text-xs font-bold text-brand-600">View details</button>
                   <StatusPill label={c.is_active ? 'Active' : 'Inactive'} tone={c.is_active ? 'live' : 'neutral'} />
                   {sub?.billing_status === 'past_due' && <StatusPill label="Past due" tone="danger" />}
                 </div>

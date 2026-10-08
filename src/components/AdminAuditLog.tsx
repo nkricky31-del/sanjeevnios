@@ -1,4 +1,5 @@
 import Loading from './ui/Loading';
+import { AuditCharts } from './Insights';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -43,6 +44,8 @@ export default function AdminAuditLog() {
         </button>
       </div>
       <p className="mt-1 text-xs text-slate-400">Every admin decision - who did what, and when.</p>
+
+      <div className="mt-3"><AuditCharts rows={rows} /></div>
 
       <div className="mt-2 space-y-2">
         {loading && <p className="text-sm text-slate-400"><Loading /></p>}

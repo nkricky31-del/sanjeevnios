@@ -1,4 +1,5 @@
 import Present from './ui/Present';
+import { ReviewsCharts } from './Insights';
 import Loading from './ui/Loading';
 import { Star, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -170,6 +171,7 @@ export default function AdminReviews() {
       <SectionTitle actionLabel="Refresh" onAction={load}>
         Reviews
       </SectionTitle>
+      <div className="mt-3"><ReviewsCharts rows={visible} /></div>
       <div className="mt-2 flex gap-1 rounded-2xl border border-slate-100 bg-white p-1">
         <button
           onClick={() => setTab('visible')}

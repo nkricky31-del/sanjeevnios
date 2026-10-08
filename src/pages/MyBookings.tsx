@@ -1,4 +1,5 @@
 import Loading from '../components/ui/Loading';
+import { BookingsCharts } from '../components/Insights';
 import { useStaggerIn } from '../lib/motionKit';
 import { Bell, CalendarDays, ChevronRight, Clock, MapPin } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -108,6 +109,7 @@ export default function MyBookings() {
       />
 
       <div className="px-4 pb-6">
+        <div className="mb-4"><BookingsCharts rows={rows} /></div>
         <Segmented options={TABS} value={tab} onChange={setTab} variant="underline" />
 
         <div ref={listRef} className="mt-4 grid gap-3 lg:grid-cols-2">

@@ -1,4 +1,5 @@
 import Loading from './ui/Loading';
+import { BillingCharts } from './Insights';
 import { useEffect, useState } from 'react';
 
 import { useAuth } from '../lib/AuthContext';
@@ -142,6 +143,8 @@ export default function ClinicBilling({ clinicId }: Props) {
           </p>
         </div>
       )}
+
+      <div className="mt-3"><BillingCharts invoices={invoices} used={usage?.doctors_used ?? null} included={usage?.max_doctors ?? null} /></div>
 
       <Card className="mt-2">
         <div className="flex items-center justify-between">

@@ -1,4 +1,5 @@
 import Present from './ui/Present';
+import { NameChangeCharts } from './Insights';
 import Loading from './ui/Loading';
 import { FileText, User, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -110,6 +111,8 @@ export default function AdminNameChanges() {
   return (
     <div>
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+
+      <div className="mb-3"><NameChangeCharts rows={[...pending, ...recent]} /></div>
 
       <SectionTitle actionLabel="Refresh" onAction={load}>
         Pending name changes

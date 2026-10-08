@@ -1,4 +1,6 @@
 import Loading from './ui/Loading';
+import { CouponCharts } from './Insights';
+import Toggle from './ui/Toggle';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
@@ -425,13 +427,13 @@ export default function AdminCoupons() {
               <button onClick={() => startEdit(c)} className="text-xs font-bold text-brand-600">
                 Edit
               </button>
-              <button onClick={() => toggleActive(c)} className="text-xs font-bold text-slate-500">
-                {c.active ? 'Deactivate' : 'Activate'}
-              </button>
+              <Toggle checked={c.active} onChange={() => toggleActive(c)} label="Coupon active" />
             </div>
           </Card>
         ))}
       </div>
+
+      <div className="mt-6"><CouponCharts rows={redemptions} /></div>
 
       <SectionTitle className="mt-6" actionLabel="Refresh" onAction={load}>
         Recent redemptions

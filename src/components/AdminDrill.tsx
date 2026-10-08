@@ -1,19 +1,25 @@
-import { ArrowLeft, BadgeCheck, Building2, CalendarCheck, ChevronRight, Mail, MapPin, Phone, Search, Stethoscope } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, Banknote, Building2, CalendarCheck, ChevronRight, IndianRupee, Mail, ShieldAlert, MapPin, Phone, Search, Stethoscope } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { todayISO } from '../lib/date';
 import { supabase } from '../lib/supabaseClient';
 import type { Clinic, ClinicStatus } from '../lib/types';
+import { FRAUD_THRESHOLDS } from '../lib/fraud';
 import { Bars, Columns, Donut, type ChartDatum } from './ui/MiniCharts';
 import Loading from './ui/Loading';
 import StatusPill from './ui/StatusPill';
 
 export type DrillView =
   | { kind: 'clinics'; status: ClinicStatus | 'all' }
-  | { kind: 'clinic'; id: string; from: ClinicStatus | 'all' }
+  | { kind: 'clinic'; id: string; from: ClinicStatus | 'all' | 'close' }
   | { kind: 'doctors' }
-  | { kind: 'today' };
+  | { kind: 'today' }
+  | { kind: 'fraud'; clinicId: string }
+  | { kind: 'payment'; id: string }
+  | { kind: 'payout'; clinicId: string }
+  | { kind: 'doctor'; id: string }
+  | { kind: 'settlement'; id: string };
 
 type ClinicRow = Pick<Clinic, 'id' | 'name' | 'status' | 'city' | 'clinic_code' | 'subscription_tier' | 'is_active' | 'is_verified' | 'contact_phone' | 'created_at'>;
 interface DoctorRow {
@@ -36,7 +42,7 @@ const TONE: Record<string, 'live' | 'warning' | 'neutral' | 'danger'> = { approv
 const fmt = (d: string) => new Date(d).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 const cap = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
-function Panel({ title, children, delay = 0 }: { title: string; children: ReactNode; delay?: number }) {
+export function Panel({ title, children, delay = 0 }: { title: string; children: ReactNode; delay?: number }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -50,7 +56,7 @@ function Panel({ title, children, delay = 0 }: { title: string; children: ReactN
   );
 }
 
-function Banner({ title, sub, icon: Icon, from, to, onBack, chips }: {
+export function Banner({ title, sub, icon: Icon, from, to, onBack, chips }: {
   title: string; sub: string; icon: typeof Building2; from: string; to: string; onBack: () => void; chips: { label: string; value: string }[];
 }) {
   return (
@@ -341,12 +347,285 @@ function TodayView({ onBack }: { onBack: () => void }) {
   );
 }
 
+export const monthsBack = (n: number) =>
+  Array.from({ length: n }, (_, i) => {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (n - 1 - i));
+    return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString(undefined, { month: 'short' }) };
+  });
+
+// ------------------------------------------------------------ fraud watch ---
+function FraudDetail({ clinicId, onBack, onOpenClinic }: { clinicId: string; onBack: () => void; onOpenClinic: () => void }) {
+  const [name, setName] = useState('Clinic');
+  const [events, setEvents] = useState<{ id: string; date: string; status: string }[] | null>(null);
+  const [refunds, setRefunds] = useState<{ id: string; amount: number; created_at: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      const [c, a, r] = await Promise.all([
+        supabase.from('clinics').select('name').eq('id', clinicId).maybeSingle(),
+        supabase.from('appointments').select('id, date, status').eq('clinic_id', clinicId).in('status', ['rejected', 'no_show']).order('date', { ascending: false }).limit(500),
+        supabase.from('payments').select('id, amount, created_at, appointments!inner(clinic_id)').eq('status', 'refunded').eq('appointments.clinic_id', clinicId).limit(500),
+      ]);
+      setName((c.data as { name: string } | null)?.name ?? 'Clinic');
+      setEvents((a.data ?? []) as { id: string; date: string; status: string }[]);
+      setRefunds((r.data ?? []) as unknown as { id: string; amount: number; created_at: string }[]);
+    })();
+  }, [clinicId]);
+  const rej = (events ?? []).filter((e) => e.status === 'rejected').length;
+  const ns = (events ?? []).filter((e) => e.status === 'no_show').length;
+  const ref = refunds.length;
+  const T = FRAUD_THRESHOLDS;
+  const flagged = rej >= T.rejections || ns >= T.noShows || ref >= T.refunds;
+  const months = monthsBack(6);
+  return (
+    <div className="space-y-4">
+      <Banner title={name} sub={flagged ? 'Over a review threshold' : 'Within the usual range'} icon={ShieldAlert} from={flagged ? '#e11d48' : '#10b981'} to={flagged ? '#f97316' : '#0ea5e9'} onBack={onBack}
+        chips={[{ label: 'Rejections', value: String(rej) }, { label: 'No-shows', value: String(ns) }, { label: 'Refunds', value: String(ref) }]} />
+      {events === null ? <p className="text-sm text-slate-400"><Loading /></p> : (
+        <>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Panel title="Against the review limits">
+              <Bars data={[
+                { label: `Rejections (limit ${T.rejections})`, value: rej, color: rej >= T.rejections ? '#f43f5e' : '#6366f1' },
+                { label: `No-shows (limit ${T.noShows})`, value: ns, color: ns >= T.noShows ? '#f43f5e' : '#f59e0b' },
+                { label: `Refunds (limit ${T.refunds})`, value: ref, color: ref >= T.refunds ? '#f43f5e' : '#8b5cf6' },
+              ]} />
+              <div className="mt-3"><StatusPill label={flagged ? 'Flagged' : 'Not flagged'} tone={flagged ? 'warning' : 'live'} dot /></div>
+            </Panel>
+            <Panel title="Problem bookings per month" delay={0.08}>
+              <Columns color="#f43f5e" data={months.map((m) => ({ label: m.label, value: (events ?? []).filter((e) => e.date.startsWith(m.key)).length }))} />
+            </Panel>
+          </div>
+          <Panel title="Most recent problem bookings" delay={0.12}>
+            <div className="space-y-2">
+              {(events ?? []).slice(0, 10).map((e, i) => (
+                <motion.div key={e.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+                  <span className="text-sm text-slate-700">{fmt(e.date)}</span>
+                  <StatusPill label={cap(e.status)} tone={e.status === 'rejected' ? 'danger' : 'neutral'} />
+                </motion.div>
+              ))}
+              {events.length === 0 && <p className="text-sm text-slate-400">None recorded.</p>}
+            </div>
+          </Panel>
+          <button type="button" onClick={onOpenClinic} className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-brand-600">Open the clinic <ChevronRight size={15} /></button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------- payment detail ---
+interface PayFull {
+  id: string; amount: number; gross_amount: number | null; discount_amount: number; coupon_code: string | null; method: string; status: string;
+  payout_status: string; created_at: string; razorpay_payment_id: string | null;
+  appointments: { clinic_id: string; date: string; slot_time: string; status: string; clinics: { name: string } | null; doctors: { name: string } | null; family_members: { name: string } | null } | null;
+}
+function PaymentDetail({ id, onBack, onOpenClinic }: { id: string; onBack: () => void; onOpenClinic: (id: string) => void }) {
+  const [pay, setPay] = useState<PayFull | null | undefined>(undefined);
+  const [others, setOthers] = useState<{ status: string; amount: number; created_at: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('payments').select('id, amount, gross_amount, discount_amount, coupon_code, method, status, payout_status, created_at, razorpay_payment_id, appointments(clinic_id, date, slot_time, status, clinics(name), doctors(name), family_members(name))').eq('id', id).maybeSingle();
+      const row = (data as unknown as PayFull | null) ?? null;
+      setPay(row);
+      if (row?.appointments?.clinic_id) {
+        const { data: o } = await supabase.from('payments').select('status, amount, created_at, appointments!inner(clinic_id)').eq('appointments.clinic_id', row.appointments.clinic_id).limit(500);
+        setOthers((o ?? []) as unknown as typeof others);
+      }
+    })();
+  }, [id]);
+  if (pay === undefined) return <p className="text-sm text-slate-400"><Loading /></p>;
+  if (pay === null) return <div><button type="button" onClick={onBack} className="text-sm font-semibold text-brand-600">Back</button><p className="mt-3 text-sm text-slate-500">Payment not found.</p></div>;
+  const a = pay.appointments;
+  const mix = Object.entries(others.reduce<Record<string, number>>((m, p) => { m[p.status] = (m[p.status] ?? 0) + 1; return m; }, {})).map(([k, v]) => ({ label: cap(k), value: v, color: k === 'captured' ? '#10b981' : k === 'refunded' ? '#8b5cf6' : k === 'hold' ? '#f43f5e' : '#f59e0b' }));
+  const months = monthsBack(6);
+  const rows: [string, string][] = [
+    ['Clinic', a?.clinics?.name ?? '-'], ['Doctor', a?.doctors?.name ?? '-'], ['Patient', a?.family_members?.name ?? '-'],
+    ['Visit', a ? `${fmt(a.date)} at ${a.slot_time.slice(0, 5)}` : '-'], ['Visit status', a ? cap(a.status) : '-'], ['Method', pay.method === 'online' ? 'Paid online' : 'Cash at clinic'],
+    ['Payout', cap(pay.payout_status)], ['Recorded', fmt(pay.created_at)],
+    ...(pay.coupon_code ? [['Coupon', `${pay.coupon_code}: ₹${pay.gross_amount ?? pay.amount} to ₹${pay.amount} (-₹${pay.discount_amount})`] as [string, string]] : []),
+    ...(pay.razorpay_payment_id ? [['Razorpay id', pay.razorpay_payment_id] as [string, string]] : []),
+  ];
+  return (
+    <div className="space-y-4">
+      <Banner title={`₹${Number(pay.amount).toLocaleString()}`} sub={`${a?.clinics?.name ?? 'Clinic'} · ${pay.method}`} icon={IndianRupee} from={pay.status === 'refunded' ? '#8b5cf6' : pay.status === 'captured' ? '#059669' : '#f59e0b'} to="#0ea5e9" onBack={onBack}
+        chips={[{ label: 'Status', value: cap(pay.status) }, { label: 'Method', value: pay.method }, { label: 'Payout', value: cap(pay.payout_status) }]} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="Details">
+          <dl className="space-y-2.5">
+            {rows.map(([k, v], i) => (
+              <motion.div key={k} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }} className="flex items-start justify-between gap-4 border-b border-slate-50 pb-2 last:border-0">
+                <dt className="text-xs uppercase tracking-wide text-slate-400">{k}</dt>
+                <dd className="break-all text-right text-sm font-medium text-slate-800">{v}</dd>
+              </motion.div>
+            ))}
+          </dl>
+          {a?.clinic_id !== undefined && <button type="button" onClick={() => onOpenClinic(a.clinic_id)} className="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-brand-600">Open the clinic <ChevronRight size={15} /></button>}
+        </Panel>
+        <div className="space-y-4">
+          <Panel title="This clinic's payments by status" delay={0.08}>{mix.length ? <Donut data={mix} centre="payments" /> : <p className="text-sm text-slate-400">No data.</p>}</Panel>
+          <Panel title="This clinic's payments per month" delay={0.14}><Columns color="#10b981" data={months.map((m) => ({ label: m.label, value: others.filter((o) => o.created_at.startsWith(m.key)).length }))} /></Panel>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------- payout account ---
+function PayoutDetail({ clinicId, onBack, onOpenClinic }: { clinicId: string; onBack: () => void; onOpenClinic: () => void }) {
+  const [clinic, setClinic] = useState<{ name: string; contact_email: string | null; contact_phone: string | null; razorpay_fund_account_id: string | null; razorpay_account_status: string; razorpay_account_note: string | null } | null | undefined>(undefined);
+  const [sets, setSets] = useState<{ status: string; net_amount: number; platform_fee: number; net_payout: number | null; created_at: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      const [c, st] = await Promise.all([
+        supabase.from('clinics').select('name, contact_email, contact_phone, razorpay_fund_account_id, razorpay_account_status, razorpay_account_note').eq('id', clinicId).maybeSingle(),
+        supabase.from('settlements').select('status, net_amount, platform_fee, net_payout, created_at').eq('clinic_id', clinicId).limit(500),
+      ]);
+      setClinic((c.data as typeof clinic) ?? null);
+      setSets((st.data ?? []) as typeof sets);
+    })();
+  }, [clinicId]);
+  if (clinic === undefined) return <p className="text-sm text-slate-400"><Loading /></p>;
+  if (clinic === null) return <div><button type="button" onClick={onBack} className="text-sm font-semibold text-brand-600">Back</button><p className="mt-3 text-sm text-slate-500">Clinic not found.</p></div>;
+  const sum = (f: (r: (typeof sets)[number]) => number) => sets.reduce((n, r) => n + f(r), 0);
+  const byStatus = Object.entries(sets.reduce<Record<string, number>>((m, r) => { m[r.status] = (m[r.status] ?? 0) + 1; return m; }, {})).map(([k, v]) => ({ label: cap(k), value: v }));
+  const months = monthsBack(6);
+  const activated = clinic.razorpay_account_status === 'activated';
+  return (
+    <div className="space-y-4">
+      <Banner title={clinic.name} sub={activated ? 'Payout account active' : 'Payout account not active yet'} icon={Banknote} from={activated ? '#059669' : '#475569'} to={activated ? '#84cc16' : '#0ea5e9'} onBack={onBack}
+        chips={[{ label: 'Settlements', value: String(sets.length) }, { label: 'Net', value: `₹${Math.round(sum((r) => Number(r.net_amount))).toLocaleString()}` }, { label: 'Fees', value: `₹${Math.round(sum((r) => Number(r.platform_fee))).toLocaleString()}` }]} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="Account">
+          <div className="mb-3 flex flex-wrap items-center gap-2"><StatusPill label={cap(clinic.razorpay_account_status)} tone={activated ? 'live' : 'warning'} dot /></div>
+          <dl className="space-y-2.5 text-sm">
+            <div className="flex justify-between gap-4"><dt className="text-slate-400">Email</dt><dd className="text-slate-800">{clinic.contact_email ?? '-'}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="text-slate-400">Phone</dt><dd className="text-slate-800">{clinic.contact_phone ?? '-'}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="text-slate-400">Razorpay account</dt><dd className="break-all font-mono text-xs text-slate-800">{clinic.razorpay_fund_account_id ?? 'Not created'}</dd></div>
+          </dl>
+          {clinic.razorpay_account_note && <p className="mt-3 rounded-xl bg-red-50 p-2 text-xs text-red-700">{clinic.razorpay_account_note}</p>}
+          <button type="button" onClick={onOpenClinic} className="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-brand-600">Open the clinic <ChevronRight size={15} /></button>
+        </Panel>
+        <Panel title="Settlements by status" delay={0.08}>{byStatus.length ? <Donut data={byStatus} centre="settlements" /> : <p className="text-sm text-slate-400">No settlements yet.</p>}</Panel>
+      </div>
+      <Panel title="Net earned per month" delay={0.14}><Columns color="#10b981" data={months.map((m) => ({ label: m.label, value: Math.round(sets.filter((r) => r.created_at.startsWith(m.key)).reduce((n, r) => n + Number(r.net_amount), 0)) }))} /></Panel>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------- doctor detail ---
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function DoctorDetail({ id, onBack, onOpenClinic }: { id: string; onBack: () => void; onOpenClinic: (id: string) => void }) {
+  const [doc, setDoc] = useState<(DoctorRow & { reg_no: string | null; reject_reason: string | null; created_at: string; clinics: { name: string } | null }) | null | undefined>(undefined);
+  const [appts, setAppts] = useState<{ date: string; status: string }[]>([]);
+  const [avail, setAvail] = useState<{ weekday: number; start_time: string; end_time: string; max_patients_per_day: number }[]>([]);
+  useEffect(() => {
+    (async () => {
+      const [d, a, v] = await Promise.all([
+        supabase.from('doctors').select('id, clinic_id, name, specialty, status, consultation_fee, is_active, is_verified, reg_no, reject_reason, created_at, clinics(name)').eq('id', id).maybeSingle(),
+        supabase.from('appointments').select('date, status').eq('doctor_id', id).limit(2000),
+        supabase.from('doctor_availability').select('weekday, start_time, end_time, max_patients_per_day').eq('doctor_id', id).order('weekday'),
+      ]);
+      setDoc((d.data as unknown as typeof doc) ?? null);
+      setAppts((a.data ?? []) as typeof appts);
+      setAvail((v.data ?? []) as typeof avail);
+    })();
+  }, [id]);
+  if (doc === undefined) return <p className="text-sm text-slate-400"><Loading /></p>;
+  if (doc === null) return <div><button type="button" onClick={onBack} className="text-sm font-semibold text-brand-600">Back</button><p className="mt-3 text-sm text-slate-500">Doctor not found.</p></div>;
+  const months = monthsBack(6);
+  const outcome = Object.entries(appts.reduce<Record<string, number>>((m, a) => { m[a.status] = (m[a.status] ?? 0) + 1; return m; }, {})).map(([k, v]) => ({ label: cap(k), value: v, color: STATUS_COLOR[k] }));
+  return (
+    <div className="space-y-4">
+      <Banner title={doc.name} sub={`${doc.specialty ?? 'General'} · ${doc.clinics?.name ?? 'Clinic'}`} icon={Stethoscope} from="#0ea5e9" to="#14b8a6" onBack={onBack}
+        chips={[{ label: 'Fee', value: `₹${Number(doc.consultation_fee).toLocaleString()}` }, { label: 'Bookings', value: String(appts.length) }, { label: 'Completed', value: String(appts.filter((a) => a.status === 'completed').length) }]} />
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusPill label={doc.status} tone={TONE[doc.status]} dot />
+        <StatusPill label={doc.is_verified ? 'Verified' : 'Not verified'} tone={doc.is_verified ? 'live' : 'neutral'} icon={BadgeCheck} />
+        <StatusPill label={doc.is_active ? 'Working here' : 'Removed'} tone={doc.is_active ? 'live' : 'neutral'} />
+        <span className="text-xs text-slate-400">Added {fmt(doc.created_at)} · Reg. {doc.reg_no ?? '-'}</span>
+      </div>
+      {doc.reject_reason && <p className="rounded-2xl bg-red-50 p-3 text-sm text-red-700">Rejected: {doc.reject_reason}</p>}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="Outcomes">{outcome.length ? <Donut data={outcome} centre="bookings" /> : <p className="text-sm text-slate-400">No bookings yet.</p>}</Panel>
+        <Panel title="Bookings per month" delay={0.08}><Columns color="#0ea5e9" data={months.map((m) => ({ label: m.label, value: appts.filter((a) => a.date.startsWith(m.key)).length }))} /></Panel>
+      </div>
+      <Panel title="Weekly schedule" delay={0.12}>
+        {avail.length === 0 ? <p className="text-sm text-slate-400">No availability set.</p> : (
+          <div className="space-y-2">
+            {avail.map((w, i) => (
+              <motion.div key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm">
+                <span className="font-semibold text-slate-800">{DAYS[w.weekday]}</span>
+                <span className="text-slate-500">{w.start_time.slice(0, 5)} to {w.end_time.slice(0, 5)}</span>
+                <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700">up to {w.max_patients_per_day}/day</span>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </Panel>
+      <button type="button" onClick={() => onOpenClinic(doc.clinic_id)} className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-brand-600">Open the clinic <ChevronRight size={15} /></button>
+    </div>
+  );
+}
+
+// ------------------------------------------------------- settlement detail ---
+const STAGES = ['collected', 'eligible', 'released', 'settled'];
+function SettlementDetail({ id, onBack, onOpenPayout }: { id: string; onBack: () => void; onOpenPayout: (clinicId: string) => void }) {
+  const [r, setR] = useState<{ clinic_id: string; status: string; net_amount: number; platform_fee: number; commission_rate: number; net_payout: number | null; hold_reason: string | null; released_at: string | null; settled_at: string | null; created_at: string; payout_reference: string | null; razorpay_transfer_id: string | null; clinics: { name: string } | null; appointments: { date: string; slot_time: string; family_members: { name: string } | null } | null } | null | undefined>(undefined);
+  useEffect(() => {
+    supabase.from('settlements').select('clinic_id, status, net_amount, platform_fee, commission_rate, net_payout, hold_reason, released_at, settled_at, created_at, payout_reference, razorpay_transfer_id, clinics(name), appointments(date, slot_time, family_members(name))').eq('id', id).maybeSingle().then(({ data }) => setR((data as unknown as typeof r) ?? null));
+  }, [id]);
+  if (r === undefined) return <p className="text-sm text-slate-400"><Loading /></p>;
+  if (r === null) return <div><button type="button" onClick={onBack} className="text-sm font-semibold text-brand-600">Back</button><p className="mt-3 text-sm text-slate-500">Settlement not found.</p></div>;
+  const net = Number(r.net_amount) - Number(r.platform_fee);
+  const stage = STAGES.indexOf(r.status);
+  const details: [string, string][] = [['Patient', r.appointments?.family_members?.name ?? '-'], ['Visit', r.appointments ? `${fmt(r.appointments.date)} at ${r.appointments.slot_time.slice(0, 5)}` : '-'], ['Created', fmt(r.created_at)], ['Released', r.released_at ? fmt(r.released_at) : '-'], ['Settled', r.settled_at ? fmt(r.settled_at) : '-'], ['Reference', r.payout_reference ?? r.razorpay_transfer_id ?? '-']];
+  return (
+    <div className="space-y-4">
+      <Banner title={`₹${Math.round(net).toLocaleString()} to the clinic`} sub={`${r.clinics?.name ?? 'Clinic'} · ${r.appointments ? fmt(r.appointments.date) : ''}`} icon={Banknote} from="#059669" to="#0ea5e9" onBack={onBack}
+        chips={[{ label: 'Collected', value: `₹${Number(r.net_amount).toLocaleString()}` }, { label: 'Fee', value: `₹${Number(r.platform_fee).toLocaleString()}` }, { label: 'Rate', value: `${(Number(r.commission_rate) * 100).toFixed(1)}%` }]} />
+      <Panel title="Where it is">
+        <div className="flex items-center">
+          {STAGES.map((s, i) => (
+            <div key={s} className="flex flex-1 items-center">
+              <div className="flex flex-col items-center gap-1">
+                <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: i * 0.12, type: 'spring' }} className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white ${i <= stage ? 'bg-gradient-to-br from-emerald-500 to-teal-500 shadow-lg' : 'bg-slate-300'}`}>{i + 1}</motion.span>
+                <span className="text-[11px] font-medium text-slate-600">{cap(s)}</span>
+              </div>
+              {i < STAGES.length - 1 && <motion.span initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ delay: 0.1 + i * 0.12 }} className={`mx-1 mb-5 h-1 flex-1 origin-left rounded-full ${i < stage ? 'bg-emerald-400' : 'bg-slate-200'}`} />}
+            </div>
+          ))}
+        </div>
+        {r.status === 'on_hold' && <p className="mt-3 rounded-xl bg-amber-50 p-2 text-xs text-amber-800">On hold: {r.hold_reason ?? 'no reason given'}</p>}
+        {r.status === 'refunded' && <p className="mt-3 rounded-xl bg-violet-50 p-2 text-xs text-violet-800">This payment was refunded.</p>}
+      </Panel>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="Money split" delay={0.08}>
+          <Bars data={[{ label: 'Collected', value: Math.round(Number(r.net_amount)), color: '#6366f1' }, { label: 'Platform fee', value: Math.round(Number(r.platform_fee)), color: '#f59e0b' }, { label: 'To the clinic', value: Math.round(net), color: '#10b981' }]} />
+        </Panel>
+        <Panel title="Details" delay={0.12}>
+          <dl className="space-y-2 text-sm">
+            {details.map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-4 border-b border-slate-50 pb-1.5 last:border-0"><dt className="text-slate-400">{k}</dt><dd className="break-all text-right font-medium text-slate-800">{v}</dd></div>
+            ))}
+          </dl>
+          <button type="button" onClick={() => onOpenPayout(r.clinic_id)} className="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-brand-600">All of this clinic's settlements <ChevronRight size={15} /></button>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDrill({ view, onChange, onClose }: { view: DrillView; onChange: (v: DrillView) => void; onClose: () => void }) {
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.div key={view.kind + ('id' in view ? view.id : '')} initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
         {view.kind === 'clinics' && <ClinicsView status={view.status} onBack={onClose} setStatus={(s) => onChange({ kind: 'clinics', status: s })} onOpen={(id) => onChange({ kind: 'clinic', id, from: view.status })} />}
-        {view.kind === 'clinic' && <ClinicDetail id={view.id} onBack={() => onChange({ kind: 'clinics', status: view.from })} />}
+        {view.kind === 'clinic' && <ClinicDetail id={view.id} onBack={() => (view.from === 'close' ? onClose() : onChange({ kind: 'clinics', status: view.from }))} />}
+        {view.kind === 'fraud' && <FraudDetail clinicId={view.clinicId} onBack={onClose} onOpenClinic={() => onChange({ kind: 'clinic', id: view.clinicId, from: 'close' })} />}
+        {view.kind === 'payment' && <PaymentDetail id={view.id} onBack={onClose} onOpenClinic={(id) => onChange({ kind: 'clinic', id, from: 'close' })} />}
+        {view.kind === 'doctor' && <DoctorDetail id={view.id} onBack={onClose} onOpenClinic={(id) => onChange({ kind: 'clinic', id, from: 'close' })} />}
+        {view.kind === 'settlement' && <SettlementDetail id={view.id} onBack={onClose} onOpenPayout={(clinicId) => onChange({ kind: 'payout', clinicId })} />}
+        {view.kind === 'payout' && <PayoutDetail clinicId={view.clinicId} onBack={onClose} onOpenClinic={() => onChange({ kind: 'clinic', id: view.clinicId, from: 'close' })} />}
         {view.kind === 'doctors' && <DoctorsView onBack={onClose} onOpenClinic={(id) => onChange({ kind: 'clinic', id, from: 'all' })} />}
         {view.kind === 'today' && <TodayView onBack={onClose} />}
       </motion.div>

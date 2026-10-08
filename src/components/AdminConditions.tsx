@@ -1,10 +1,11 @@
 import Loading from './ui/Loading';
+import { ConditionCharts } from './Insights';
+import Toggle from './ui/Toggle';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
 import type { ConditionRef } from '../lib/types';
 import Button from './ui/Button';
-import StatusPill from './ui/StatusPill';
 
 // conditions_ref is admin-write, everyone-else-read (see schema.sql section
 // 24) - this is the "admin can add more" screen the spec calls for.
@@ -70,6 +71,8 @@ export default function AdminConditions() {
       </div>
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
 
+      <div className="mt-4"><ConditionCharts conditions={conditions} /></div>
+
       <div className="mt-4 space-y-2">
         {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && conditions.length === 0 && <p className="text-sm text-slate-400">No conditions yet.</p>}
@@ -77,10 +80,7 @@ export default function AdminConditions() {
           <div key={c.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3">
             <p className="text-sm font-semibold text-slate-900">{c.name}</p>
             <div className="flex items-center gap-2">
-              <StatusPill label={c.is_active ? 'Active' : 'Inactive'} tone={c.is_active ? 'live' : 'neutral'} />
-              <button onClick={() => toggleActive(c)} className="text-xs font-bold text-brand-600">
-                {c.is_active ? 'Deactivate' : 'Activate'}
-              </button>
+              <Toggle checked={c.is_active} onChange={() => toggleActive(c)} label={`${c.name} active`} />
             </div>
           </div>
         ))}

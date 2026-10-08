@@ -1,4 +1,5 @@
 import { CalendarRange, Users } from 'lucide-react';
+import { CapacityChart } from './Insights';
 import { useCallback, useEffect, useState } from 'react';
 
 import { todayISO } from '../lib/date';
@@ -123,6 +124,8 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
       <p className="mt-0.5 text-xs text-slate-400">
         How this clinic takes patients. Changing it affects new bookings only — anything already booked stands.
       </p>
+
+      <CapacityChart clinicId={clinic.id} cap={clinic.daily_cap ?? 100} />
 
       <Card className="mt-2">
         <Segmented

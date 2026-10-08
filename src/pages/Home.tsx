@@ -1,4 +1,5 @@
 import CtaButton from '../components/ui/CtaButton';
+import { HomeCharts } from '../components/Insights';
 import Loading from '../components/ui/Loading';
 import { useStaggerIn } from '../lib/motionKit';
 import {
@@ -85,6 +86,11 @@ export default function Home() {
   const [next, setNext] = useState<NextAppointment | null>(null);
   const [encounters, setEncounters] = useState<RecentEncounter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [acts, setActs] = useState<{ date: string; status: string }[]>([]);
+
+  useEffect(() => {
+    supabase.from('appointments').select('date, status').limit(1000).then(({ data }) => setActs((data ?? []) as { date: string; status: string }[]));
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -219,6 +225,8 @@ export default function Home() {
         </div>
 
         {/* Recent encounters */}
+        <HomeCharts rows={acts} />
+
         <SectionTitle className="mt-6" actionLabel="View All" actionTo="/records">
           Recent Encounters
         </SectionTitle>

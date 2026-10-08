@@ -1,4 +1,5 @@
 import Present from '../components/ui/Present';
+import { PatientHistory } from '../components/Insights';
 import Loading from '../components/ui/Loading';
 import {
   CalendarClock, CheckCircle2, ChevronRight, ClipboardList, KeyRound, MapPin, Monitor, Pill, Receipt, ScanLine, Send,
@@ -159,6 +160,7 @@ export default function ClinicQueue() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [doctors, setDoctors] = useState<DoctorRow[]>([]);
   const [doctorId, setDoctorId] = useState('');
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [queueDate, setQueueDate] = useState(todayISO);
   const [pending, setPending] = useState<QueueAppointment[]>([]);
   const [dayRows, setDayRows] = useState<QueueAppointment[]>([]);
@@ -692,7 +694,7 @@ export default function ClinicQueue() {
 
         {view === 'patients' && (
           <div className="mt-4">
-            <PatientLookup />
+            <PatientLookup clinicId={clinic.id} />
           </div>
         )}
 
@@ -804,8 +806,12 @@ export default function ClinicQueue() {
                               </p>
                             </div>
                           </div>
-                          <div className="mt-3 flex gap-2">
+                          {historyFor === a.id && <PatientHistory memberId={a.member_id} clinicId={clinic.id} />}
+                          <div className="mt-3 flex flex-wrap gap-2">
                             <Button onClick={() => acceptAppointment(a)}>Accept</Button>
+                            <Button variant="outline" onClick={() => setHistoryFor((prev) => (prev === a.id ? null : a.id))}>
+                              {historyFor === a.id ? 'Hide history' : 'Patient history'}
+                            </Button>
                             <Button
                               variant="danger"
                               onClick={() => setRejectOpenFor((prev) => (prev === a.id ? null : a.id))}

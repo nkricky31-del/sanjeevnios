@@ -1,4 +1,5 @@
 import Loading from './ui/Loading';
+import AdminDrill, { type DrillView } from './AdminDrill';
 import { useEffect, useState } from 'react';
 
 import { FRAUD_THRESHOLDS, isFlagged, type ClinicFraudStats } from '../lib/fraud';
@@ -24,6 +25,7 @@ const FETCH_LIMIT = 2000;
 export default function AdminFraud() {
   const [stats, setStats] = useState<ClinicFraudStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [drill, setDrill] = useState<DrillView | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -71,6 +73,8 @@ export default function AdminFraud() {
     load();
   }, []);
 
+  if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
+
   return (
     <div>
       <SuspendUserForm />
@@ -93,7 +97,10 @@ export default function AdminFraud() {
           <Card key={s.clinicId}>
             <div className="flex items-center justify-between">
               <p className="font-semibold text-slate-900">{s.clinicName}</p>
-              {s.flagged && <StatusPill label="Flagged" tone="warning" />}
+              <div className="flex items-center gap-2">
+                {s.flagged && <StatusPill label="Flagged" tone="warning" />}
+                <button onClick={() => setDrill({ kind: 'fraud', clinicId: s.clinicId })} className="text-xs font-bold text-brand-600">View details</button>
+              </div>
             </div>
             <p className="text-sm text-slate-600">
               {s.rejections} rejection{s.rejections === 1 ? '' : 's'} · {s.noShows} no-show

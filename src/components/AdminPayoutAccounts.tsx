@@ -1,4 +1,5 @@
 import Loading from './ui/Loading';
+import AdminDrill, { type DrillView } from './AdminDrill';
 import { Banknote, CheckCircle2, Clock, ShieldAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -89,6 +90,7 @@ const inputClass =
 // ever live client-side, and it's discarded the moment the request settles.
 export default function AdminPayoutAccounts() {
   const [clinics, setClinics] = useState<ClinicRow[]>([]);
+  const [drill, setDrill] = useState<DrillView | null>(null);
   const [loading, setLoading] = useState(true);
   const [openFor, setOpenFor] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -195,6 +197,8 @@ export default function AdminPayoutAccounts() {
     }
   };
 
+  if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -223,7 +227,10 @@ export default function AdminPayoutAccounts() {
                   <IconTile icon={icon} size="sm" tone={c.razorpay_account_status === 'activated' ? 'emerald' : c.razorpay_account_status === 'needs_clarification' || c.razorpay_account_status === 'suspended' ? 'pink' : 'slate'} />
                   <p className="truncate font-bold text-slate-900">{c.name}</p>
                 </div>
-                <StatusPill label={STATUS_LABEL[c.razorpay_account_status]} tone={STATUS_TONE[c.razorpay_account_status]} />
+                <div className="flex items-center gap-2">
+                  <StatusPill label={STATUS_LABEL[c.razorpay_account_status]} tone={STATUS_TONE[c.razorpay_account_status]} />
+                  <button onClick={() => setDrill({ kind: 'payout', clinicId: c.id })} className="text-xs font-bold text-brand-600">View details</button>
+                </div>
               </div>
               {c.razorpay_fund_account_id && (
                 <p className="mt-1 truncate font-mono text-[11px] text-slate-400">account: {c.razorpay_fund_account_id}</p>

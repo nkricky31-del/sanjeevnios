@@ -1,4 +1,5 @@
 import Present from '../components/ui/Present';
+import { DoctorInsights } from '../components/Insights';
 import Loading from '../components/ui/Loading';
 import { useEffect, useState } from 'react';
 
@@ -47,6 +48,7 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [expandedDoctorId, setExpandedDoctorId] = useState<string | null>(null);
+  const [insightsFor, setInsightsFor] = useState<string | null>(null);
   const [onboardingDoctor, setOnboardingDoctor] = useState<{ id: string; name: string } | null>(null);
   const [clinicDocuments, setClinicDocuments] = useState<DocumentRow[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -213,6 +215,12 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
               >
                 {expandedDoctorId === d.id ? 'Hide availability' : 'Manage availability'}
               </button>
+              <button
+                onClick={() => setInsightsFor((prev) => (prev === d.id ? null : d.id))}
+                className="text-sm font-medium text-brand-600"
+              >
+                {insightsFor === d.id ? 'Hide stats' : 'View stats'}
+              </button>
               {d.status === 'approved' && (
                 <button
                   onClick={() => toggleDoctorActive(d)}
@@ -230,6 +238,7 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
               </p>
             )}
 
+            {insightsFor === d.id && <DoctorInsights doctorId={d.id} />}
             {expandedDoctorId === d.id && <DoctorAvailabilityForm doctorId={d.id} />}
           </Card>
         ))}

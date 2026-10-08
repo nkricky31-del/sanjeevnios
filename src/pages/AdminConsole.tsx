@@ -12,6 +12,7 @@ import AdminBilling from '../components/AdminBilling';
 import AdminConditions from '../components/AdminConditions';
 import AdminCoupons from '../components/AdminCoupons';
 import AdminDashboard from '../components/AdminDashboard';
+import AdminDrill, { type DrillView } from '../components/AdminDrill';
 import AdminDocumentReview from '../components/AdminDocumentReview';
 import AdminFraud from '../components/AdminFraud';
 import AdminNameChanges from '../components/AdminNameChanges';
@@ -107,6 +108,7 @@ export default function AdminConsole() {
     | 'names'
     | 'reviews'
   >('dashboard');
+  const [drill, setDrill] = useState<DrillView | null>(null);
   const [clinics, setClinics] = useState<PendingClinic[]>([]);
   const [doctors, setDoctors] = useState<PendingDoctor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -422,7 +424,9 @@ export default function AdminConsole() {
           </div>
         )}
 
-        {view === 'verification' && (
+        {view === 'verification' && drill && <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />}
+
+        {view === 'verification' && !drill && (
           <>
             {actionError && <p className="mb-3 mt-4 text-sm text-red-600">{actionError}</p>}
 
@@ -455,7 +459,7 @@ export default function AdminConsole() {
                       <IconTile icon={Building2} size="sm" />
                       <p className="truncate font-bold text-slate-900">{c.name}</p>
                     </div>
-                    <StatusPill label="Pending" tone="warning" />
+                    <div className="flex items-center gap-2"><button onClick={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} className="text-xs font-bold text-brand-600">View details</button><StatusPill label="Pending" tone="warning" /></div>
                   </div>
                   <p className="mt-2 text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
                   {c.address && <p className="text-xs text-slate-400">{c.address}</p>}
@@ -523,7 +527,7 @@ export default function AdminConsole() {
                       <IconTile icon={Stethoscope} size="sm" />
                       <p className="truncate font-bold text-slate-900">{d.name}</p>
                     </div>
-                    <StatusPill label="Pending" tone="warning" />
+                    <div className="flex items-center gap-2"><button onClick={() => setDrill({ kind: 'doctor', id: d.id })} className="text-xs font-bold text-brand-600">View details</button><StatusPill label="Pending" tone="warning" /></div>
                   </div>
                   {d.specialty && <p className="mt-2 text-sm font-medium text-brand-600">{d.specialty}</p>}
                   <p className="text-sm text-slate-500">Reg. {d.reg_no ?? '—'}</p>
@@ -599,7 +603,7 @@ export default function AdminConsole() {
                       <IconTile icon={Building2} size="sm" tone={c.is_verified ? 'emerald' : 'slate'} />
                       <p className="truncate font-bold text-slate-900">{c.name}</p>
                     </div>
-                    <StatusPill label={c.is_verified ? 'Verified' : 'Not verified'} tone={c.is_verified ? 'live' : 'neutral'} />
+                    <div className="flex items-center gap-2"><button onClick={() => setDrill({ kind: 'clinic', id: c.id, from: 'close' })} className="text-xs font-bold text-brand-600">View details</button><StatusPill label={c.is_verified ? 'Verified' : 'Not verified'} tone={c.is_verified ? 'live' : 'neutral'} /></div>
                   </div>
                   <p className="mt-2 text-sm text-slate-500">Reg. {c.reg_no ?? '—'}</p>
                   <div className="mt-2">
@@ -636,7 +640,7 @@ export default function AdminConsole() {
                       <IconTile icon={Stethoscope} size="sm" tone={d.is_verified ? 'emerald' : 'slate'} />
                       <p className="truncate font-bold text-slate-900">{d.name}</p>
                     </div>
-                    <StatusPill label={d.is_verified ? 'Verified' : 'Not verified'} tone={d.is_verified ? 'live' : 'neutral'} />
+                    <div className="flex items-center gap-2"><button onClick={() => setDrill({ kind: 'doctor', id: d.id })} className="text-xs font-bold text-brand-600">View details</button><StatusPill label={d.is_verified ? 'Verified' : 'Not verified'} tone={d.is_verified ? 'live' : 'neutral'} /></div>
                   </div>
                   {d.specialty && <p className="mt-2 text-sm font-medium text-brand-600">{d.specialty}</p>}
                   <p className="text-xs text-slate-400">{d.clinics?.name}</p>

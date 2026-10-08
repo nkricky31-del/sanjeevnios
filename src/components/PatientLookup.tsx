@@ -1,4 +1,5 @@
 import { Search } from 'lucide-react';
+import { PatientsOverview } from './Insights';
 import { useState, type FormEvent } from 'react';
 
 import PatientProfile from './PatientProfile';
@@ -11,7 +12,7 @@ function normalizeMrn(input: string): string {
   return trimmed.startsWith('MRN-') ? trimmed : `MRN-${trimmed}`;
 }
 
-export default function PatientLookup() {
+export default function PatientLookup({ clinicId }: { clinicId?: string }) {
   const [input, setInput] = useState('');
   const [mrn, setMrn] = useState<string | null>(null);
 
@@ -44,9 +45,12 @@ export default function PatientLookup() {
 
       {mrn && (
         <div className="mt-4">
+          <button type="button" onClick={() => { setMrn(null); setInput(''); }} className="mb-2 text-sm font-semibold text-brand-600">← All patients</button>
           <PatientProfile mrn={mrn} />
         </div>
       )}
+
+      {!mrn && <PatientsOverview clinicId={clinicId} onOpen={(m) => { setInput(m); setMrn(m); }} />}
     </div>
   );
 }

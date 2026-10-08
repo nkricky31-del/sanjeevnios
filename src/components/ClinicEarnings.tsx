@@ -1,4 +1,5 @@
 import Present from './ui/Present';
+import { EarningsCharts } from './Insights';
 import Loading from './ui/Loading';
 import { Clock3, Download, IndianRupee, Printer, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -240,6 +241,8 @@ export default function ClinicEarnings({ clinic }: Props) {
             </Card>
             </button>
           </div>
+
+          <div className="mt-4 print:hidden"><EarningsCharts rows={filtered} /></div>
 
           <div className="mt-4 flex flex-wrap items-end gap-2 print:hidden">
             <div>
