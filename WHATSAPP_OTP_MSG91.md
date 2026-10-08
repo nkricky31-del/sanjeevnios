@@ -262,9 +262,24 @@ already handles) - only take this path if Step 5's Hook genuinely isn't availabl
 
 ---
 
-## What to do next
+## Status: the function is written
 
-This file is a plan, not yet-applied code - none of it has been created in this repo. Once you've done
-the MSG91-side setup (Steps 1-2, which need your own MSG91 account and can't be done for you), tell me
-and I'll write the actual Edge Function, wire up the secrets command, and update this file with the
-exact values you end up using in place of the placeholders.
+`supabase/functions/send-whatsapp-otp/index.ts` is the finished version of Step 3 above (it replaces the
+sketch). Beyond the sketch it: sends WhatsApp first and falls back to MSG91 SMS (`OTP_CHANNEL`), accepts
+only Indian mobile numbers (blocks SMS-pumping abuse), caps 5 codes/phone/hour and a project-wide daily
+ceiling (`OTP_DAILY_CAP`, default 3000; needs migration 74), and never logs the code or full number.
+
+What is left is yours (accounts/dashboards):
+1. MSG91 KYC; WhatsApp number + **Authentication** template approved (Steps 1-2). For the SMS fallback you
+   also need a DLT-registered sender + OTP template, and its MSG91 template id.
+2. Supabase: Authentication > Hooks > **Send SMS hook** > HTTPS > the function URL; copy the signing secret.
+   (If Hooks is greyed out on your plan, you need Pro - and the project should be on Pro for launch anyway.)
+3. `npx supabase secrets set SEND_SMS_HOOK_SECRET='v1,whsec_...' MSG91_AUTH_KEY=... MSG91_WHATSAPP_SENDER=...
+   MSG91_WHATSAPP_TEMPLATE_NAME=... MSG91_SMS_TEMPLATE_ID=... OTP_CHANNEL=whatsapp_then_sms`
+4. `SUPABASE_ACCESS_TOKEN=... ./scripts/deploy-functions.sh` (deploys everything, then re-applies
+   `--no-verify-jwt` on this function and razorpay-webhook - a plain deploy-all would turn the JWT check back
+   on and break OTP).
+5. Check the exact MSG91 request/field names against your own dashboard snippet (Step 2); the SMS call uses
+   MSG91's `/api/v5/otp` endpoint.
+6. Test with a real WhatsApp number; `npx supabase functions logs send-whatsapp-otp` for failures.
+   Test-OTP numbers keep working and skip the hook.
