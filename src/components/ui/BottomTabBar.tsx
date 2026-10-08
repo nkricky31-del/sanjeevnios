@@ -1,4 +1,5 @@
 import { CalendarDays, CreditCard, FileText, Home, User } from 'lucide-react';
+import { motion } from 'motion/react';
 import { NavLink } from 'react-router-dom';
 
 // The five patient tabs. On a phone this is the bottom bar; from `lg` up the
@@ -31,8 +32,17 @@ export default function BottomTabBar() {
           >
             {({ isActive }) => (
               <>
-                {isActive && <span aria-hidden className="absolute -top-1.5 h-0.5 w-8 rounded-full bg-brand-600" />}
-                <t.icon size={19} strokeWidth={1.75} />
+                {isActive && (
+                  <motion.span
+                    layoutId="tabbar-indicator"
+                    aria-hidden
+                    className="absolute -top-1.5 h-0.5 w-8 rounded-full bg-brand-600"
+                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  />
+                )}
+                <motion.span animate={{ scale: isActive ? 1.18 : 1, y: isActive ? -2 : 0 }} transition={{ type: 'spring', stiffness: 420, damping: 18 }}>
+                  <t.icon size={19} strokeWidth={1.75} />
+                </motion.span>
                 <span className="truncate">{t.label}</span>
               </>
             )}

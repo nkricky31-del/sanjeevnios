@@ -1,4 +1,5 @@
 import { ArrowLeft, Maximize2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -139,9 +140,20 @@ export default function TokenBoard() {
         {/* Now serving */}
         <div className="rounded-[2rem] bg-[var(--accent)] px-6 py-10 text-center text-ground">
           <p className="text-lg font-bold uppercase tracking-[0.2em] text-ground/70">Now serving</p>
-          <p className="mt-2 text-[9rem] font-extrabold leading-none tracking-tight">
-            {nowServing ?? '—'}
-          </p>
+          <div className="relative mt-2 h-[9rem]">
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.p
+                key={String(nowServing ?? '—')}
+                className="text-[9rem] font-extrabold leading-none tracking-tight"
+                initial={{ y: 70, opacity: 0, scale: 0.85, rotateX: -50 }}
+                animate={{ y: 0, opacity: 1, scale: 1, rotateX: 0 }}
+                exit={{ y: -70, opacity: 0, scale: 0.9 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+              >
+                {nowServing ?? '—'}
+              </motion.p>
+            </AnimatePresence>
+          </div>
           {serving[0]?.doctors?.name && (
             <p className="mt-2 text-xl font-semibold text-ground/80">{serving[0].doctors.name}</p>
           )}
@@ -166,9 +178,15 @@ export default function TokenBoard() {
           {!loading && waiting.length === 0 && (
             <p className="text-xl text-ink/40">No one else waiting right now.</p>
           )}
+          <AnimatePresence mode="popLayout" initial={false}>
           {waiting.slice(0, 6).map((r, i) => (
-            <div
+            <motion.div
+              layout
               key={r.id}
+              initial={{ opacity: 0, scale: 0.8, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: -24 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 26 }}
               className={`rounded-3xl px-8 py-6 text-center ${
                 i === 0 ? 'bg-ink text-ground' : 'bg-ink/10 text-ink'
               }`}
@@ -177,8 +195,9 @@ export default function TokenBoard() {
               {r.doctors?.name && (
                 <p className={`mt-2 text-sm ${i === 0 ? 'text-ground/70' : 'text-ink/50'}`}>{r.doctors.name}</p>
               )}
-            </div>
+            </motion.div>
           ))}
+          </AnimatePresence>
         </div>
 
         {waiting.length > 6 && (

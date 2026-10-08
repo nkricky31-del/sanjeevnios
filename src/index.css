@@ -85,6 +85,23 @@ body {
   --color-slate-950: #030712;
 }
 
+/* Sidebar / navigation colours per role (deep gradient + a light accent). */
+.app-scope {
+  --sidebar-bg: linear-gradient(185deg, #0a1240 0%, #16258a 52%, #2a44a8 100%);
+  --sidebar-light: #a9bcff;
+  --sidebar-glow: rgba(124, 150, 255, 0.5);
+}
+.app-scope[data-app-role='clinic'] {
+  --sidebar-bg: linear-gradient(185deg, #04261d 0%, #065f46 55%, #0b7f5c 100%);
+  --sidebar-light: #6ee7b7;
+  --sidebar-glow: rgba(52, 211, 153, 0.45);
+}
+.app-scope[data-app-role='admin'] {
+  --sidebar-bg: linear-gradient(185deg, #04060c 0%, #0f1729 55%, #1f2e47 100%);
+  --sidebar-light: #8fd8ff;
+  --sidebar-glow: rgba(125, 211, 252, 0.32);
+}
+
 /* Clinics get the warmer Nunito Sans for body text. */
 .app-scope[data-app-role='clinic'] {
   --accent: var(--color-leaf-text);

@@ -1,3 +1,4 @@
+import { useStaggerIn } from '../lib/motionKit';
 import { BellRing, PlayCircle, SkipForward, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -77,6 +78,7 @@ export default function WaitingList({
   onChanged,
   reminderLimit = 3,
 }: Props) {
+  const listRef = useStaggerIn();
   const [rows, setRows] = useState<QueueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -265,7 +267,7 @@ export default function WaitingList({
         <p className="mt-2 rounded-2xl bg-emerald-50 p-2.5 text-sm font-semibold text-emerald-700">{note}</p>
       )}
 
-      <div className="mt-3 space-y-2">
+      <div ref={listRef} className="mt-3 space-y-2">
         {loading && <p className="text-sm text-slate-400">Loading...</p>}
         {!loading && rows.length === 0 && <p className="text-sm text-slate-400">Nobody has checked in yet.</p>}
 

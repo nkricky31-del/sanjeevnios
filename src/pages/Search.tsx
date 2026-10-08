@@ -1,3 +1,4 @@
+import { useStaggerIn } from '../lib/motionKit';
 import { ChevronRight, MapPin, SearchIcon, Stethoscope } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -17,6 +18,7 @@ interface MyLocation {
 }
 
 export default function Search() {
+  const listRef = useStaggerIn();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<DoctorSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,7 +117,7 @@ export default function Search() {
         </div>
         {locationError && <p className="mt-1.5 text-xs text-red-600">{locationError}</p>}
 
-        <div className="mt-5 grid gap-2.5 lg:grid-cols-2">
+        <div ref={listRef} className="mt-5 grid gap-2.5 lg:grid-cols-2">
           {loading && <p className="text-sm text-slate-400 lg:col-span-2">Searching...</p>}
           {!loading && sortedResults.length === 0 && (
             <p className="text-sm text-slate-400 lg:col-span-2">No approved clinics found.</p>

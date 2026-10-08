@@ -20,6 +20,8 @@ export interface AuthTheme {
   orbits: { radius: number; duration: number; reverse: boolean; icons: LucideIcon[] }[];
   /** Ring style differs per role so the screens are told apart at a glance. */
   ring: 'solid' | 'dashed' | 'dotted';
+  /** The animated side panel: a deep gradient with light, glowing accents. */
+  stage: { bg: string; blobA: string; blobB: string; light: string };
   badges: { icon: LucideIcon; lines: [string, string] }[];
 }
 
@@ -39,6 +41,12 @@ export const AUTH_THEMES: Record<AuthRole, AuthTheme> = {
       { radius: 280, duration: 70, reverse: false, icons: [Stethoscope, ShieldCheck] },
     ],
     ring: 'solid',
+    stage: {
+      bg: 'linear-gradient(150deg, #0a1240 0%, #1d2f8f 48%, #3b5bdb 100%)',
+      blobA: 'rgba(124,150,255,0.55)',
+      blobB: 'rgba(16,185,129,0.30)',
+      light: '#a9bcff',
+    },
     badges: [
       { icon: ShieldCheck, lines: ['Secure &', 'encrypted'] },
       { icon: FileText, lines: ['Your records,', 'your consent'] },
@@ -58,6 +66,12 @@ export const AUTH_THEMES: Record<AuthRole, AuthTheme> = {
       { radius: 280, duration: 70, reverse: true, icons: [Building2, Stethoscope] },
     ],
     ring: 'dashed',
+    stage: {
+      bg: 'linear-gradient(150deg, #04261d 0%, #065f46 52%, #0f9f74 100%)',
+      blobA: 'rgba(52,211,153,0.50)',
+      blobB: 'rgba(96,165,250,0.28)',
+      light: '#6ee7b7',
+    },
     badges: [
       { icon: ShieldCheck, lines: ['Secure &', 'encrypted'] },
       { icon: FileCheck2, lines: ['Document', 'verified'] },
@@ -77,8 +91,14 @@ export const AUTH_THEMES: Record<AuthRole, AuthTheme> = {
       { radius: 280, duration: 100, reverse: false, icons: [ShieldCheck] },
     ],
     ring: 'dotted',
+    stage: {
+      bg: 'linear-gradient(150deg, #04060c 0%, #0f1729 52%, #27364d 100%)',
+      blobA: 'rgba(125,211,252,0.34)',
+      blobB: 'rgba(129,140,248,0.26)',
+      light: '#8fd8ff',
+    },
     badges: [
-      { icon: KeyRound, lines: ['Authenticator', 'required'] },
+      { icon: KeyRound, lines: ['Restricted', 'access'] },
       { icon: ScrollText, lines: ['Every action', 'logged'] },
       { icon: Lock, lines: ['Break-glass', 'only'] },
     ],

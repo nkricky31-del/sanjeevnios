@@ -1,3 +1,4 @@
+import { CountUp } from '../lib/motionKit';
 import {
   BadgeCheck,
   Bell,
@@ -228,7 +229,7 @@ export default function Profile() {
             ].map((s) => (
               <div key={s.label} className="px-1 py-3 text-center">
                 <s.icon size={17} className="mx-auto text-brand-600" />
-                <p className="mt-1 text-sm font-extrabold text-slate-900">{s.value}</p>
+                <p className="mt-1 text-sm font-extrabold text-slate-900">{typeof s.value === 'number' ? <CountUp value={s.value} /> : s.value}</p>
                 <p className="text-[10px] font-semibold leading-tight text-slate-500">{s.label}</p>
               </div>
             ))}

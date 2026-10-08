@@ -1,3 +1,4 @@
+import { useStaggerIn } from '../lib/motionKit';
 import { Bell, CalendarDays, ChevronRight, Clock, MapPin } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -60,6 +61,7 @@ const STATUS_LABEL: Record<AppointmentStatus, string> = {
 };
 
 export default function MyBookings() {
+  const listRef = useStaggerIn();
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
   const [rows, setRows] = useState<Row[]>([]);
@@ -107,7 +109,7 @@ export default function MyBookings() {
       <div className="px-4 pb-6">
         <Segmented options={TABS} value={tab} onChange={setTab} variant="underline" />
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div ref={listRef} className="mt-4 grid gap-3 lg:grid-cols-2">
           {loading && <p className="text-sm text-slate-400 lg:col-span-2">Loading...</p>}
           {!loading && visible.length === 0 && (
             <Card className="text-center lg:col-span-2">

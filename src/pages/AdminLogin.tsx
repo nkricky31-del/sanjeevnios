@@ -20,6 +20,9 @@ import TurnstileWidget from '../components/TurnstileWidget';
 // this screen doesn't need to collect or check anything beyond identity -
 // App.tsx's role check after sign-in decides whether AdminConsole is
 // actually reachable.
+// Mirrors AdminMfaGate: the authenticator step (and what we say about it) only appears when it is switched on.
+const MFA_ON = import.meta.env.VITE_REQUIRE_ADMIN_MFA === 'true';
+
 export default function AdminLogin() {
   const [stage, setStage] = useState<'phone' | 'otp'>('phone');
   const [digits, setDigits] = useState('');
@@ -88,7 +91,11 @@ export default function AdminLogin() {
       {stage === 'phone' ? (
         <>
           <AuthNotice icon={Lock}>Restricted access. Every action here is logged.</AuthNotice>
-          <AuthHeading title="Admin login" sub="Sign in with your registered phone number. You will be asked for your authenticator app next." />
+          <AuthHeading title="Admin login" sub={
+              MFA_ON
+                ? 'Sign in with your registered phone number. You will be asked for your authenticator app next.'
+                : 'Sign in with your registered phone number.'
+            } />
 
           <form onSubmit={sendOtp} className="mt-6">
             <PhoneField label="Mobile number" value={digits} onChange={setDigits} placeholder="Enter your mobile number" />

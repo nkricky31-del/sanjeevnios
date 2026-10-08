@@ -1,3 +1,4 @@
+import { useStaggerIn } from '../lib/motionKit';
 import {
   CalendarDays,
   CalendarPlus,
@@ -74,6 +75,7 @@ const STATUS_LABEL: Partial<Record<AppointmentStatus, string>> = {
 const AVATAR_TONES: IconTone[] = ['brand', 'emerald', 'amber', 'pink'];
 
 export default function Home() {
+  const actionsRef = useStaggerIn();
   const { profile } = useAuth();
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
@@ -201,7 +203,7 @@ export default function Home() {
 
         {/* Quick actions */}
         <SectionTitle className="mt-6">Quick Actions</SectionTitle>
-        <div className="mt-2 grid grid-cols-4 gap-2">
+        <div ref={actionsRef} className="mt-2 grid grid-cols-4 gap-2">
           {QUICK_ACTIONS.map((a) => (
             <Link
               key={a.label}

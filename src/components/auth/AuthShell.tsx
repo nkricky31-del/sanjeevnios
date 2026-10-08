@@ -8,76 +8,163 @@ import { AUTH_THEMES, type AuthRole, type AuthTheme } from './authThemes';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-// Concentric rings that breathe, plus icons orbiting on three paths. All of it
-// is motion transforms, so prefers-reduced-motion (MotionConfig in main.tsx)
-// freezes it into a still picture.
+// Deterministic "random" so the particles sit in the same places on every render.
+const PARTICLES = Array.from({ length: 26 }, (_, i) => ({
+  left: (i * 37 + 11) % 100,
+  size: 2 + ((i * 5) % 4),
+  duration: 9 + ((i * 7) % 9),
+  delay: -((i * 3) % 11),
+  drift: ((i * 13) % 40) - 20,
+}));
+
+// The animated side panel. Deep role-coloured gradient, then (back to front):
+// drifting colour blobs, a fine dot grid, sonar waves rising from the centre, a
+// slow radar sweep, glowing rings, glass icons on three orbits, floating
+// particles, and the word. All motion transforms, so prefers-reduced-motion
+// (MotionConfig in main.tsx) holds the whole thing still.
 function Stage({ theme }: { theme: AuthTheme }) {
+  const { stage } = theme;
   const ringStyle = theme.ring === 'solid' ? 'border-solid' : theme.ring === 'dashed' ? 'border-dashed' : 'border-dotted';
+  const glow = `0 0 22px ${stage.light}66, inset 0 0 12px ${stage.light}22`;
   return (
-    <div className="relative hidden min-h-screen flex-1 overflow-hidden border-r border-hairline bg-ground-2 lg:block" aria-hidden>
-      {/* breathing rings */}
-      {[0, 1, 2, 3].map((i) => {
-        const size = 220 + i * 140;
+    <div className="relative hidden min-h-screen flex-1 overflow-hidden lg:block" style={{ background: stage.bg }} aria-hidden>
+      {/* drifting colour */}
+      <motion.div
+        className="absolute -left-32 -top-32 h-[34rem] w-[34rem] rounded-full blur-3xl"
+        style={{ background: stage.blobA }}
+        animate={{ x: [0, 90, 0], y: [0, 60, 0], scale: [1, 1.18, 1] }}
+        transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.div
+        className="absolute -bottom-40 -right-24 h-[32rem] w-[32rem] rounded-full blur-3xl"
+        style={{ background: stage.blobB }}
+        animate={{ x: [0, -80, 0], y: [0, -50, 0], scale: [1.1, 0.95, 1.1] }}
+        transition={{ duration: 17, repeat: Infinity, ease: 'easeInOut' }}
+      />
+
+      {/* fine dot grid, fading out towards the edges */}
+      <div
+        className="absolute inset-0 opacity-60 [background-image:radial-gradient(rgba(255,255,255,0.16)_1px,transparent_1px)] [background-size:30px_30px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_72%)]"
+      />
+
+      {/* sonar waves: rings that grow out of the centre and fade */}
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={`wave-${i}`}
+          className="absolute left-1/2 top-1/2 -ml-[210px] -mt-[210px] h-[420px] w-[420px] rounded-full border-2"
+          style={{ borderColor: stage.light }}
+          initial={{ scale: 0.35, opacity: 0 }}
+          animate={{ scale: [0.35, 1.9], opacity: [0.55, 0] }}
+          transition={{ duration: 6.5, delay: i * 2.15, repeat: Infinity, ease: 'easeOut' }}
+        />
+      ))}
+
+      {/* radar sweep (leaves the centre clear for the word) */}
+      <motion.div
+        className="absolute left-1/2 top-1/2 -ml-[300px] -mt-[300px] h-[600px] w-[600px] rounded-full"
+        style={{
+          background: `conic-gradient(from 0deg, transparent 0deg, ${stage.light}00 250deg, ${stage.light}55 330deg, ${stage.light}00 360deg)`,
+          maskImage: 'radial-gradient(circle, transparent 36%, black 37%, black 100%)',
+          WebkitMaskImage: 'radial-gradient(circle, transparent 36%, black 37%, black 100%)',
+        }}
+        animate={{ rotate: 360 }}
+        transition={{ duration: 9, ease: 'linear', repeat: Infinity }}
+      />
+
+      {/* orbit rings */}
+      {[0, 1, 2].map((i) => {
+        const size = theme.orbits[i].radius * 2;
         return (
-          <motion.span
-            key={i}
-            className={`absolute left-1/2 top-1/2 rounded-full border border-ink/10 ${ringStyle}`}
-            style={{ width: size, height: size, marginLeft: -size / 2, marginTop: -size / 2 }}
-            animate={{ scale: [1, 0.94, 1], opacity: [0.9 - i * 0.18, 0.5 - i * 0.1, 0.9 - i * 0.18] }}
-            transition={{ duration: 6, delay: i * 0.5, repeat: Infinity, ease: 'easeInOut' }}
+          <span
+            key={`ring-${i}`}
+            className={`absolute left-1/2 top-1/2 rounded-full border ${ringStyle}`}
+            style={{ width: size, height: size, marginLeft: -size / 2, marginTop: -size / 2, borderColor: 'rgba(255,255,255,0.20)' }}
           />
         );
       })}
 
-      {/* orbits */}
-      {theme.orbits.map((orbit, oi) => (
-        <motion.div
-          key={oi}
-          className="absolute left-1/2 top-1/2 h-0 w-0"
-          animate={{ rotate: orbit.reverse ? -360 : 360 }}
-          transition={{ duration: orbit.duration, ease: 'linear', repeat: Infinity }}
-        >
-          {orbit.icons.map((Icon, ii) => {
-            const angle = (360 / orbit.icons.length) * ii + oi * 40;
-            return (
-              <div
-                key={ii}
-                className="absolute left-0 top-0"
-                style={{ transform: `rotate(${angle}deg) translateX(${orbit.radius}px)` }}
-              >
-                {/* counter-rotate so the icon stays upright while its orbit turns */}
-                <motion.div
-                  className="-ml-[18px] -mt-[18px] flex h-9 w-9 items-center justify-center rounded-full border border-hairline bg-ground text-[var(--accent)]"
-                  initial={{ rotate: -angle }}
-                  animate={{ rotate: orbit.reverse ? -angle + 360 : -angle - 360 }}
-                  transition={{ duration: orbit.duration, ease: 'linear', repeat: Infinity }}
-                >
-                  <Icon size={16} strokeWidth={1.75} />
-                </motion.div>
-              </div>
-            );
-          })}
-        </motion.div>
+      {/* orbiting glass icons */}
+      {theme.orbits.map((orbit, oi) => {
+        const duration = 22 + oi * 12;
+        return (
+          <motion.div
+            key={oi}
+            className="absolute left-1/2 top-1/2 h-0 w-0"
+            animate={{ rotate: orbit.reverse ? -360 : 360 }}
+            transition={{ duration, ease: 'linear', repeat: Infinity }}
+          >
+            {orbit.icons.map((Icon, ii) => {
+              const angle = (360 / orbit.icons.length) * ii + oi * 40;
+              return (
+                <div key={ii} className="absolute left-0 top-0" style={{ transform: `rotate(${angle}deg) translateX(${orbit.radius}px)` }}>
+                  <motion.div
+                    className="-ml-[23px] -mt-[23px] flex h-[46px] w-[46px] items-center justify-center rounded-full border border-white/30 bg-white/10 backdrop-blur-md"
+                    style={{ color: '#ffffff', boxShadow: glow }}
+                    initial={{ rotate: -angle }}
+                    animate={{ rotate: orbit.reverse ? -angle + 360 : -angle - 360 }}
+                    transition={{ duration, ease: 'linear', repeat: Infinity }}
+                  >
+                    <motion.span
+                      className="flex"
+                      animate={{ scale: [1, 1.18, 1] }}
+                      transition={{ duration: 3.2, delay: ii * 0.7 + oi * 0.4, repeat: Infinity, ease: 'easeInOut' }}
+                    >
+                      <Icon size={19} strokeWidth={1.75} />
+                    </motion.span>
+                  </motion.div>
+                </div>
+              );
+            })}
+          </motion.div>
+        );
+      })}
+
+      {/* floating particles */}
+      {PARTICLES.map((pt, i) => (
+        <motion.span
+          key={i}
+          className="absolute rounded-full"
+          style={{ left: `${pt.left}%`, bottom: -10, width: pt.size, height: pt.size, background: stage.light }}
+          animate={{ y: [0, -1000], x: [0, pt.drift], opacity: [0, 0.9, 0.9, 0] }}
+          transition={{ duration: pt.duration, delay: pt.delay, repeat: Infinity, ease: 'linear', times: [0, 0.1, 0.85, 1] }}
+        />
       ))}
 
       {/* the word at the centre */}
       <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center text-center">
-        <p className="font-ui text-[10.5px] font-medium uppercase tracking-[0.15em] text-ink-2">SanjeevniOS</p>
-        <p className="mt-3 font-display text-6xl font-extrabold leading-none tracking-[-0.03em] text-ink xl:text-7xl">
+        <motion.p
+          className="font-ui text-[10.5px] font-medium uppercase tracking-[0.3em] text-white/70"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.2 }}
+        >
+          SanjeevniOS
+        </motion.p>
+        <motion.p
+          className="mt-3 font-display text-6xl font-extrabold leading-none tracking-[-0.03em] text-white drop-shadow-[0_6px_30px_rgba(0,0,0,0.35)] xl:text-7xl"
+          initial={{ opacity: 0, y: 24, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.9, delay: 0.3, ease: EASE }}
+        >
           {theme.word}
-          <span className="text-[var(--accent)]">.</span>
-        </p>
+          <span style={{ color: stage.light }}>.</span>
+        </motion.p>
       </div>
 
       {/* headline pinned bottom-left */}
-      <div className="absolute inset-x-10 bottom-10">
-        <p className="font-display text-3xl font-bold leading-[1.05] tracking-[-0.02em] text-ink">
+      <motion.div
+        className="absolute inset-x-10 bottom-10 z-10"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8, delay: 0.7, ease: EASE }}
+      >
+        <p className="font-display text-3xl font-bold leading-[1.05] tracking-[-0.02em] text-white">
           {theme.headline[0]}
           <br />
-          <span className="text-[var(--accent)]">{theme.headline[1]}</span>
+          <span style={{ color: stage.light }}>{theme.headline[1]}</span>
         </p>
-        <p className="mt-3 max-w-sm font-ui text-sm leading-relaxed text-ink-2">{theme.blurb}</p>
-      </div>
+        <p className="mt-3 max-w-sm font-ui text-sm leading-relaxed text-white/75">{theme.blurb}</p>
+      </motion.div>
     </div>
   );
 }

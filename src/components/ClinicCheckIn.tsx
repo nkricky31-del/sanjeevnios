@@ -1,3 +1,4 @@
+import { useStaggerIn } from '../lib/motionKit';
 import { Banknote, CheckCircle2, CreditCard, IdCard, QrCode as QrCodeIcon, Search, UserCheck, UserX } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -64,6 +65,7 @@ interface Outcome {
 // rows, and the check-in function independently refuses an appointment the
 // caller's clinic doesn't own. A QR from another clinic simply won't match.
 export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }: Props) {
+  const listRef = useStaggerIn();
   const [expected, setExpected] = useState<ExpectedRow[]>([]);
   const [noShows, setNoShows] = useState<ExpectedRow[]>([]);
   const [query, setQuery] = useState('');
@@ -438,7 +440,7 @@ export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }:
         />
       </div>
 
-      <div className="mt-3 space-y-2">
+      <div ref={listRef} className="mt-3 space-y-2">
         {loading && <p className="text-sm text-slate-400">Loading...</p>}
         {!loading && expected.length === 0 && (
           <p className="text-sm text-slate-400">Nobody left to check in for this date.</p>

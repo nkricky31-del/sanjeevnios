@@ -32,7 +32,12 @@ export default function StatusPill({ label, tone = 'neutral', icon: Icon, dot }:
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-current/15 px-3 py-1 text-[11px] font-semibold capitalize ${TONE_STYLES[tone]}`}
     >
-      {dot && <span className={`h-1.5 w-1.5 rounded-full ${DOT_STYLES[tone]}`} />}
+      {dot && (
+        <span className="relative flex h-1.5 w-1.5">
+          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-70 ${DOT_STYLES[tone]}`} />
+          <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${DOT_STYLES[tone]}`} />
+        </span>
+      )}
       {Icon && <Icon size={13} />}
       {label}
     </span>

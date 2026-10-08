@@ -1,5 +1,8 @@
 import type { LucideIcon } from 'lucide-react';
+import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
+
+import { CountUp } from '../../lib/motionKit';
 
 interface Props {
   icon: LucideIcon;
@@ -18,12 +21,16 @@ const TONE_BG: Record<string, string> = {
 
 export default function StatTile({ icon: Icon, label, value, tone = 'brand' }: Props) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-3">
+    <motion.div
+      whileHover={{ y: -3 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 24 }}
+      className="rounded-2xl border border-slate-100 bg-white p-3 hover:border-brand-200"
+    >
       <div className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ${TONE_BG[tone]}`}>
         <Icon size={16} />
       </div>
       <p className="mt-2 text-xs text-slate-500">{label}</p>
-      <p className="text-base font-bold text-slate-900">{value}</p>
-    </div>
+      <p className="text-base font-bold text-slate-900">{typeof value === 'number' ? <CountUp value={value} /> : value}</p>
+    </motion.div>
   );
 }

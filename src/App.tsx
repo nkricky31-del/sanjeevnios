@@ -7,6 +7,7 @@ import EncounterDetail from './components/EncounterDetail';
 import NotificationsList from './components/NotificationsList';
 import Button from './components/ui/Button';
 import { InstallBanner, OfflineBanner } from './components/InstallBanner';
+import SplashLoader from './components/ui/SplashLoader';
 import { getStoredActingMode } from './lib/actingMode';
 import { isStandalone } from './lib/pwa';
 import { useAuth } from './lib/AuthContext';
@@ -52,13 +53,7 @@ function AppContent() {
     setSignupIntent(false);
   };
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-canvas">
-        <p className="text-slate-400">Loading...</p>
-      </div>
-    );
-  }
+  if (loading) return <SplashLoader />;
 
   // PUBLIC vs PRIVATE, enforced here as a real redirect (not just "render
   // Login inline") so the address bar and browser history both reflect it -
