@@ -13,10 +13,28 @@ export function isStandalone(): boolean {
 // development never serves stale files).
 export function registerServiceWorker() {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
+  // When a new version takes over an already-controlled page, reload once so
+  // the person sees the new app rather than the one they opened with.
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    window.location.reload();
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
-      /* the site works exactly the same without it */
-    });
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/', updateViaCache: 'none' })
+      .then((reg) => {
+        reg.update().catch(() => {});
+        // check again whenever the app comes back to the foreground
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+      })
+      .catch(() => {
+        /* the site works exactly the same without it */
+      });
   });
 }
 

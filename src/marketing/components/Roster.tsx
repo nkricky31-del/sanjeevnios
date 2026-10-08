@@ -65,7 +65,11 @@ export default function Roster() {
   if (stats && rows.length === 0) return null;
 
   return (
-    <section className="bg-ground py-24" aria-labelledby="roster-heading">
+    <section className="relative isolate overflow-hidden bg-ground py-24" aria-labelledby="roster-heading">
+      <span aria-hidden className="blob -z-10 -left-24 top-0 h-72 w-72 bg-indigo-300" />
+      <span aria-hidden className="blob -z-10 -right-24 bottom-0 h-72 w-72 bg-emerald-300 [animation-delay:-6s]" />
+      <span aria-hidden className="blob -z-10 left-1/2 top-1/3 h-56 w-56 bg-amber-200 [animation-delay:-10s]" />
+
       <div className="mx-auto max-w-6xl px-5">
         <Reveal><Label accent="leaf">The network, live</Label></Reveal>
         <Reveal delay={0.08}>

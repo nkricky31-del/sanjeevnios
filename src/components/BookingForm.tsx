@@ -1,4 +1,5 @@
 import { ShieldAlert } from 'lucide-react';
+import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
 
 import TurnstileWidget from './TurnstileWidget';
@@ -527,7 +528,7 @@ export default function BookingForm({
   }
 
   return (
-    <Card className="mt-4 !rounded-3xl">
+    <Card className="rise-in mt-4 !rounded-3xl">
       <p className="text-base font-bold text-slate-900">Book appointment</p>
 
       {looksLikeFreeFollowUp ? (
@@ -625,19 +626,33 @@ export default function BookingForm({
           <div className="mt-1.5 flex gap-2">
             <button
               onClick={() => changeMethod('online')}
-              className={`flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
-                method === 'online' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
+              className={`relative flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                method === 'online' ? 'border-brand-600 text-brand-700' : 'border-slate-200 text-slate-500'
               }`}
             >
-              Pay online
+              {method === 'online' && (
+                <motion.span
+                  layoutId="pay-method"
+                  className="absolute inset-0 -z-0 rounded-2xl bg-brand-50"
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                />
+              )}
+              <span className="relative">Pay online</span>
             </button>
             <button
               onClick={() => changeMethod('cod')}
-              className={`flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
-                method === 'cod' ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
+              className={`relative flex-1 rounded-2xl border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                method === 'cod' ? 'border-brand-600 text-brand-700' : 'border-slate-200 text-slate-500'
               }`}
             >
-              Cash at clinic
+              {method === 'cod' && (
+                <motion.span
+                  layoutId="pay-method"
+                  className="absolute inset-0 -z-0 rounded-2xl bg-brand-50"
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                />
+              )}
+              <span className="relative">Cash at clinic</span>
             </button>
           </div>
           {/* What paying online does and does not buy, said up front - so

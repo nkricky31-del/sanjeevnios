@@ -7,7 +7,11 @@ import { Label, Reveal } from './motionKit';
 export default function CloseSection() {
   const navigate = useNavigate();
   return (
-    <section className="bg-ground py-28">
+    <section className="relative isolate overflow-hidden bg-ground py-28">
+      <span aria-hidden className="blob -z-10 -left-24 top-0 h-72 w-72 bg-indigo-300" />
+      <span aria-hidden className="blob -z-10 -right-24 bottom-0 h-72 w-72 bg-emerald-300 [animation-delay:-6s]" />
+      <span aria-hidden className="blob -z-10 left-1/2 top-1/3 h-56 w-56 bg-amber-200 [animation-delay:-10s]" />
+
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-5 md:flex-row md:items-end md:justify-between">
         <div>
           <Reveal><Label accent="leaf">Get started</Label></Reveal>

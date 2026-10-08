@@ -96,7 +96,11 @@ export default function ProductDeck() {
   const topId = order[0];
 
   return (
-    <section className="overflow-x-clip bg-ground-2 py-24" aria-labelledby="deck-heading">
+    <section className="relative isolate overflow-hidden bg-ground-2 py-24" aria-labelledby="deck-heading">
+      <span aria-hidden className="blob -z-10 -left-24 top-0 h-72 w-72 bg-indigo-300" />
+      <span aria-hidden className="blob -z-10 -right-24 bottom-0 h-72 w-72 bg-emerald-300 [animation-delay:-6s]" />
+      <span aria-hidden className="blob -z-10 left-1/2 top-1/3 h-56 w-56 bg-amber-200 [animation-delay:-10s]" />
+
       <div className="mx-auto grid max-w-6xl items-center gap-14 px-5 lg:grid-cols-2">
         <div>
           <Reveal><Label accent="primary">The product</Label></Reveal>

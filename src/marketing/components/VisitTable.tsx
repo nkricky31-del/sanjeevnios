@@ -14,7 +14,11 @@ const ROWS = [
 
 export default function VisitTable() {
   return (
-    <section className="bg-ground-2 py-24" aria-labelledby="visit-heading">
+    <section className="relative isolate overflow-hidden bg-ground-2 py-24" aria-labelledby="visit-heading">
+      <span aria-hidden className="blob -z-10 -left-24 top-0 h-72 w-72 bg-indigo-300" />
+      <span aria-hidden className="blob -z-10 -right-24 bottom-0 h-72 w-72 bg-emerald-300 [animation-delay:-6s]" />
+      <span aria-hidden className="blob -z-10 left-1/2 top-1/3 h-56 w-56 bg-amber-200 [animation-delay:-10s]" />
+
       <div className="mx-auto max-w-6xl px-5">
         <Reveal><Label accent="primary">How a visit runs</Label></Reveal>
         <Reveal delay={0.08}>

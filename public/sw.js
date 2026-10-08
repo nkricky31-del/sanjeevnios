@@ -12,7 +12,9 @@
  *   /assets/*           cache first (file names are content-hashed, so immutable)
  *   icons, images, etc  stale-while-revalidate
  */
-const VERSION = 'v1';
+// Replaced with a fresh stamp on every production build (see vite.config.ts), so
+// each deploy changes this file, the browser installs it, and old caches are purged.
+const VERSION = '__BUILD_ID__';
 const SHELL = `sos-shell-${VERSION}`;
 const RUNTIME = `sos-runtime-${VERSION}`;
 const STATIC = ['/', '/manifest.webmanifest', '/favicon.svg', '/icon-192.png', '/icon-512.png'];

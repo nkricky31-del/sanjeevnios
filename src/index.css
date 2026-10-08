@@ -175,3 +175,79 @@ body {
   .app-scope :where(input, select, textarea):focus-visible { animation: none; }
   .app-scope input[type='file']::file-selector-button { transition: none; }
 }
+
+/* ---- Every plain <button> inside the apps: lift on hover, squash on press ---- */
+.app-scope button:not([data-fx='own']):not(:disabled),
+.app-scope [role='button']:not([data-fx='own']) {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), filter 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.app-scope button:not([data-fx='own']):not(:disabled):hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06) saturate(1.05);
+  box-shadow: 0 8px 18px -10px color-mix(in srgb, var(--accent, #4f46e5) 55%, transparent);
+}
+.app-scope button:not([data-fx='own']):not(:disabled):active {
+  transform: translateY(0) scale(0.95);
+  filter: brightness(0.96);
+  box-shadow: none;
+}
+/* the touch ring that grows out from wherever a button was pressed */
+.press-ring {
+  position: fixed;
+  z-index: 9999;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent, #4f46e5) 35%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--accent, #4f46e5) 70%, transparent);
+  animation: press-ring 0.55s ease-out forwards;
+}
+@keyframes press-ring {
+  from { transform: scale(0.4); opacity: 0.9; }
+  to { transform: scale(5); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-scope button:not([data-fx='own']) { transition: none; transform: none !important; }
+  .press-ring { display: none; }
+}
+
+/* ---- Landing page colour motion ---- */
+.hue-text {
+  background-image: linear-gradient(100deg, #4f46e5, #0ea5e9, #10b981, #f59e0b, #ec4899, #4f46e5);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: hue-slide 9s linear infinite;
+}
+@keyframes hue-slide { to { background-position: 300% 0; } }
+.blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(70px);
+  opacity: 0.35;
+  pointer-events: none;
+  animation: blob-drift 14s ease-in-out infinite alternate;
+}
+@keyframes blob-drift {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(6vw, -4vw) scale(1.15); }
+  100% { transform: translate(-5vw, 3vw) scale(0.95); }
+}
+.stroke-hue { animation: stroke-hue 8s linear infinite; }
+@keyframes stroke-hue { to { -webkit-text-stroke-color: rgb(236 72 153 / 0.5); } from { -webkit-text-stroke-color: rgb(79 70 229 / 0.5); } }
+@media (prefers-reduced-motion: reduce) {
+  .hue-text, .blob, .stroke-hue { animation: none; }
+}
+
+/* Children rise in one after another - add .rise-in to any container. */
+.rise-in > * { animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rise-in > *:nth-child(2) { animation-delay: 0.07s; }
+.rise-in > *:nth-child(3) { animation-delay: 0.14s; }
+.rise-in > *:nth-child(4) { animation-delay: 0.21s; }
+.rise-in > *:nth-child(5) { animation-delay: 0.28s; }
+.rise-in > *:nth-child(n+6) { animation-delay: 0.35s; }
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .rise-in > * { animation: none; } }

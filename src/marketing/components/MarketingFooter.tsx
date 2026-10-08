@@ -50,7 +50,7 @@ export default function MarketingFooter() {
       </div>
       <p
         aria-hidden
-        className="mx-auto mt-4 translate-y-[26%] select-none whitespace-nowrap text-center font-display text-[9.4vw] font-extrabold leading-[0.85] tracking-[-0.04em] text-ink/90"
+        className="hue-text mx-auto mt-6 select-none whitespace-nowrap pb-[0.12em] text-center font-display text-[9vw] font-extrabold leading-[1.05] tracking-[-0.04em]"
       >
         SanjeevniOS
       </p>

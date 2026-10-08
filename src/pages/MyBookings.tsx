@@ -58,7 +58,7 @@ const STATUS_LABEL: Record<AppointmentStatus, string> = {
   completed: 'Completed',
   rejected: 'Rejected',
   cancelled: 'Cancelled',
-  no_show: 'No-show',
+  no_show: 'Cancelled (did not arrive)',
 };
 
 export default function MyBookings() {

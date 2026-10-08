@@ -10,6 +10,7 @@ import { InstallBanner, OfflineBanner } from './components/InstallBanner';
 import SplashLoader from './components/ui/SplashLoader';
 import { getStoredActingMode } from './lib/actingMode';
 import { isStandalone } from './lib/pwa';
+import { usePressFx } from './lib/pressFx';
 import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
 import { supabase } from './lib/supabaseClient';
@@ -240,6 +241,7 @@ function AppContent() {
 export default function App() {
   const { session, profile } = useAuth();
   const location = useLocation();
+  usePressFx();
   useDarkBackdropWhen(Boolean(session && profile) && location.pathname !== '/poster');
 
   const banners = (

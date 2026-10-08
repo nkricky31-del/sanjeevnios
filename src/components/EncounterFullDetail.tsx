@@ -71,7 +71,7 @@ export default function EncounterFullDetail({ encounter, onLoaded }: Props) {
   const prescription = visit?.prescriptions[0];
 
   return (
-    <div>
+    <div className="rise-in">
       <div className="flex flex-wrap items-center gap-2">
         <StatusPill label={encounter.status} tone="info" />
         <span className="text-xs text-slate-400">{new Date(encounter.visit_datetime).toLocaleString()}</span>

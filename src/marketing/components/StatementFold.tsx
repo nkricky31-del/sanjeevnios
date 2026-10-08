@@ -14,7 +14,10 @@ export default function StatementFold() {
   const rotate = useTransform(scrollYProgress, [0, 1], reduce ? [0, 0] : [-12, 22]);
 
   return (
-    <section ref={ref} className="relative flex min-h-[100svh] items-center overflow-hidden bg-ground">
+    <section ref={ref} className="relative isolate flex min-h-[100svh] items-center overflow-hidden bg-ground">
+      <span aria-hidden className="blob -z-10 -left-20 top-10 h-80 w-80 bg-indigo-400" />
+      <span aria-hidden className="blob -z-10 bottom-0 left-1/3 h-72 w-72 bg-emerald-300 [animation-delay:-5s]" />
+      <span aria-hidden className="blob -z-10 right-10 top-0 h-64 w-64 bg-amber-300 [animation-delay:-9s]" />
       <motion.div
         aria-hidden
         className="absolute -right-[22vw] top-1/2 -mt-[22vw] h-[44vw] min-h-[260px] w-[44vw] min-w-[260px] overflow-hidden rounded-full opacity-30"
@@ -29,7 +32,7 @@ export default function StatementFold() {
         </Reveal>
         <Reveal delay={0.08}>
           <p className="mt-6 max-w-[22ch] font-display text-[clamp(24px,3.6vw,52px)] font-bold leading-[1.12] tracking-[-0.02em] text-ink">
-            A clinic's front desk and a patient's phone should show <span className="text-primary">the same queue.</span>
+            A clinic's front desk and a patient's phone should show <span className="hue-text">the same queue.</span>
           </p>
         </Reveal>
         <Reveal delay={0.16}>
@@ -40,7 +43,7 @@ export default function StatementFold() {
         </Reveal>
         <p
           aria-hidden
-          className="mt-14 select-none font-display text-[clamp(96px,16vw,220px)] font-extrabold leading-none tracking-[-0.04em] text-transparent [-webkit-text-stroke:1px_rgb(17_24_39/0.22)]"
+          className="mt-14 select-none font-display text-[clamp(96px,16vw,220px)] font-extrabold leading-none tracking-[-0.04em] stroke-hue text-transparent [-webkit-text-stroke:2px_rgb(79_70_229/0.5)]"
         >
           01
         </p>

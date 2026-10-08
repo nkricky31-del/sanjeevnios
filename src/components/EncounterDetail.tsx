@@ -1,4 +1,5 @@
 import { Download } from 'lucide-react';
+import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
 
 import { useAuth } from '../lib/AuthContext';
@@ -112,20 +113,39 @@ export default function EncounterDetail({ encounterId }: Props) {
         )}
 
         {encounter && (
-          <>
-            <p className="font-mono text-xs font-bold text-brand-600">{encounter.encounter_no}</p>
-            <p className="text-lg font-bold text-slate-900">{encounter.doctors?.name ?? 'Unknown doctor'}</p>
-            <p className="text-sm text-slate-500">{encounter.clinics?.name}</p>
-            {encounter.family_members?.name && (
-              <p className="mt-0.5 text-xs text-slate-400">
-                Patient: {encounter.family_members.name} · {encounter.mrn}
-              </p>
-            )}
+          <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}>
+            <motion.div
+              className="relative overflow-hidden rounded-2xl p-4 text-white"
+              style={{ background: 'var(--band-bg)' }}
+              initial={{ scale: 0.97 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 160, damping: 16 }}
+            >
+              <motion.span
+                aria-hidden
+                className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-white/15"
+                animate={{ scale: [1, 1.25, 1], x: [0, -10, 0] }}
+                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+              />
+              <p className="relative font-mono text-xs font-bold text-white/80">{encounter.encounter_no}</p>
+              <p className="relative text-lg font-bold">{encounter.doctors?.name ?? 'Unknown doctor'}</p>
+              <p className="relative text-sm text-white/80">{encounter.clinics?.name}</p>
+              {encounter.family_members?.name && (
+                <p className="relative mt-0.5 text-xs text-white/70">
+                  Patient: {encounter.family_members.name} · {encounter.mrn}
+                </p>
+              )}
+            </motion.div>
 
-            <div className="mt-3">
+            <motion.div
+              className="mt-3 rise-in"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.15 }}
+            >
               <EncounterFullDetail encounter={encounter} onLoaded={handleLoaded} />
-            </div>
-          </>
+            </motion.div>
+          </motion.div>
         )}
       </div>
     </div>

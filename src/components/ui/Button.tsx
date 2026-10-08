@@ -35,6 +35,7 @@ export default function Button({ variant = 'primary', full, className = '', onPo
 
   return (
     <button
+      data-fx="own"
       {...props}
       onPointerDown={handleDown}
       className={`relative inline-flex cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl px-4 py-2.5 text-sm font-semibold outline-none transition duration-200 hover:-translate-y-px focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas active:translate-y-0 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:active:scale-100 ${VARIANTS[variant]} ${full ? 'w-full' : ''} ${className}`}

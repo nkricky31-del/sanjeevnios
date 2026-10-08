@@ -16,6 +16,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -101,7 +102,7 @@ const STATUS_LABEL: Record<AppointmentStatus, string> = {
   completed: 'Completed',
   rejected: 'Rejected by clinic',
   cancelled: 'Cancelled',
-  no_show: 'Marked as no-show',
+  no_show: 'Cancelled - you did not arrive',
 };
 
 const STATUS_TONE: Record<AppointmentStatus, 'live' | 'warning' | 'info' | 'neutral'> = {
@@ -137,6 +138,8 @@ export default function BookingStatus() {
   // I'm seen" - null until then, so slotMinutes stays the fallback.
   const [avgConsultationMinutes, setAvgConsultationMinutes] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [doctorVerified, setDoctorVerified] = useState(false);
   const [clinicVerified, setClinicVerified] = useState(false);
   const [options, setOptions] = useState<CheckInOptions | null>(null);
@@ -412,11 +415,14 @@ export default function BookingStatus() {
 
   const cancelBooking = async () => {
     setActionError(null);
+    setCancelling(true);
     const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', booking.id);
+    setCancelling(false);
     if (error) {
       setActionError(error.message);
       return;
     }
+    setConfirmCancel(false);
     loadBooking();
   };
 
@@ -721,20 +727,59 @@ export default function BookingStatus() {
 
         {actionError && <p className="mt-3 text-sm text-red-600">{actionError}</p>}
 
-        {canModify && (
-          <div className="mt-4 space-y-2">
-            <Button full onClick={rescheduleBooking}>
-              <CalendarClock size={17} /> Reschedule Appointment
-            </Button>
-            <Button variant="danger" full onClick={cancelBooking}>
-              <Trash2 size={16} /> Cancel Appointment
-            </Button>
-          </div>
-        )}
-        {['booked', 'accepted'].includes(booking.status) && !canModify && (
-          <p className="mt-3 text-center text-xs text-slate-400">
-            Too close to the appointment time to cancel or reschedule (within {cancelWindowHours} hour{cancelWindowHours === 1 ? '' : 's'}).
-          </p>
+        {['booked', 'accepted'].includes(booking.status) && (
+          <motion.div
+            className="mt-4 space-y-2"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+          >
+            {canModify && (
+              <Button full onClick={rescheduleBooking}>
+                <CalendarClock size={17} /> Reschedule Appointment
+              </Button>
+            )}
+            <AnimatePresence mode="wait" initial={false}>
+              {confirmCancel ? (
+                <motion.div
+                  key="confirm"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden rounded-xl border border-red-200 bg-red-50 p-3"
+                >
+                  <p className="text-sm font-medium text-red-800">Cancel this appointment?</p>
+                  <p className="mt-1 text-xs text-red-700">
+                    {isPaid && booking.payment_status === 'paid_online'
+                      ? 'Your online payment will be refunded.'
+                      : 'This cannot be undone.'}
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <Button variant="danger" full disabled={cancelling} onClick={cancelBooking}>
+                      <Trash2 size={16} /> {cancelling ? 'Cancelling…' : 'Yes, cancel'}
+                    </Button>
+                    <Button variant="secondary" full disabled={cancelling} onClick={() => setConfirmCancel(false)}>
+                      Keep it
+                    </Button>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div key="btn" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <Button variant="danger" full disabled={!canModify} onClick={() => setConfirmCancel(true)}>
+                    <Trash2 size={16} /> Cancel Appointment
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            {!canModify && (
+              <p className="text-center text-xs text-slate-400">
+                Too close to the appointment time to cancel or reschedule (within {cancelWindowHours} hour{cancelWindowHours === 1 ? '' : 's'}). Please contact the clinic.
+              </p>
+            )}
+            <p className="text-center text-xs text-slate-400">
+              If you don't arrive on the day, the appointment is cancelled automatically.
+            </p>
+          </motion.div>
         )}
 
         <VisitDetails visit={visit} prescription={visit?.prescriptions[0] ?? null} />
