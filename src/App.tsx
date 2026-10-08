@@ -6,7 +6,9 @@ import PatientOnboardingGate from './components/PatientOnboardingGate';
 import EncounterDetail from './components/EncounterDetail';
 import NotificationsList from './components/NotificationsList';
 import Button from './components/ui/Button';
+import { InstallBanner, OfflineBanner } from './components/InstallBanner';
 import { getStoredActingMode } from './lib/actingMode';
+import { isStandalone } from './lib/pwa';
 import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
 import { supabase } from './lib/supabaseClient';
@@ -68,6 +70,8 @@ function AppContent() {
   // still can't read another account's data.
   const PUBLIC_PATHS = ['/', '/about', '/for-clinics', '/for-patients', '/contact'];
   if (!session) {
+    // The installed app opens straight to sign-in; the marketing page is for browsers.
+    if (location.pathname === '/' && isStandalone()) return <Navigate to="/login" replace />;
     if (PUBLIC_PATHS.includes(location.pathname)) return <MarketingSite />;
     // Three separate, role-aware login screens - each its own URL and its
     // own look (PatientLogin.tsx / ClinicLogin.tsx / AdminLogin.tsx) - so
@@ -243,11 +247,25 @@ export default function App() {
   const location = useLocation();
   useDarkBackdropWhen(Boolean(session && profile) && location.pathname !== '/poster');
 
-  if (!session || !profile || location.pathname === '/poster') return <AppContent />;
+  const banners = (
+    <>
+      <OfflineBanner />
+      <InstallBanner />
+    </>
+  );
+  if (!session || !profile || location.pathname === '/poster') {
+    return (
+      <>
+        <AppContent />
+        {banners}
+      </>
+    );
+  }
   const role = profile.role === 'admin' ? 'admin' : (getStoredActingMode() ?? (profile.role === 'clinic' ? 'clinic' : 'patient'));
   return (
     <div className="app-scope min-h-screen" data-app-role={role}>
       <AppContent />
+      {banners}
     </div>
   );
 }

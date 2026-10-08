@@ -1,0 +1,29 @@
+{
+  "id": "/",
+  "name": "SanjeevniOS",
+  "short_name": "SanjeevniOS",
+  "description": "Book clinic visits, follow your live queue, and keep every record in one place. Clinics run bookings, queues and prescriptions from one console.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fafbfc",
+  "theme_color": "#3b5bdb",
+  "lang": "en-IN",
+  "dir": "ltr",
+  "categories": ["medical", "health"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Book an appointment", "short_name": "Book", "url": "/search", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "My appointments", "short_name": "Appointments", "url": "/bookings", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Health records", "short_name": "Records", "url": "/records", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ],
+  "screenshots": [
+    { "src": "/screenshots/narrow.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "SanjeevniOS on a phone" },
+    { "src": "/screenshots/wide.png", "sizes": "1280x720", "type": "image/png", "form_factor": "wide", "label": "SanjeevniOS on a laptop" }
+  ]
+}
