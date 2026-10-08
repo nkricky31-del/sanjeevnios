@@ -1,3 +1,4 @@
+import Present from '../components/ui/Present';
 import Loading from '../components/ui/Loading';
 import {
   CalendarClock, CheckCircle2, ChevronRight, ClipboardList, KeyRound, MapPin, Monitor, Pill, Receipt, ScanLine, Send,
@@ -611,7 +612,7 @@ export default function ClinicQueue() {
                   )}
                 </div>
 
-                {walkInOpen && (
+                <Present show={walkInOpen}>
                   <WalkInForm
                     clinicId={clinic.id}
                     doctors={doctors}
@@ -622,7 +623,7 @@ export default function ClinicQueue() {
                     }}
                     onCancel={() => setWalkInOpen(false)}
                   />
-                )}
+                </Present>
 
                 <ClinicCheckIn
                   doctorId={doctorId}

@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom';
 
+import BrandMark from '../../components/ui/BrandMark';
+import Wordmark from '../../components/ui/Wordmark';
+
 const COLUMNS = [
   { title: 'Product', links: [{ to: '/for-patients', label: 'For patients' }, { to: '/for-clinics', label: 'For clinics' }] },
   { title: 'Company', links: [{ to: '/about', label: 'About' }, { to: '/contact', label: 'Contact' }] },
@@ -19,6 +22,10 @@ export default function MarketingFooter() {
   return (
     <footer className="overflow-hidden border-t border-hairline bg-ground">
       <div className="mx-auto max-w-6xl px-5 pt-12">
+        <Link to="/" className="mb-8 flex w-fit items-center gap-2.5 font-display text-lg font-bold tracking-[-0.02em] text-ink">
+          <BrandMark size={34} />
+          <Wordmark />
+        </Link>
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
           {COLUMNS.map((c) => (
             <div key={c.title}>

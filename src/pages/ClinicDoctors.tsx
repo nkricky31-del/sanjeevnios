@@ -1,3 +1,4 @@
+import Present from '../components/ui/Present';
 import Loading from '../components/ui/Loading';
 import { useEffect, useState } from 'react';
 
@@ -163,7 +164,7 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
         verification.
       </p>
 
-      {showAddForm && (
+      <Present show={showAddForm}>
         <AddDoctorForm
           clinicId={clinic.id}
           onAdded={(doctorId) => {
@@ -173,7 +174,7 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
           }}
           onCancel={() => setShowAddForm(false)}
         />
-      )}
+      </Present>
 
       <div className="mt-3 space-y-2">
         {loading && <p className="text-sm text-slate-400"><Loading /></p>}

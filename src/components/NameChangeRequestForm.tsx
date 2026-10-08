@@ -1,3 +1,4 @@
+import { motion } from 'motion/react';
 import { Lock, ShieldAlert, UploadCloud } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -136,11 +137,16 @@ export default function NameChangeRequestForm({ accountId, memberId, currentName
       {submitted && <p className="mb-2 text-xs font-medium text-emerald-600">Request submitted for review.</p>}
 
       {!open ? (
-        <Button variant="secondary" onClick={() => setOpen(true)}>
-          <Lock size={14} /> Request name change
+        <Button variant="secondary" className="group" onClick={() => setOpen(true)}>
+          <Lock size={14} className="transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-125" /> Request name change
         </Button>
       ) : (
-        <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3">
+        <motion.div
+          className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3"
+          initial={{ opacity: 0, y: -10, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+        >
           <p className="text-xs text-slate-500">
             Current name on file: <span className="font-semibold text-slate-700">{currentName}</span>. Upload a
             government ID (Aadhaar, passport, PAN, etc.) as proof - an admin checks it before anything changes.
@@ -176,7 +182,7 @@ export default function NameChangeRequestForm({ accountId, memberId, currentName
               Cancel
             </Button>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {latest?.status === 'approved' && (

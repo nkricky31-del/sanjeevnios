@@ -1,3 +1,4 @@
+import Present from './ui/Present';
 import Loading from './ui/Loading';
 import { Clock3, Download, IndianRupee, Printer, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -172,7 +173,7 @@ export default function ClinicEarnings({ clinic }: Props) {
                 <td className="whitespace-nowrap px-3 py-2 text-right font-bold text-emerald-700">
                   ₹{round2(r.net_payout ?? r.net_amount - r.platform_fee).toLocaleString()}
                 </td>
-                {showPayout && (
+                <Present show={showPayout}>
                   <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">
                     {r.released_at && <div>{new Date(r.released_at).toLocaleDateString()}</div>}
                     {r.payout_reference && <div className="font-mono text-slate-400">{r.payout_reference}</div>}
@@ -180,7 +181,7 @@ export default function ClinicEarnings({ clinic }: Props) {
                       <div className="text-amber-600">Released, not yet confirmed settled</div>
                     )}
                   </td>
-                )}
+                </Present>
               </tr>
             ))}
           </tbody>

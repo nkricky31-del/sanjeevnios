@@ -1,3 +1,4 @@
+import Present from '../components/ui/Present';
 import Loading from '../components/ui/Loading';
 import {
   BadgeCheck, Banknote, Building2, CreditCard, HeartPulse, Landmark, LayoutDashboard, ListChecks, Receipt, Repeat,
@@ -490,14 +491,14 @@ export default function AdminConsole() {
                       </ul>
                     </div>
                   )}
-                  {rejectClinicId === c.id && (
+                  <Present show={rejectClinicId === c.id}>
                     <AdminRejectForm
                       label="Reason for rejecting this clinic"
                       onConfirm={(reason) => rejectClinic(c, reason)}
                       onCancel={() => setRejectClinicId(null)}
                     />
-                  )}
-                  {clinicDocsOpenFor === c.id && (
+                  </Present>
+                  <Present show={clinicDocsOpenFor === c.id}>
                     <AdminDocumentReview
                       ownerType="clinic"
                       ownerId={c.id}
@@ -506,7 +507,7 @@ export default function AdminConsole() {
                       requirements={requirements}
                       onChanged={loadPending}
                     />
-                  )}
+                  </Present>
                 </Card>
               ))}
             </div>
@@ -562,13 +563,13 @@ export default function AdminConsole() {
                       </ul>
                     </div>
                   )}
-                  {rejectDoctorId === d.id && (
+                  <Present show={rejectDoctorId === d.id}>
                     <AdminRejectForm
                       label="Reason for rejecting this doctor"
                       onConfirm={(reason) => rejectDoctor(d, reason)}
                       onCancel={() => setRejectDoctorId(null)}
                     />
-                  )}
+                  </Present>
                   {doctorDocsOpenFor === d.id && d.clinics && (
                     <AdminDocumentReview
                       ownerType="doctor"
@@ -609,7 +610,7 @@ export default function AdminConsole() {
                       {approvedClinicDocsOpenFor === c.id ? 'Hide checklist' : 'Review verification checklist'}
                     </Button>
                   </div>
-                  {approvedClinicDocsOpenFor === c.id && (
+                  <Present show={approvedClinicDocsOpenFor === c.id}>
                     <AdminDocumentReview
                       ownerType="clinic"
                       ownerId={c.id}
@@ -618,7 +619,7 @@ export default function AdminConsole() {
                       requirements={requirements}
                       onChanged={loadPending}
                     />
-                  )}
+                  </Present>
                 </Card>
               ))}
             </div>

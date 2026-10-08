@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
 import BrandMark from '../ui/BrandMark';
+import Wordmark from '../ui/Wordmark';
 import { useDarkBackdrop } from '../../lib/useDarkBackdrop';
 import { AUTH_THEMES, type AuthRole, type AuthTheme } from './authThemes';
 
@@ -190,8 +191,9 @@ function MobileBand({ theme }: { theme: AuthTheme }) {
         <StageArt theme={theme} />
       </div>
       <div className="absolute inset-x-5 top-5 flex items-center justify-between">
-        <Link to="/" className="font-display text-[15px] font-bold tracking-[-0.02em] text-white" aria-label="SanjeevniOS home">
-          SanjeevniOS<span style={{ color: stage.light }}>.</span>
+        <Link to="/" className="flex items-center gap-2 font-display text-[15px] font-bold tracking-[-0.02em] text-white" aria-label="SanjeevniOS home">
+          <BrandMark size={30} tone="light" />
+          <Wordmark dotClassName="" dotColor={stage.light} />
         </Link>
         <span className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 font-ui text-[10px] font-medium uppercase tracking-[0.16em] text-white/85 ring-1 ring-white/20 backdrop-blur">
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: stage.light }} />
@@ -249,9 +251,9 @@ export default function AuthShell({
             transition={{ duration: 0.5, ease: EASE }}
           >
             <Link to="/" className="flex w-fit items-center gap-2.5" aria-label="SanjeevniOS home">
-              <BrandMark size={30} />
+              <BrandMark size={34} />
               <span className="font-display text-[15px] font-bold tracking-[-0.02em]">
-                SanjeevniOS<span className="text-[var(--accent)]">.</span>
+                <Wordmark dotClassName="text-[var(--accent)]" />
               </span>
             </Link>
             <p className="mt-5 flex items-center gap-2 font-ui text-[10.5px] font-medium uppercase tracking-[0.15em] text-ink-2">

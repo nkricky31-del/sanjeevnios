@@ -2,6 +2,8 @@ import { LogOut, type LucideIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Link, NavLink } from 'react-router-dom';
 
+import BrandMark from '../ui/BrandMark';
+import Wordmark from '../ui/Wordmark';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 
@@ -92,8 +94,9 @@ export default function Sidebar({ tag, items }: { tag: string; items: NavItem[] 
       />
 
       <div className="relative px-6 pb-2 pt-8">
-        <Link to="/" className="font-display text-lg font-bold tracking-[-0.02em] text-white outline-none focus-visible:underline">
-          SanjeevniOS<span style={{ color: 'var(--sidebar-light)' }}>.</span>
+        <Link to="/" className="flex items-center gap-2.5 font-display text-lg font-bold tracking-[-0.02em] text-white outline-none focus-visible:underline">
+          <BrandMark size={32} tone="light" />
+          <Wordmark dotClassName="text-[var(--sidebar-light)]" />
         </Link>
         <p className="mt-2 flex items-center gap-2 text-[10.5px] font-medium uppercase tracking-[0.18em] text-white/60">
           <span className="relative flex h-1.5 w-1.5">

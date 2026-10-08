@@ -1,6 +1,6 @@
 import { Bell } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 
 import HeroBand from '../ui/HeroBand';
 import Segmented from '../ui/Segmented';
@@ -30,6 +30,11 @@ export default function ConsoleLayout<T extends string>({
   children: ReactNode;
 }) {
   const active = tabs.find((t) => t.value === value);
+  // Which way did we move? Tabs further down / to the right slide in from the right.
+  const index = tabs.findIndex((t) => t.value === value);
+  const previous = useRef(index);
+  const direction = index >= previous.current ? 1 : -1;
+  previous.current = index;
   return (
     <div className="min-h-screen bg-canvas lg:pl-64">
       <Sidebar
@@ -86,9 +91,9 @@ export default function ConsoleLayout<T extends string>({
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={value}
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0, transition: { duration: 0.32, ease: [0.22, 1, 0.36, 1] } }}
-              exit={{ opacity: 0, y: -8, transition: { duration: 0.14 } }}
+              initial={{ opacity: 0, x: 36 * direction, y: 8 }}
+              animate={{ opacity: 1, x: 0, y: 0, transition: { type: 'spring', stiffness: 260, damping: 26 } }}
+              exit={{ opacity: 0, x: -24 * direction, transition: { duration: 0.14 } }}
             >
               {children}
             </motion.div>

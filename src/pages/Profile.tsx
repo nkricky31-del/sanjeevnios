@@ -1,3 +1,5 @@
+import LockedField from '../components/ui/LockedField';
+import Present from '../components/ui/Present';
 import Loading from '../components/ui/Loading';
 import { CountUp } from '../lib/motionKit';
 import {
@@ -251,20 +253,10 @@ export default function Profile() {
             </span>
             <ChevronRight size={18} className={`shrink-0 text-slate-300 ${panel === 'personal' ? 'rotate-90' : ''}`} />
           </button>
-          {panel === 'personal' && (
+          <Present show={panel === 'personal'}>
             <div className="border-t border-slate-100 bg-slate-50/60 p-4">
               <label className="text-sm font-bold text-slate-700">Name</label>
-              <div className="mt-1.5 flex items-center gap-2">
-                <IconTile icon={Lock} size="sm" tone="slate" />
-                <input
-                  type="text"
-                  value={profile.name ?? ''}
-                  placeholder="Not set"
-                  disabled
-                  readOnly
-                  className="w-full cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-600 outline-none"
-                />
-              </div>
+              <LockedField value={profile.name ?? ''} />
               <p className="mt-1 text-xs text-slate-400">
                 Your legal name is locked. To fix it, submit a name-change request with a government ID.
               </p>
@@ -381,7 +373,7 @@ export default function Profile() {
                 </p>
               )}
             </div>
-          )}
+          </Present>
 
           <button
             onClick={() => togglePanel('family')}
@@ -396,7 +388,7 @@ export default function Profile() {
             </span>
             <ChevronRight size={18} className={`shrink-0 text-slate-300 ${panel === 'family' ? 'rotate-90' : ''}`} />
           </button>
-          {panel === 'family' && (
+          <Present show={panel === 'family'}>
             <div className="border-t border-slate-100 bg-slate-50/60 p-4">
               {showForm ? (
                 <FamilyMemberForm
@@ -478,7 +470,7 @@ export default function Profile() {
                 </>
               )}
             </div>
-          )}
+          </Present>
 
           <button
             onClick={() => {
@@ -494,7 +486,7 @@ export default function Profile() {
             </span>
             <ChevronRight size={18} className={`shrink-0 text-slate-300 ${panel === 'medical' ? 'rotate-90' : ''}`} />
           </button>
-          {panel === 'medical' && (
+          <Present show={panel === 'medical'}>
             <div className="border-t border-slate-100 bg-slate-50/60 p-4">
               {selfMember ? (
                 <KnownConditionsForm patientId={selfMember.id} onSaved={loadMembers} />
@@ -502,7 +494,7 @@ export default function Profile() {
                 <p className="text-sm text-slate-500">Add yourself under "My Family" first.</p>
               )}
             </div>
-          )}
+          </Present>
         </Card>
 
         {/* Account & Preferences */}
@@ -546,13 +538,13 @@ export default function Profile() {
             </span>
             <ChevronRight size={18} className={`shrink-0 text-slate-300 ${panel === 'privacy' ? 'rotate-90' : ''}`} />
           </button>
-          {panel === 'privacy' && (
+          <Present show={panel === 'privacy'}>
             <div className="border-t border-slate-100 bg-slate-50/60 p-4 text-xs leading-relaxed text-slate-600">
               Your health records are visible only to you, the clinics you have actually visited, and Sanjeevni
               admins. Clinics can read your known conditions but cannot edit them. Every change to your health
               information is logged.
             </div>
-          )}
+          </Present>
 
           <button
             onClick={() => togglePanel('about')}
@@ -565,13 +557,13 @@ export default function Profile() {
             </span>
             <ChevronRight size={18} className={`shrink-0 text-slate-300 ${panel === 'about' ? 'rotate-90' : ''}`} />
           </button>
-          {panel === 'about' && (
+          <Present show={panel === 'about'}>
             <div className="border-t border-slate-100 bg-slate-50/60 p-4 text-xs leading-relaxed text-slate-600">
               SanjeevniOS connects you to clinics near you: book appointments, hold your place in the live queue,
               and keep every prescription, lab report and visit summary in one place under a single medical record
               number.
             </div>
-          )}
+          </Present>
         </Card>
 
         <button

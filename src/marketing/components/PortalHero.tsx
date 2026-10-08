@@ -3,6 +3,7 @@ import { motion, useMotionValue, useReducedMotion, useScroll, useTransform } fro
 import { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import HeroScene from './HeroScene';
 import { Label } from './motionKit';
 
 // ---------------------------------------------------------------------------
@@ -155,7 +156,7 @@ function Letters({ text, start = 0, gradient = false }: { text: string; start?: 
 // opposite edges. Everything below is bound to scroll POSITION (not a timer),
 // so it plays in reverse on the way back up.
 //
-// Layers, back to front: photo (starts overscaled) -> duotone wash (indigo+emerald,
+// Layers, back to front: the animated scene (starts overscaled) -> duotone wash (indigo+emerald,
 // overlay blend, starts at 0) -> radial veil -> two panels -> two accent dots
 // -> wordmark -> corner metadata. With prefers-reduced-motion the stage is
 // simply rendered in its finished, opened state.
@@ -173,7 +174,7 @@ export default function PortalHero() {
   const rightX = useTransform(open, (v) => `${v * 106}%`);
 
   const photoScale = useTransform(p, [0, 0.7], [1.14, 1]);
-  const washOpacity = useTransform(p, [0, 0.7], [0, 0.3]);
+  const washOpacity = useTransform(p, [0, 0.7], [0, 0.1]);
 
   // Two dots at the centre travel to opposite corners of the field.
   const dotAX = useTransform(open, (v) => `${-v * 42}vw`);
@@ -201,14 +202,8 @@ export default function PortalHero() {
   return (
     <section ref={ref} className={`relative bg-ground ${reduce ? 'h-[100svh]' : 'h-[250vh]'}`}>
       <div className="sticky top-0 isolate h-[100svh] overflow-hidden">
-        {/* 1. photograph */}
-        <motion.img
-          src="/img/hero-doctor.jpg"
-          alt="A doctor in a white coat and stethoscope holding a phone"
-          className="absolute inset-0 -z-50 h-full w-full object-cover"
-          style={{ scale: photoScale }}
-          fetchPriority="high"
-        />
+        {/* 1. the animated product scene (replaces the stock photo) */}
+        <HeroScene p={p} scale={photoScale} />
         {/* 2. duotone wash: the two accents, blended, at near-zero opacity */}
         <motion.div
           aria-hidden
@@ -219,7 +214,7 @@ export default function PortalHero() {
         <div
           aria-hidden
           className="absolute inset-0 -z-30"
-          style={{ background: 'radial-gradient(120% 90% at 50% 45%, rgba(17,24,39,.25) 0%, rgba(17,24,39,.82) 100%)' }}
+          style={{ background: 'radial-gradient(120% 90% at 50% 45%, rgba(7,13,46,0) 0%, rgba(7,13,46,.5) 100%)' }}
         />
 
         {/* 4. the two panels, a little over half the width each so they meet and

@@ -132,3 +132,46 @@ body {
   font-family: var(--font-display);
   letter-spacing: -0.02em;
 }
+
+/* ===========================================================================
+   Form controls everywhere in the signed-in apps: inputs, selects, text areas
+   and file pickers (patient, clinic and admin forms, document uploads...).
+   =========================================================================== */
+.app-scope :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']), select, textarea) {
+  transition: border-color 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease;
+}
+.app-scope
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']), select, textarea):hover:not(:disabled):not(:focus) {
+  border-color: var(--color-slate-300);
+}
+/* a ring that pulses outward once when a field gets focus */
+@keyframes field-focus {
+  from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 38%, transparent); }
+  to { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+.app-scope :where(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea):focus-visible {
+  animation: field-focus 0.6s ease-out;
+}
+/* the native "Choose file" button, restyled in the role's colour */
+.app-scope input[type='file'] { cursor: pointer; }
+.app-scope input[type='file']::file-selector-button {
+  margin-right: 0.75rem;
+  cursor: pointer;
+  border: 0;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--band-bg);
+  transition: transform 0.2s ease, filter 0.2s ease, box-shadow 0.25s ease;
+}
+.app-scope input[type='file']:hover::file-selector-button {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px -10px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.app-scope input[type='file']:active::file-selector-button { transform: translateY(0) scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .app-scope :where(input, select, textarea):focus-visible { animation: none; }
+  .app-scope input[type='file']::file-selector-button { transition: none; }
+}

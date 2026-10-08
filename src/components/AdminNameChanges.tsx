@@ -1,3 +1,4 @@
+import Present from './ui/Present';
 import Loading from './ui/Loading';
 import { FileText, User, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -174,13 +175,13 @@ export default function AdminNameChanges() {
                 </Button>
               </div>
 
-              {rejectOpenFor === r.id && (
+              <Present show={rejectOpenFor === r.id}>
                 <AdminRejectForm
                   label="Reason for rejecting this name change"
                   onConfirm={(reason) => reject(r, reason)}
                   onCancel={() => setRejectOpenFor(null)}
                 />
-              )}
+              </Present>
             </Card>
           );
         })}

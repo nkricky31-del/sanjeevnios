@@ -1,3 +1,4 @@
+import Present from './ui/Present';
 import Loading from './ui/Loading';
 import { Star, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -152,13 +153,13 @@ export default function AdminReviews() {
         )}
       </div>
 
-      {hideOpenFor === r.id && (
+      <Present show={hideOpenFor === r.id}>
         <AdminRejectForm
           label="Reason for hiding this review (kept for your own records, not shown to the reviewer)"
           onConfirm={(reason) => hide(r, reason)}
           onCancel={() => setHideOpenFor(null)}
         />
-      )}
+      </Present>
     </Card>
   );
 

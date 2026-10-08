@@ -1,3 +1,4 @@
+import { motion } from 'motion/react';
 import jsQR from 'jsqr';
 import { CameraOff, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -99,7 +100,12 @@ export default function QrScanner({ onScan, onClose, hint }: Props) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/95 backdrop-blur">
+    <motion.div
+      className="fixed inset-0 z-50 flex flex-col bg-slate-900/95 backdrop-blur"
+      initial={{ opacity: 0, scale: 1.04 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+    >
       <div className="flex items-center justify-between px-4 py-4 text-white">
         <p className="text-base font-bold">Scan patient QR</p>
         <button onClick={onClose} aria-label="Close scanner" className="rounded-full p-2 hover:bg-white/10">
@@ -134,6 +140,6 @@ export default function QrScanner({ onScan, onClose, hint }: Props) {
       </div>
 
       <canvas ref={canvasRef} className="hidden" />
-    </div>
+    </motion.div>
   );
 }

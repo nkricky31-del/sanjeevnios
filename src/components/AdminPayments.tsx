@@ -1,3 +1,4 @@
+import Present from './ui/Present';
 import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
@@ -138,13 +139,13 @@ export default function AdminPayments() {
                 >
                   {refundOpenFor === p.id ? 'Cancel' : 'Reverse payment'}
                 </Button>
-                {refundOpenFor === p.id && (
+                <Present show={refundOpenFor === p.id}>
                   <AdminRejectForm
                     label="Reason for reversing this payment (shown to the patient)"
                     onConfirm={(reason) => reversePayment(p, reason)}
                     onCancel={() => setRefundOpenFor(null)}
                   />
-                )}
+                </Present>
               </>
             )}
           </Card>

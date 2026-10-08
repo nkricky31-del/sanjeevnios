@@ -1,18 +1,20 @@
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigationType } from 'react-router-dom';
 
-// A short fade-and-rise whenever the route changes. Keyed on the path so each
-// screen enters fresh; with prefers-reduced-motion set, MotionConfig (main.tsx)
-// skips the rise and the page simply appears.
+// Opening a page (a link or button) slides it in from the right; going back
+// slides it in from the left - so the screens feel like a stack you move along.
+// With prefers-reduced-motion set, MotionConfig (main.tsx) drops the movement.
 export default function PageTransition({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
+  const type = useNavigationType();
+  const from = type === 'POP' ? -44 : type === 'REPLACE' ? 0 : 44;
   return (
     <motion.div
       key={pathname}
-      initial={{ opacity: 0, y: 18, scale: 0.995 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+      initial={{ opacity: 0, x: from, y: from === 0 ? 18 : 6, scale: 0.99 }}
+      animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 220, damping: 26, mass: 0.9 }}
     >
       {children}
     </motion.div>

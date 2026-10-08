@@ -3,6 +3,9 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 
+import BrandMark from '../../components/ui/BrandMark';
+import Wordmark from '../../components/ui/Wordmark';
+
 const LINKS = [
   { to: '/about', label: 'About' },
   { to: '/for-clinics', label: 'For clinics' },
@@ -30,9 +33,10 @@ export default function MarketingNav() {
         <Link
           to="/"
           onClick={() => setOpen(false)}
-          className="font-display text-[15px] font-bold tracking-[-0.02em] text-ink outline-none focus-visible:underline"
+          className="flex items-center gap-2 font-display text-[15px] font-bold tracking-[-0.02em] text-ink outline-none focus-visible:underline"
         >
-          SanjeevniOS<span className="text-primary">.</span>
+          <BrandMark size={28} />
+          <Wordmark />
         </Link>
 
         <nav className="hidden items-center gap-8 md:flex" aria-label="Main">
