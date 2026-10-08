@@ -96,7 +96,7 @@ export default function ProductDeck() {
   const topId = order[0];
 
   return (
-    <section className="relative isolate overflow-hidden bg-ground-2 py-24" aria-labelledby="deck-heading">
+    <section id="for-patients" className="relative isolate scroll-mt-14 overflow-hidden bg-ground-2 py-24" aria-labelledby="deck-heading">
       <span aria-hidden className="blob -z-10 -left-24 top-0 h-72 w-72 bg-indigo-300" />
       <span aria-hidden className="blob -z-10 -right-24 bottom-0 h-72 w-72 bg-emerald-300 [animation-delay:-6s]" />
       <span aria-hidden className="blob -z-10 left-1/2 top-1/3 h-56 w-56 bg-amber-200 [animation-delay:-10s]" />
@@ -117,11 +117,11 @@ export default function ProductDeck() {
           </Reveal>
           <Reveal delay={0.24} className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button type="button" onClick={() => navigate('/login')}
-              className="cursor-pointer rounded-full bg-primary px-6 py-3 font-ui text-sm font-semibold text-white outline-none transition hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-leaf-text focus-visible:ring-offset-2 focus-visible:ring-offset-ground-2">
+              className="fx-fill cursor-pointer rounded-full bg-primary px-6 py-3 font-ui text-sm font-semibold text-white outline-none transition focus-visible:ring-2 focus-visible:ring-leaf-text focus-visible:ring-offset-2 focus-visible:ring-offset-ground-2">
               Book a visit
             </button>
             <button type="button" onClick={() => navigate('/clinic/login?mode=register')}
-              className="cursor-pointer rounded-full border border-ink/40 px-6 py-3 font-ui text-sm font-semibold text-ink outline-none transition hover:border-primary hover:text-primary focus-visible:ring-2 focus-visible:ring-primary">
+              className="fx-fill cursor-pointer rounded-full border border-ink/40 px-6 py-3 font-ui text-sm font-semibold text-ink outline-none transition focus-visible:ring-2 focus-visible:ring-primary">
               Register your clinic
             </button>
           </Reveal>

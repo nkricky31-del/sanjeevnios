@@ -14,7 +14,7 @@ export default function StatementFold() {
   const rotate = useTransform(scrollYProgress, [0, 1], reduce ? [0, 0] : [-12, 22]);
 
   return (
-    <section ref={ref} className="relative isolate flex min-h-[100svh] items-center overflow-hidden bg-ground">
+    <section ref={ref} id="about" className="relative isolate scroll-mt-14 flex min-h-[100svh] items-center overflow-hidden bg-ground">
       <span aria-hidden className="blob -z-10 -left-20 top-10 h-80 w-80 bg-indigo-400" />
       <span aria-hidden className="blob -z-10 bottom-0 left-1/3 h-72 w-72 bg-emerald-300 [animation-delay:-5s]" />
       <span aria-hidden className="blob -z-10 right-10 top-0 h-64 w-64 bg-amber-300 [animation-delay:-9s]" />

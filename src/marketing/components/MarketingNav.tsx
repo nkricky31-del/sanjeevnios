@@ -1,17 +1,13 @@
 import { Menu, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import BrandMark from '../../components/ui/BrandMark';
 import Wordmark from '../../components/ui/Wordmark';
+import { goToSection, SECTIONS, useActiveSection } from '../lib/sectionNav';
 
-const LINKS = [
-  { to: '/about', label: 'About' },
-  { to: '/for-clinics', label: 'For clinics' },
-  { to: '/for-patients', label: 'For patients' },
-  { to: '/contact', label: 'Contact' },
-];
+const IDS = SECTIONS.map((x) => x.id);
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] transition-colors hover:text-primary focus-visible:text-primary ${
@@ -25,6 +21,9 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 // from the page itself (?mode=register skips the Clinic ID field).
 export default function MarketingNav() {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const active = useActiveSection(IDS);
+  const go = (id: string) => goToSection(id, pathname, navigate);
   const [open, setOpen] = useState(false);
 
   return (
@@ -40,10 +39,22 @@ export default function MarketingNav() {
         </Link>
 
         <nav className="hidden items-center gap-8 md:flex" aria-label="Main">
-          {LINKS.map((l) => (
-            <NavLink key={l.to} to={l.to} className={linkClass}>
+          {SECTIONS.map((l) => (
+            <a
+              key={l.id}
+              href={`/#${l.id}`}
+              onClick={(e) => { e.preventDefault(); go(l.id); }}
+              className={`relative py-1 ${linkClass({ isActive: pathname === '/' && active === l.id })}`}
+            >
               {l.label}
-            </NavLink>
+              {pathname === '/' && active === l.id && (
+                <motion.span
+                  layoutId="nav-underline"
+                  className="absolute inset-x-0 -bottom-0.5 h-0.5 rounded-full bg-gradient-to-r from-indigo-500 via-sky-500 to-emerald-500"
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                />
+              )}
+            </a>
           ))}
         </nav>
 
@@ -51,7 +62,7 @@ export default function MarketingNav() {
           <button
             type="button"
             onClick={() => navigate('/login')}
-            className="cursor-pointer rounded-full border border-ink/30 px-4 py-1.5 font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink outline-none transition-colors hover:bg-primary hover:text-white focus-visible:ring-2 focus-visible:ring-primary"
+            className="fx-fill cursor-pointer rounded-full border border-ink/30 px-4 py-1.5 font-ui text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary"
           >
             Sign in
           </button>
@@ -78,10 +89,15 @@ export default function MarketingNav() {
             transition={{ duration: 0.28 }}
           >
             <div className="flex flex-col gap-5 px-5 py-6">
-              {LINKS.map((l) => (
-                <NavLink key={l.to} to={l.to} className={linkClass} onClick={() => setOpen(false)}>
+              {SECTIONS.map((l) => (
+                <a
+                  key={l.id}
+                  href={`/#${l.id}`}
+                  className={linkClass({ isActive: pathname === '/' && active === l.id })}
+                  onClick={(e) => { e.preventDefault(); setOpen(false); go(l.id); }}
+                >
                   {l.label}
-                </NavLink>
+                </a>
               ))}
               <button
                 type="button"

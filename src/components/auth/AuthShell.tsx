@@ -150,7 +150,7 @@ function Stage({ theme }: { theme: AuthTheme }) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, delay: 0.2 }}
         >
-          SanjeevniOS
+          Sanjeevni<span className="os-grad">OS</span>
         </motion.p>
         <motion.p
           className="mt-3 font-display text-6xl font-extrabold leading-none tracking-[-0.03em] text-white drop-shadow-[0_6px_30px_rgba(0,0,0,0.35)] xl:text-7xl"

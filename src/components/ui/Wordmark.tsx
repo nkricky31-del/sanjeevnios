@@ -21,7 +21,7 @@ export default function Wordmark({ className = '', dotClassName = 'text-primary'
         <motion.span
           key={i}
           aria-hidden
-          className="inline-block"
+          className={`inline-block ${i >= NAME.length - 2 ? 'os-grad' : ''}`}
           variants={{
             rest: { y: still ? 0 : '0.6em', opacity: still ? 1 : 0 },
             in: { y: 0, opacity: 1, transition: { type: 'spring', stiffness: 260, damping: 15, delay: still ? 0 : 0.05 + i * 0.045 } },

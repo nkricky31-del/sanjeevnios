@@ -40,6 +40,7 @@ import { livePhoneDigits, normalizePhone } from '../lib/phone';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember, Gender } from '../lib/types';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
+import BrandName from '../components/ui/BrandName';
 
 const RELATION_LABEL: Record<string, string> = {
   self: 'Self',
@@ -553,7 +554,7 @@ export default function Profile() {
             <IconTile icon={Info} tone="slate" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-bold text-slate-900">About the App</span>
-              <span className="block text-xs text-slate-500">SanjeevniOS</span>
+              <span className="block text-xs text-slate-500"><BrandName /></span>
             </span>
             <ChevronRight size={18} className={`shrink-0 text-slate-300 ${panel === 'about' ? 'rotate-90' : ''}`} />
           </button>

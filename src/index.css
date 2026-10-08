@@ -251,3 +251,131 @@ body {
 .rise-in > *:nth-child(n+6) { animation-delay: 0.35s; }
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .rise-in > * { animation: none; } }
+
+/* ---- The brand colour: "OS" always carries the moving indigo-to-emerald gradient ---- */
+.os-grad {
+  background-image: linear-gradient(100deg, #5c7cfa 0%, #34d399 45%, #5c7cfa 90%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: os-slide 5s linear infinite;
+}
+@keyframes os-slide { to { background-position: 220% 50%; } }
+@media (prefers-reduced-motion: reduce) { .os-grad { animation: none; } }
+
+/* ---- Colour-fill hover for pill buttons: a gradient wipes in from the left ---- */
+.fx-fill { position: relative; overflow: hidden; isolation: isolate; }
+.fx-fill::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(100deg, #4f46e5, #0ea5e9 55%, #10b981);
+  transform: translateX(-101%);
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.fx-fill:hover::before, .fx-fill:focus-visible::before { transform: translateX(0); }
+.fx-fill:hover { color: #fff; border-color: transparent; }
+.fx-fill:active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) { .fx-fill::before { transition: none; } }
+
+/* ======================================================================
+   Life for the signed-in apps: every card, row and text button responds.
+   ====================================================================== */
+
+/* text-only buttons (no background of their own): a tint of the accent wipes in
+   from the left and the label takes the accent colour */
+.app-scope button:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']) {
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--accent, #4f46e5) 14%, transparent), color-mix(in srgb, var(--accent, #4f46e5) 14%, transparent));
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 0% 100%;
+  border-radius: 0.6rem;
+  transition: background-size 0.4s cubic-bezier(0.22, 1, 0.36, 1), color 0.2s ease, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease;
+}
+.app-scope button:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']):hover {
+  background-size: 100% 100%;
+  color: var(--accent, #4f46e5);
+}
+
+/* white cards: rise in one after another, lift and take a coloured edge on hover */
+.app-scope main .bg-white[class*='rounded-'].border {
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease, border-color 0.25s ease;
+}
+.app-scope main .bg-white[class*='rounded-'].border:nth-child(2) { animation-delay: 0.05s; }
+.app-scope main .bg-white[class*='rounded-'].border:nth-child(3) { animation-delay: 0.1s; }
+.app-scope main .bg-white[class*='rounded-'].border:nth-child(4) { animation-delay: 0.15s; }
+.app-scope main .bg-white[class*='rounded-'].border:nth-child(5) { animation-delay: 0.2s; }
+.app-scope main .bg-white[class*='rounded-'].border:nth-child(n+6) { animation-delay: 0.25s; }
+@media (hover: hover) {
+  .app-scope main .bg-white[class*='rounded-'].border:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--accent, #4f46e5) 45%, transparent);
+    box-shadow: 0 14px 30px -18px color-mix(in srgb, var(--accent, #4f46e5) 55%, transparent);
+  }
+}
+/* a coloured edge on every white card's left, growing on hover */
+.app-scope main .bg-white[class*='rounded-'].border { background-image: linear-gradient(180deg, var(--accent, #4f46e5), transparent); background-repeat: no-repeat; background-size: 3px 0%; background-position: left center; }
+.app-scope main .bg-white[class*='rounded-'].border:hover { background-size: 3px 100%; }
+
+/* tables and list rows */
+.app-scope main tbody tr { transition: background-color 0.2s ease; }
+.app-scope main tbody tr:hover { background-color: color-mix(in srgb, var(--accent, #4f46e5) 7%, transparent); }
+
+/* pills and badges breathe */
+.app-scope main [class*='rounded-full'][class*='px-'][class*='text-xs'] { animation: pill-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+@keyframes pill-pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* small uppercase section labels get a travelling accent underline */
+.app-scope main h2, .app-scope main h3 { transition: letter-spacing 0.3s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-scope main .bg-white[class*='rounded-'].border, .app-scope main [class*='rounded-full'][class*='px-'][class*='text-xs'] { animation: none; }
+  .app-scope main .bg-white[class*='rounded-'].border:hover { transform: none; }
+}
+
+/* Link-style action buttons (Refresh, Make optional, Activate, Deactivate...):
+   a visible pill at rest; on hover a vivid gradient wipes across and the label
+   turns white, on press it squashes. */
+.app-scope main button[class*='text-brand-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']),
+.app-scope main button[class*='text-red-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']) {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--accent, #4f46e5) 30%, transparent);
+  border-radius: 9999px;
+  background-image: linear-gradient(100deg, #4f46e5, #0ea5e9 55%, #10b981);
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 0% 100%;
+  background-color: color-mix(in srgb, var(--accent, #4f46e5) 7%, transparent);
+}
+.app-scope main button[class*='text-red-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']) {
+  background-image: linear-gradient(100deg, #e11d48, #f97316);
+  border-color: rgb(244 63 94 / 0.35);
+  background-color: rgb(244 63 94 / 0.06);
+}
+.app-scope main button[class*='text-brand-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']):hover,
+.app-scope main button[class*='text-red-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']):hover {
+  background-size: 100% 100%;
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 10px 22px -12px rgb(79 70 229 / 0.7);
+}
+.app-scope main button[class*='text-emerald-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']),
+.app-scope main button[class*='text-green-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']) {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid rgb(16 185 129 / 0.35);
+  border-radius: 9999px;
+  background-color: rgb(16 185 129 / 0.07);
+  background-image: linear-gradient(100deg, #059669, #84cc16);
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 0% 100%;
+}
+.app-scope main button[class*='text-emerald-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']):hover,
+.app-scope main button[class*='text-green-']:not([class*='bg-']):not([data-fx='own']):not(:disabled):not([role='tab']):hover {
+  background-size: 100% 100%;
+  color: #fff;
+  border-color: transparent;
+}

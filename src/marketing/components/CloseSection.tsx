@@ -7,7 +7,7 @@ import { Label, Reveal } from './motionKit';
 export default function CloseSection() {
   const navigate = useNavigate();
   return (
-    <section className="relative isolate overflow-hidden bg-ground py-28">
+    <section id="contact" className="relative isolate scroll-mt-14 overflow-hidden bg-ground py-28">
       <span aria-hidden className="blob -z-10 -left-24 top-0 h-72 w-72 bg-indigo-300" />
       <span aria-hidden className="blob -z-10 -right-24 bottom-0 h-72 w-72 bg-emerald-300 [animation-delay:-6s]" />
       <span aria-hidden className="blob -z-10 left-1/2 top-1/3 h-56 w-56 bg-amber-200 [animation-delay:-10s]" />
@@ -28,11 +28,11 @@ export default function CloseSection() {
         </div>
         <Reveal delay={0.24} className="flex shrink-0 flex-col gap-3 sm:flex-row">
           <button type="button" onClick={() => navigate('/clinic/login?mode=register')}
-            className="shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-primary px-7 py-3.5 font-ui text-sm font-semibold text-white outline-none transition hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-ground">
+            className="fx-fill shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-primary px-7 py-3.5 font-ui text-sm font-semibold text-white outline-none transition focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-ground">
             Register your clinic
           </button>
           <button type="button" onClick={() => navigate('/login')}
-            className="shrink-0 cursor-pointer whitespace-nowrap rounded-full border border-ink/40 px-7 py-3.5 font-ui text-sm font-semibold text-ink outline-none transition hover:border-leaf-text hover:text-leaf-text focus-visible:ring-2 focus-visible:ring-leaf-text">
+            className="fx-fill shrink-0 cursor-pointer whitespace-nowrap rounded-full border border-ink/40 px-7 py-3.5 font-ui text-sm font-semibold text-ink outline-none transition focus-visible:ring-2 focus-visible:ring-leaf-text">
             Sign in
           </button>
         </Reveal>

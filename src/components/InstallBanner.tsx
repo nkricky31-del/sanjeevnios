@@ -2,6 +2,7 @@ import { Share, WifiOff, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { useInstall } from '../lib/pwa';
+import BrandName from './ui/BrandName';
 
 const DISMISS_KEY = 'sos-install-dismissed';
 const QUIET_DAYS = 14;
@@ -56,7 +57,7 @@ export function InstallBanner() {
       <div className="flex items-start gap-3 pr-6">
         <img src="/icon-192.png" alt="" width={44} height={44} className="h-11 w-11 shrink-0 rounded-xl" />
         <div className="min-w-0">
-          <p className="font-display text-sm font-bold text-slate-900">Install SanjeevniOS</p>
+          <p className="font-display text-sm font-bold text-slate-900">Install <BrandName /></p>
           {canPrompt ? (
             <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
               Add it to your home screen to open it like an app.

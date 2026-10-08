@@ -727,7 +727,7 @@ export default function BookingStatus() {
 
         {actionError && <p className="mt-3 text-sm text-red-600">{actionError}</p>}
 
-        {['booked', 'accepted'].includes(booking.status) && (
+        {['booked', 'accepted', 'checked_in', 'called', 'in_consultation'].includes(booking.status) && (
           <motion.div
             className="mt-4 space-y-2"
             initial={{ opacity: 0, y: 14 }}
@@ -772,8 +772,10 @@ export default function BookingStatus() {
               )}
             </AnimatePresence>
             {!canModify && (
-              <p className="text-center text-xs text-slate-400">
-                Too close to the appointment time to cancel or reschedule (within {cancelWindowHours} hour{cancelWindowHours === 1 ? '' : 's'}). Please contact the clinic.
+              <p className="text-center text-xs text-slate-500">
+                {['checked_in', 'called', 'in_consultation'].includes(booking.status)
+                  ? "You're already at the clinic, so this visit can't be cancelled online. Please tell the front desk."
+                  : `Too close to the appointment time to cancel or reschedule (within ${cancelWindowHours} hour${cancelWindowHours === 1 ? '' : 's'}). Please contact the clinic.`}
               </p>
             )}
             <p className="text-center text-xs text-slate-400">

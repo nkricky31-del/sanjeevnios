@@ -117,6 +117,42 @@ function HeroAmbient() {
   );
 }
 
+// Four colourful floating tiles beside the call to action: each one a tiny
+// scene (a token ticking up, a prescription, a verified tick, a heartbeat).
+const BADGES = [
+  { Icon: Ticket, label: 'Token A-17', sub: '6 ahead', from: '#6366f1', to: '#38bdf8' },
+  { Icon: Pill, label: 'Rx ready', sub: 'In your records', from: '#10b981', to: '#a3e635' },
+  { Icon: ShieldCheck, label: 'Verified', sub: 'Clinic & doctor', from: '#f59e0b', to: '#f43f5e' },
+  { Icon: HeartPulse, label: 'Live queue', sub: 'Updates in real time', from: '#ec4899', to: '#8b5cf6' },
+];
+function HeroChips() {
+  return (
+    <div aria-hidden className="mt-5 flex items-center justify-center gap-3 sm:justify-start">
+      {BADGES.map(({ Icon, label, from, to }, i) => (
+        <motion.span
+          key={label}
+          title={label}
+          className="relative flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-lg shadow-black/25 ring-1 ring-white/30"
+          style={{ background: `linear-gradient(135deg, ${from}, ${to})` }}
+          animate={{ y: [0, -7, 0] }}
+          transition={{ duration: 2.6 + i * 0.4, delay: i * 0.25, repeat: Infinity, ease: 'easeInOut' }}
+          whileHover={{ scale: 1.2, rotate: -8 }}
+        >
+          <motion.span
+            className="absolute inset-0 rounded-2xl"
+            style={{ background: `linear-gradient(135deg, ${from}, ${to})` }}
+            animate={{ scale: [1, 1.6], opacity: [0.5, 0] }}
+            transition={{ duration: 2.2, delay: i * 0.5, repeat: Infinity, ease: 'easeOut' }}
+          />
+          <motion.span className="relative" animate={{ rotate: [0, -10, 10, 0] }} transition={{ duration: 3.4, delay: i * 0.4, repeat: Infinity }}>
+            <Icon size={20} />
+          </motion.span>
+        </motion.span>
+      ))}
+    </div>
+  );
+}
+
 // Each letter springs up in turn when the page loads.
 function Letters({ text, start = 0, gradient = false }: { text: string; start?: number; gradient?: boolean }) {
   return (
@@ -195,7 +231,7 @@ export default function PortalHero() {
   const labelColor = useTransform(p, [0.12, 0.5], ['#6b7280', 'rgba(255,255,255,0.8)']);
 
   const copyOpacity = useTransform(p, [0.5, 0.82], [0, 1]);
-  const copyPointer = useTransform(p, (v) => (v > 0.7 ? 'auto' : 'none'));
+  const copyPointer = useTransform(p, (v) => (v > 0.55 ? 'auto' : 'none'));
   const hintOpacity = useTransform(p, [0, 0.12], [1, 0]);
   const ambientOpacity = useTransform(p, [0, 0.32], [1, 0]);
 
@@ -275,22 +311,23 @@ export default function PortalHero() {
               <button
                 type="button"
                 onClick={() => navigate('/login')}
-                className="cursor-pointer rounded-full bg-primary px-6 py-3 font-ui text-sm font-semibold text-white outline-none transition hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-primary"
+                className="fx-fill cursor-pointer rounded-full bg-primary px-6 py-3 font-ui text-sm font-semibold text-white outline-none transition focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-primary"
               >
                 Book a visit
               </button>
               <button
                 type="button"
                 onClick={() => navigate('/clinic/login?mode=register')}
-                className="cursor-pointer rounded-full border border-white/60 px-6 py-3 font-ui text-sm font-semibold text-white outline-none transition hover:bg-white hover:text-ink focus-visible:ring-2 focus-visible:ring-white"
+                className="fx-fill cursor-pointer rounded-full border border-white/60 px-6 py-3 font-ui text-sm font-semibold text-white outline-none transition focus-visible:ring-2 focus-visible:ring-white"
               >
                 Register your clinic
               </button>
             </div>
+            <HeroChips />
           </motion.div>
           <motion.div
             aria-hidden
-            className="absolute inset-x-0 bottom-6 flex justify-center"
+            className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center"
             style={{ opacity: reduce ? 0 : hintOpacity }}
           >
             <div className="flex flex-col items-center gap-2">

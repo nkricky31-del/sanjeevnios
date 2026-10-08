@@ -20,7 +20,7 @@ export interface NavItem {
 }
 
 const ITEM =
-  'group relative flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/60';
+  'group relative flex hover:bg-white/[0.06] w-full cursor-pointer items-center gap-3 rounded-xl px-2 py-1.5 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/60';
 const ON = 'text-white';
 const OFF = 'text-white/60 hover:text-white';
 
@@ -50,17 +50,23 @@ function ActiveMark() {
   );
 }
 
-function Inner({ it, active }: { it: NavItem; active: boolean }) {
+// Every item has its own colour, so a long list reads at a glance and each one
+// lights up when you point at it.
+const HUES = ['#818cf8', '#38bdf8', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#fb7185', '#2dd4bf'];
+
+function Inner({ it, active, hue }: { it: NavItem; active: boolean; hue: string }) {
   return (
     <>
       {active && <ActiveMark />}
-      <it.icon
-        size={17}
-        strokeWidth={1.75}
-        className="relative transition-transform duration-200 group-hover:scale-110"
-        style={active ? { color: 'var(--sidebar-light)' } : undefined}
-      />
-      <span className="relative">{it.label}</span>
+      <span
+        className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all duration-300 group-hover:-rotate-6 group-hover:scale-110 group-hover:bg-[var(--h)] group-hover:text-slate-900 group-hover:shadow-[0_0_18px_-2px_var(--h)] ${
+          active ? 'bg-[var(--h)] text-slate-900 shadow-[0_0_18px_-2px_var(--h)]' : 'bg-[color-mix(in_srgb,var(--h)_20%,transparent)] text-[var(--h)]'
+        }`}
+        style={{ ['--h' as string]: hue }}
+      >
+        <it.icon size={17} strokeWidth={1.9} />
+      </span>
+      <span className="relative transition-transform duration-300 group-hover:translate-x-1">{it.label}</span>
     </>
   );
 }
@@ -114,15 +120,15 @@ export default function Sidebar({ tag, items }: { tag: string; items: NavItem[] 
         initial="hidden"
         animate="show"
       >
-        {items.map((it) => (
+        {items.map((it, idx) => (
           <motion.div key={it.key} variants={row}>
             {it.to ? (
               <NavLink to={it.to} end={it.end} className={({ isActive }) => `${ITEM} ${isActive ? ON : OFF}`}>
-                {({ isActive }) => <Inner it={it} active={isActive} />}
+                {({ isActive }) => <Inner it={it} active={isActive} hue={HUES[idx % HUES.length]} />}
               </NavLink>
             ) : (
               <button type="button" onClick={it.onSelect} aria-current={it.active ? 'page' : undefined} className={`${ITEM} ${it.active ? ON : OFF}`}>
-                <Inner it={it} active={Boolean(it.active)} />
+                <Inner it={it} active={Boolean(it.active)} hue={HUES[idx % HUES.length]} />
               </button>
             )}
           </motion.div>

@@ -7,6 +7,7 @@ import type { Consent } from '../lib/types';
 import Button from './ui/Button';
 import StatusPill from './ui/StatusPill';
 import { checkUpload, safeFileName } from '../lib/fileSafety';
+import BrandName from './ui/BrandName';
 
 interface Props {
   doctorId: string;
@@ -132,7 +133,7 @@ export default function AgreementConsentForm({ doctorId, onSigned }: Props) {
 
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
-      <p className="text-sm font-bold text-slate-900">Agreement to join SanjeevniOS</p>
+      <p className="text-sm font-bold text-slate-900">Agreement to join <BrandName /></p>
       {consent && !upToDate && (
         <p className="mt-1 text-xs text-amber-700">
           This doctor signed an earlier version of the agreement - please review and re-sign the current version.

@@ -31,7 +31,7 @@ export default function SplashLoader({ label = 'SanjeevniOS' }: { label?: string
         animate={{ opacity: [0.4, 1, 0.4], y: 0 }}
         transition={{ opacity: { duration: 1.8, repeat: Infinity }, y: { duration: 0.5 } }}
       >
-        {label}
+        {label === 'SanjeevniOS' ? <>Sanjeevni<span className="os-grad">OS</span></> : label}
       </motion.p>
     </div>
   );
