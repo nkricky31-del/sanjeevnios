@@ -18,6 +18,24 @@ export async function openAppointmentFile(fileId: string): Promise<{ url: string
   return { url: data.signedUrl };
 }
 
+// Same permission check as above, but saves the file to the device instead of
+// opening a tab.
+export async function downloadAppointmentFile(fileId: string): Promise<{ ok: true } | { error: string }> {
+  const { data: path, error: authError } = await supabase.rpc('authorize_patient_file_download', { p_file_id: fileId });
+  if (authError || !path) return { error: authError?.message ?? 'Could not download file.' };
+  const { data, error } = await supabase.storage
+    .from(APPOINTMENT_FILES_BUCKET)
+    .createSignedUrl(path as string, 60, { download: (path as string).split('/').pop() ?? true });
+  if (error || !data) return { error: 'Could not download file.' };
+  const a = document.createElement('a');
+  a.href = data.signedUrl;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  return { ok: true };
+}
+
 // Same idea, for a clinic/doctor's uploaded registration document - used by
 // the admin verification console.
 export async function openVerificationDoc(path: string): Promise<string | null> {

@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import DeckArt from './DeckArt';
 import { Label, Reveal } from './motionKit';
 
 interface DeckCard {
@@ -174,6 +175,7 @@ export default function ProductDeck() {
                     <Label accent={card.tone}>{card.who}</Label>
                     <span className="font-display text-sm font-bold text-ink-2">{card.code} / 0{CARDS.length}</span>
                   </div>
+                  <DeckArt index={id} />
                   <div>
                     <Icon size={26} strokeWidth={1.5} className="text-ink" />
                     <h3 className="mt-4 font-display text-4xl font-extrabold tracking-[-0.03em] text-ink">

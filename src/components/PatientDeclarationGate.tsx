@@ -71,15 +71,25 @@ export default function PatientDeclarationGate({ children }: Props) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-brand-50 via-slate-50 to-coral-50 px-4 py-8">
-      <Card className="w-full max-w-sm !rounded-3xl !p-6">
-        <p className="text-lg font-bold text-slate-900">Before you continue</p>
-        <p className="mt-1 text-sm text-slate-500">Please read and accept the following.</p>
+    <div className="relative isolate flex min-h-screen items-center justify-center overflow-hidden px-4 py-8" style={{ background: 'var(--sidebar-bg)' }}>
+      <span aria-hidden className="blob -z-10 -left-24 top-0 h-80 w-80" style={{ background: 'var(--sidebar-glow)', opacity: 0.55 }} />
+      <span aria-hidden className="blob -z-10 -right-24 bottom-0 h-80 w-80 [animation-delay:-6s]" style={{ background: 'var(--sidebar-glow)', opacity: 0.45 }} />
+      <span aria-hidden className="blob -z-10 left-1/2 top-1/3 h-56 w-56 bg-emerald-300 [animation-delay:-10s]" style={{ opacity: 0.2 }} />
+      <Card className="rise-in w-full max-w-md !rounded-3xl !p-6 shadow-2xl shadow-black/30">
+        <div className="flex items-center gap-3">
+          <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white" style={{ background: 'var(--band-bg)' }}>
+            <ShieldAlert size={22} />
+          </span>
+          <div>
+            <p className="font-display text-xl font-bold tracking-[-0.02em] text-slate-900">Before you continue</p>
+            <p className="text-sm text-slate-500">Please read and accept the following.</p>
+          </div>
+        </div>
 
         {platform.status === 'needed' && (
           <div className="mt-3">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Platform declaration</p>
-            <div className="mt-1 rounded-xl bg-slate-50 p-3 text-sm leading-relaxed text-slate-600">
+            <div className="mt-1 max-h-44 overflow-y-auto rounded-xl border border-brand-100 bg-brand-50/50 p-3 text-sm leading-relaxed text-slate-600">
               {PATIENT_DECLARATION_TEXT}
             </div>
             <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
@@ -97,7 +107,7 @@ export default function PatientDeclarationGate({ children }: Props) {
         {dpdp.status === 'needed' && (
           <div className="mt-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Data-sharing consent</p>
-            <div className="mt-1 rounded-xl bg-slate-50 p-3 text-sm leading-relaxed text-slate-600">
+            <div className="mt-1 max-h-44 overflow-y-auto rounded-xl border border-brand-100 bg-brand-50/50 p-3 text-sm leading-relaxed text-slate-600">
               {DPDP_CONSENT_TEXT}
             </div>
             <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">

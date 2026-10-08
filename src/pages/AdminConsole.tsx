@@ -340,7 +340,7 @@ export default function AdminConsole() {
 
         {view === 'dashboard' && (
           <div className="mt-4">
-            <AdminDashboard />
+            <AdminDashboard onNavigate={(t) => setView(t)} />
           </div>
         )}
 

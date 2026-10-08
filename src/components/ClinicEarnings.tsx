@@ -215,24 +215,30 @@ export default function ClinicEarnings({ clinic }: Props) {
       ) : (
         <>
           <div className="mt-4 grid grid-cols-3 gap-2">
-            <Card className="!p-3 text-center">
-              <Clock3 size={16} className="mx-auto text-slate-400" />
+            <button type="button" onClick={() => setView('pending')} className={`block rounded-2xl text-left transition ${view === 'pending' ? 'ring-2 ring-brand-500 shadow-lg' : ''}`}>
+            <Card className="!p-3 text-center ">
+              <Clock3 size={16} className="mx-auto text-sky-500" />
               <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Pending</p>
               <p className="mt-0.5 text-base font-extrabold text-slate-900">₹{pendingTotal.toLocaleString()}</p>
               <p className="text-[11px] text-slate-400">{pending.length} visit(s) not yet completed</p>
             </Card>
-            <Card className="!p-3 text-center">
+            </button>
+            <button type="button" onClick={() => setView('ready')} className={`block rounded-2xl text-left transition ${view === 'ready' ? 'ring-2 ring-brand-500 shadow-lg' : ''}`}>
+            <Card className="!p-3 text-center ">
               <IndianRupee size={16} className="mx-auto text-amber-500" />
               <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Ready</p>
               <p className="mt-0.5 text-base font-extrabold text-amber-700">₹{readyTotal.toLocaleString()}</p>
               <p className="text-[11px] text-slate-400">{ready.length} awaiting release</p>
             </Card>
-            <Card className="!p-3 text-center">
+            </button>
+            <button type="button" onClick={() => setView('paid')} className={`block rounded-2xl text-left transition ${view === 'paid' ? 'ring-2 ring-brand-500 shadow-lg' : ''}`}>
+            <Card className="!p-3 text-center ">
               <Wallet size={16} className="mx-auto text-emerald-500" />
               <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Paid</p>
               <p className="mt-0.5 text-base font-extrabold text-emerald-700">₹{paidTotal.toLocaleString()}</p>
               <p className="text-[11px] text-slate-400">{paid.length} released/settled</p>
             </Card>
+            </button>
           </div>
 
           <div className="mt-4 flex flex-wrap items-end gap-2 print:hidden">

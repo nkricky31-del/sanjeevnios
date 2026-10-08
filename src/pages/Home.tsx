@@ -51,10 +51,10 @@ const QUICK_ACTIONS: { label: string; icon: typeof CalendarDays; tone: IconTone;
   { label: 'My Appointments', icon: CalendarDays, tone: 'brand', to: '/bookings' },
   { label: 'Book Appointment', icon: CalendarPlus, tone: 'emerald', to: '/search' },
   { label: 'My Health Records', icon: FileText, tone: 'brand', to: '/records' },
-  { label: 'Prescriptions', icon: Pill, tone: 'pink', to: '/records?category=prescriptions' },
-  { label: 'Lab Reports', icon: FlaskConical, tone: 'emerald', to: '/records?category=lab_report' },
+  { label: 'Prescriptions', icon: Pill, tone: 'pink', to: '/records/prescriptions' },
+  { label: 'Lab Reports', icon: FlaskConical, tone: 'emerald', to: '/records/lab_report' },
   { label: 'Bills & Payments', icon: Wallet, tone: 'sky', to: '/payments' },
-  { label: 'Health Summary', icon: HeartPulse, tone: 'amber', to: '/records?category=encounters' },
+  { label: 'Health Summary', icon: HeartPulse, tone: 'amber', to: '/records/encounters' },
   { label: 'My Profile', icon: UserRound, tone: 'brand', to: '/profile' },
 ];
 

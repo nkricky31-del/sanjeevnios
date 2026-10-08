@@ -29,11 +29,11 @@ interface PaymentRow {
   } | null;
 }
 
-const STATUS_TONE: Record<string, 'live' | 'warning' | 'neutral' | 'danger'> = {
+const STATUS_TONE: Record<string, 'live' | 'warning' | 'neutral' | 'danger' | 'violet'> = {
   captured: 'live',
   pending: 'warning',
   hold: 'warning',
-  refunded: 'neutral',
+  refunded: 'violet',
 };
 
 const STATUS_LABEL: Record<string, string> = {

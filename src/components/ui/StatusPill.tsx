@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 
 interface Props {
   label: string;
-  tone?: 'live' | 'warning' | 'info' | 'neutral' | 'danger';
+  tone?: 'live' | 'warning' | 'info' | 'neutral' | 'danger' | 'violet' | 'sky';
   icon?: LucideIcon;
   dot?: boolean;
 }
@@ -17,6 +17,8 @@ const TONE_STYLES: Record<string, string> = {
   info: 'bg-brand-50 text-brand-700',
   neutral: 'bg-slate-100 text-slate-600',
   danger: 'bg-red-50 text-red-600',
+  violet: 'bg-violet-50 text-violet-700',
+  sky: 'bg-sky-50 text-sky-700',
 };
 
 const DOT_STYLES: Record<string, string> = {
@@ -25,9 +27,33 @@ const DOT_STYLES: Record<string, string> = {
   info: 'bg-brand-500',
   neutral: 'bg-slate-400',
   danger: 'bg-red-500',
+  violet: 'bg-violet-500',
+  sky: 'bg-sky-500',
 };
 
-export default function StatusPill({ label, tone = 'neutral', icon: Icon, dot }: Props) {
+// A neutral grey pill whose word already says what it is takes that word's colour,
+// so the same status looks the same on every screen.
+const LABEL_TONE: Record<string, keyof typeof TONE_STYLES> = {
+  pending: 'warning',
+  hold: 'warning',
+  'on hold': 'warning',
+  collected: 'sky',
+  refunded: 'violet',
+  refund: 'violet',
+  cancelled: 'danger',
+  rejected: 'danger',
+  failed: 'danger',
+  captured: 'live',
+  paid: 'live',
+  settled: 'live',
+  approved: 'live',
+  active: 'live',
+  released: 'info',
+  eligible: 'info',
+};
+
+export default function StatusPill({ label, tone: given = 'neutral', icon: Icon, dot }: Props) {
+  const tone = given === 'neutral' ? (LABEL_TONE[label.toLowerCase()] ?? 'neutral') : given;
   return (
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-current/15 px-3 py-1 text-[11px] font-semibold capitalize ${TONE_STYLES[tone]}`}

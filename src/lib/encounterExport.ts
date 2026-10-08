@@ -72,3 +72,33 @@ export function downloadEncounterSummary(
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+// One prescription as a plain-text copy the patient can keep or hand over.
+export function downloadPrescriptionText(
+  p: { id: string; items: { name: string; dosage: string; frequency: string; durationDays: number }[]; signed_by: string | null; status: string; created_at: string },
+  meta: { doctor?: string | null; clinic?: string | null; patient?: string | null }
+) {
+  const lines = [
+    'SanjeevniOS - Prescription',
+    '='.repeat(40),
+    `Date: ${new Date(p.created_at).toLocaleDateString()}`,
+    `Doctor: ${meta.doctor ?? '-'}`,
+    `Clinic: ${meta.clinic ?? '-'}`,
+    ...(meta.patient ? [`Patient: ${meta.patient}`] : []),
+    `Status: ${p.status}`,
+    ...(p.signed_by ? [`Signed by: ${p.signed_by}`] : []),
+    '',
+    'Medicines',
+    '-'.repeat(40),
+    ...(p.items.length ? p.items.map((i) => `- ${i.name} - ${i.dosage} - ${i.frequency} - ${i.durationDays} day(s)`) : ['None recorded.']),
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `prescription-${p.id.slice(0, 8)}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

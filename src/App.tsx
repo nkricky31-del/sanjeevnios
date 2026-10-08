@@ -32,6 +32,7 @@ import PatientLogin from './pages/PatientLogin';
 import Payments from './pages/Payments';
 import Profile from './pages/Profile';
 import Records from './pages/Records';
+import RecordsCategory from './pages/RecordsCategory';
 import Search from './pages/Search';
 import TokenBoard from './pages/TokenBoard';
 
@@ -218,6 +219,7 @@ function AppContent() {
             <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
             <Route path="/bookings/:appointmentId/pass" element={<BookingPass />} />
             <Route path="/records" element={<Records />} />
+            <Route path="/records/:category" element={<RecordsCategory />} />
             <Route path="/payments" element={<Payments />} />
             {/* Kept so old links/bookmarks to the timeline still land somewhere. */}
             <Route path="/timeline" element={<Records />} />

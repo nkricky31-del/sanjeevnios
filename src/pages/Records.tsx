@@ -1,5 +1,5 @@
 import Loading from '../components/ui/Loading';
-import { FileText, FlaskConical, HeartPulse, Lock, Pill, ScanLine, Search, ShieldCheck } from 'lucide-react';
+import { ChevronRight, FileText, FlaskConical, HeartPulse, Lock, Pill, ScanLine, Search, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -221,7 +221,7 @@ export default function Records() {
             return (
               <button
                 key={key}
-                onClick={() => setCategory(active ? null : key)}
+                onClick={() => navigate(`/records/${key}`)}
                 className={`flex w-full items-center gap-3 border-b border-slate-50 px-4 py-3.5 text-left transition last:border-b-0 ${
                   active ? 'bg-brand-50/60' : 'hover:bg-slate-50'
                 }`}
@@ -234,6 +234,7 @@ export default function Records() {
                 <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
                   {counts[key]}
                 </span>
+                <ChevronRight size={16} className="shrink-0 text-slate-300" />
               </button>
             );
           })}

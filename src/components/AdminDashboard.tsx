@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { todayISO } from '../lib/date';
 import { supabase } from '../lib/supabaseClient';
 import type { ClinicStatus } from '../lib/types';
+import AdminDrill, { type DrillView } from './AdminDrill';
 import StatTile from './ui/StatTile';
 
 interface Stats {
@@ -25,7 +26,8 @@ const EMPTY_STATS: Stats = {
   platformRevenue: 0,
 };
 
-export default function AdminDashboard() {
+export default function AdminDashboard({ onNavigate }: { onNavigate?: (tab: 'patients' | 'billing') => void }) {
+  const [drill, setDrill] = useState<DrillView | null>(null);
   const [stats, setStats] = useState<Stats>(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
 
@@ -70,6 +72,8 @@ export default function AdminDashboard() {
     load();
   }, []);
 
+  if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -85,21 +89,22 @@ export default function AdminDashboard() {
         <>
           <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Clinics</p>
           <div className="mt-1 grid grid-cols-3 gap-2">
-            <StatTile icon={Building2} label="Approved" value={stats.clinicsByStatus.approved} tone="emerald" />
-            <StatTile icon={Building2} label="Pending" value={stats.clinicsByStatus.pending} tone="amber" />
-            <StatTile icon={Building2} label="Rejected" value={stats.clinicsByStatus.rejected} tone="slate" />
+            <StatTile icon={Building2} label="Approved" value={stats.clinicsByStatus.approved} tone="emerald" onClick={() => setDrill({ kind: 'clinics', status: 'approved' })} />
+            <StatTile icon={Building2} label="Pending" value={stats.clinicsByStatus.pending} tone="amber" onClick={() => setDrill({ kind: 'clinics', status: 'pending' })} />
+            <StatTile icon={Building2} label="Rejected" value={stats.clinicsByStatus.rejected} tone="slate" onClick={() => setDrill({ kind: 'clinics', status: 'rejected' })} />
           </div>
 
           <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Platform</p>
           <div className="mt-1 grid grid-cols-2 gap-2">
-            <StatTile icon={Stethoscope} label="Doctors" value={stats.doctorCount} tone="brand" />
-            <StatTile icon={Users} label="Patients" value={stats.patientCount} tone="brand" />
-            <StatTile icon={CalendarCheck} label="Appointments today" value={stats.appointmentsToday} tone="brand" />
+            <StatTile icon={Stethoscope} label="Doctors" value={stats.doctorCount} tone="brand" onClick={() => setDrill({ kind: 'doctors' })} />
+            <StatTile icon={Users} label="Patients" value={stats.patientCount} tone="brand" onClick={() => onNavigate?.('patients')} />
+            <StatTile icon={CalendarCheck} label="Appointments today" value={stats.appointmentsToday} tone="brand" onClick={() => setDrill({ kind: 'today' })} />
             <StatTile
               icon={IndianRupee}
               label="Platform commission (all-time)"
               value={`₹${stats.platformRevenue.toLocaleString()}`}
               tone="emerald"
+              onClick={() => onNavigate?.('billing')}
             />
           </div>
           <p className="mt-2 text-xs text-slate-400">

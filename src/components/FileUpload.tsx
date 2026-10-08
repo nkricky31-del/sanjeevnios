@@ -10,6 +10,11 @@ import { checkUpload, safeFileName } from '../lib/fileSafety';
 interface Props {
   appointmentId: string;
   memberId: string;
+  /** Pre-select (and hide the chooser for) one kind of file. */
+  fixedCategory?: FileCategory;
+  /** Hide the list of files already on this appointment. */
+  hideList?: boolean;
+  onUploaded?: () => void;
 }
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB - matches the bucket's server-side limit
@@ -22,9 +27,9 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
   photo: 'Photo',
 };
 
-export default function FileUpload({ appointmentId, memberId }: Props) {
+export default function FileUpload({ appointmentId, memberId, fixedCategory, hideList, onUploaded }: Props) {
   const [files, setFiles] = useState<AppointmentFile[]>([]);
-  const [category, setCategory] = useState<FileCategory>('lab_report');
+  const [category, setCategory] = useState<FileCategory>(fixedCategory ?? 'lab_report');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -104,6 +109,7 @@ export default function FileUpload({ appointmentId, memberId }: Props) {
       return;
     }
     setDone(true);
+    onUploaded?.();
     window.setTimeout(() => setDone(false), 3500);
     loadFiles();
   };
@@ -123,9 +129,9 @@ export default function FileUpload({ appointmentId, memberId }: Props) {
 
   return (
     <div className="mt-4 rounded-2xl border border-slate-200 p-4">
-      <p className="text-sm font-semibold text-slate-900">Files</p>
+      {!hideList && <p className="text-sm font-semibold text-slate-900">Files</p>}
 
-      <div className="mt-2 space-y-2">
+      <div className={`mt-2 space-y-2 ${hideList ? 'hidden' : ''}`}>
         {files.length === 0 && <p className="text-sm text-slate-400">No files uploaded yet.</p>}
         <AnimatePresence initial={false}>
           {files.map((f) => (
@@ -150,7 +156,7 @@ export default function FileUpload({ appointmentId, memberId }: Props) {
         </AnimatePresence>
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
+      <div className={`mt-3 flex items-center gap-2 ${fixedCategory ? 'hidden' : ''}`}>
         <label htmlFor={`${inputId}-type`} className="text-xs font-semibold text-slate-500">
           Type
         </label>

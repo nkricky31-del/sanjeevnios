@@ -41,11 +41,11 @@ interface ExpectedRow {
 // Payment is shown next to the patient purely so the desk knows whether to
 // collect money. It has NO bearing on the queue: an unpaid patient who is
 // here is ahead of a paid one who isn't. See schema.sql section 30.
-const PAYMENT_TONE: Record<AppointmentPaymentStatus, 'live' | 'warning' | 'neutral'> = {
+const PAYMENT_TONE: Record<AppointmentPaymentStatus, 'live' | 'warning' | 'neutral' | 'violet'> = {
   paid_online: 'live',
   paid_at_clinic: 'live',
   pay_at_clinic: 'warning',
-  refunded: 'neutral',
+  refunded: 'violet',
   free_followup: 'live',
 };
 

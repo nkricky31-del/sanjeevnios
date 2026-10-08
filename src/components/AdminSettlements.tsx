@@ -38,11 +38,11 @@ interface ClinicGroup {
   total: number;
 }
 
-const STATUS_TONE: Record<SettlementStatus, 'live' | 'warning' | 'info' | 'neutral' | 'danger'> = {
-  collected: 'neutral',
+const STATUS_TONE: Record<SettlementStatus, 'live' | 'warning' | 'info' | 'neutral' | 'danger' | 'sky' | 'violet'> = {
+  collected: 'sky',
   eligible: 'warning',
   on_hold: 'danger',
-  refunded: 'neutral',
+  refunded: 'violet',
   released: 'info',
   settled: 'live',
 };

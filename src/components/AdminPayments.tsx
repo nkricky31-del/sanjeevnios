@@ -33,11 +33,11 @@ interface PaymentRow {
   } | null;
 }
 
-const STATUS_TONE: Record<PaymentRow['status'], 'live' | 'warning' | 'info' | 'neutral'> = {
-  pending: 'neutral',
-  hold: 'warning',
+const STATUS_TONE: Record<PaymentRow['status'], 'live' | 'warning' | 'info' | 'neutral' | 'danger' | 'violet'> = {
+  pending: 'warning',
+  hold: 'danger',
   captured: 'live',
-  refunded: 'info',
+  refunded: 'violet',
 };
 
 // Recent-payments cap for this MVP admin view - large enough to cover
