@@ -31,6 +31,28 @@
   /* The lavender-tinted page background the mockups sit on - not a plain
      grey, it carries a little of the brand hue. */
   --color-canvas: #f6f5fa;
+
+  /* ---- Label system (landing page + the three sign-in screens) ----------
+     A dark editorial ground with a warm bone ink. Two accents only, both
+     pulled from the hero photograph (warm skin / teal stethoscope), and they
+     are only ever used for type, a dot or a rule - never a filled area. */
+  --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --color-ground: #0a0c0e;
+  --color-ground-2: #101317;
+  --color-ink: #ede7dc;
+  --color-ink-2: #9ea5a8;
+  --color-muted: #6c7378;
+  --color-amber: #e8913c;
+  --color-teal: #2e6b72;
+  /* #2e6b72 is only ~3:1 on the ground, fine for a dot or rule but too dim
+     for small text; this lighter teal is the readable version of the same hue. */
+  --color-teal-text: #6fb3bb;
+  /* Admin accent: a cool violet-silver, so the restricted console never reads
+     as the patient (teal) or clinic (amber) screens. */
+  --color-admin: #a99cff;
+  --color-alert: #ff9a8d;
+  --color-hairline: rgb(237 231 220 / 0.13);
 }
 
 body {

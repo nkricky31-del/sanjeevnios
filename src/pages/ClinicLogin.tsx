@@ -1,23 +1,18 @@
-import { ArrowRight, Building2, FileCheck2, Lock, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
-import BrandMark from '../components/ui/BrandMark';
-import Button from '../components/ui/Button';
+import {
+  AuthDivider, AuthError, AuthHeading, AuthLink, AuthLinkButton, AuthSubmit, AuthTextButton, OtpField, PhoneField, TextField,
+} from '../components/auth/AuthFields';
+import AuthShell from '../components/auth/AuthShell';
 import { setActingMode } from '../lib/actingMode';
 import { CLINIC_SIGNUP_INTENT_KEY } from '../lib/clinicSignupIntent';
 import { safeNext } from '../lib/loginRedirect';
-import { livePhoneDigits, normalizePhone } from '../lib/phone';
+import { normalizePhone } from '../lib/phone';
 import { logAuthEvent } from '../lib/audit';
 import { supabase } from '../lib/supabaseClient';
 import { CAPTCHA_ENABLED } from '../lib/captcha';
 import TurnstileWidget from '../components/TurnstileWidget';
-
-const TRUST_BADGES = [
-  { icon: ShieldCheck, lines: ['Secure &', 'Encrypted'] },
-  { icon: FileCheck2, lines: ['Admin', 'Verified'] },
-  { icon: Lock, lines: ['Clinic Data', 'Isolated'] },
-];
 
 // The CLINIC login screen - its own URL, its own (coral-accented) look, so
 // it's never confused with the patient screen. An EXISTING clinic signs in
@@ -156,159 +151,80 @@ export default function ClinicLogin() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-canvas">
-      {/* Coral wash instead of PatientLogin's lavender one - same brand mark,
-          deliberately different accent so this never reads as the patient screen. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-32 h-72 bg-coral-100/50 [mask-image:radial-gradient(120%_60%_at_50%_0%,#000_40%,transparent_75%)]"
-      />
+    <AuthShell role="clinic">
+      {stage === 'details' ? (
+        <>
+          <AuthHeading
+            title={mode === 'register' ? 'Register your clinic' : 'Clinic login'}
+            sub={
+              mode === 'register'
+                ? 'Sign in with your phone number to get started.'
+                : 'Sign in with your Clinic ID and registered phone number.'
+            }
+          />
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col px-5 pb-10 pt-12">
-        <div className="flex flex-col items-center text-center">
-          <BrandMark size={64} />
-          <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-brand-600">SanjeevniOS</h1>
-          <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-coral-50 px-3 py-1 text-xs font-bold text-coral-600">
-            <Building2 size={13} /> Clinic Console
-          </p>
-        </div>
+          <form onSubmit={sendOtp} className="mt-6 space-y-4">
+            {mode === 'login' && (
+              <TextField label="Clinic ID" value={clinicId} onChange={setClinicId} placeholder="e.g. SNJ-CL-000123" />
+            )}
+            <PhoneField
+              label="Registered mobile number"
+              value={digits}
+              onChange={setDigits}
+              placeholder="Clinic's mobile number"
+            />
+            {error && <AuthError>{error}</AuthError>}
+            <TurnstileWidget onToken={setCaptchaToken} resetSignal={captchaReset} theme="dark" />
+            <AuthSubmit loading={loading} loadingLabel="Sending..." disabled={loading || (CAPTCHA_ENABLED && !captchaToken)}>
+              Continue
+            </AuthSubmit>
+          </form>
 
-        <div className="mt-7 rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-200/60">
-          {stage === 'details' ? (
-            <>
-              <h2 className="text-2xl font-extrabold text-slate-900">
-                {mode === 'register' ? 'Register your clinic' : 'Clinic Login'}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {mode === 'register'
-                  ? 'Sign in with your phone number to get started'
-                  : 'Sign in with your Clinic ID and registered phone number'}
-              </p>
-
-              <form onSubmit={sendOtp} className="mt-4">
-                {mode === 'login' && (
-                  <div className="mb-4">
-                    <label className="text-sm font-bold text-slate-800">Clinic ID</label>
-                    <input
-                      type="text"
-                      value={clinicId}
-                      onChange={(e) => setClinicId(e.target.value)}
-                      placeholder="e.g. SNJ-CL-000123"
-                      className="mt-1.5 w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3.5 text-sm font-medium outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-coral-500"
-                    />
-                  </div>
-                )}
-
-                <label className="text-sm font-bold text-slate-800">Registered Mobile Number</label>
-                <div className="mt-1.5 flex items-center overflow-hidden rounded-2xl border border-slate-200 bg-white focus-within:ring-2 focus-within:ring-coral-500">
-                  <span className="flex items-center gap-2 border-r border-slate-200 px-3 py-3.5 text-sm font-bold text-slate-700">
-                    <span aria-hidden className="flex h-3.5 w-5 flex-col overflow-hidden rounded-sm ring-1 ring-slate-200">
-                      <span className="flex-1 bg-[#FF9933]" />
-                      <span className="flex flex-1 items-center justify-center bg-white">
-                        <span className="h-1 w-1 rounded-full ring-[0.5px] ring-[#128807]" />
-                      </span>
-                      <span className="flex-1 bg-[#128807]" />
-                    </span>
-                    +91
-                  </span>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={15}
-                    value={digits}
-                    onChange={(e) => setDigits(livePhoneDigits(e.target.value))}
-                    placeholder="Enter clinic's mobile number"
-                    className="w-full bg-transparent px-3 py-3.5 text-sm font-medium outline-none placeholder:text-slate-400"
-                  />
-                </div>
-
-                {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-
-                <TurnstileWidget onToken={setCaptchaToken} resetSignal={captchaReset} />
-
-                <Button type="submit" variant="coral" disabled={loading || (CAPTCHA_ENABLED && !captchaToken)} full className="mt-4">
-                  {loading ? 'Sending...' : 'Continue'}
-                  {!loading && <ArrowRight size={17} />}
-                </Button>
-              </form>
-
-              {mode === 'login' && (
-                <p className="mt-3 text-center text-xs text-slate-400">
-                  Don't have a Clinic ID yet?{' '}
-                  <button type="button" onClick={switchToRegister} className="font-bold text-coral-600">
-                    Register your clinic
-                  </button>
-                </p>
-              )}
-
-              <div className="mt-5 flex items-center gap-3">
-                <span className="h-px flex-1 bg-slate-100" />
-                <span className="text-xs text-slate-400">or</span>
-                <span className="h-px flex-1 bg-slate-100" />
-              </div>
-
-              <p className="text-center text-sm text-slate-500">
-                {mode === 'register' ? (
-                  <button type="button" onClick={switchToLogin} className="font-bold text-coral-600">
-                    Go back to Clinic Login
-                  </button>
-                ) : (
-                  <>
-                    Not a clinic?{' '}
-                    <Link to="/login" className="font-bold text-coral-600">
-                      Patient login
-                    </Link>
-                  </>
-                )}
-              </p>
-            </>
-          ) : (
-            <form onSubmit={verifyOtp}>
-              <h2 className="text-2xl font-extrabold text-slate-900">Verify your number</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Enter the 6-digit code sent to <span className="font-semibold text-slate-700">+91 {digits}</span>
-              </p>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                placeholder="······"
-                className="mt-4 w-full rounded-2xl border border-slate-200 bg-white px-3 py-3.5 text-center text-2xl font-extrabold tracking-[0.4em] outline-none focus:ring-2 focus:ring-coral-500"
-              />
-              {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-              <Button type="submit" variant="coral" disabled={loading} full className="mt-4">
-                {loading ? 'Verifying...' : 'Verify & sign in'}
-              </Button>
-              <button
-                type="button"
-                onClick={() => {
-                  setStage('details');
-                  setOtp('');
-                  setError(null);
-                }}
-                className="mt-3 w-full text-center text-sm font-semibold text-slate-500"
-              >
-                Use a different number
-              </button>
-            </form>
+          {mode === 'login' && (
+            <p className="mt-4 text-center text-xs text-ink-2">
+              Don't have a Clinic ID yet? <AuthLinkButton onClick={switchToRegister}>Register your clinic</AuthLinkButton>
+            </p>
           )}
-        </div>
 
-        <div className="mt-6 grid grid-cols-3 gap-2 text-center">
-          {TRUST_BADGES.map((b) => (
-            <div key={b.lines.join()} className="flex flex-col items-center gap-1.5">
-              <b.icon size={20} className="text-coral-600" />
-              <p className="text-[11px] font-semibold leading-tight text-slate-500">
-                {b.lines[0]}
-                <br />
-                {b.lines[1]}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+          <AuthDivider />
+          <p className="text-center text-sm text-ink-2">
+            {mode === 'register' ? (
+              <AuthLinkButton onClick={switchToLogin}>Go back to clinic login</AuthLinkButton>
+            ) : (
+              <>
+                Not a clinic? <AuthLink to="/login">Patient login</AuthLink>
+              </>
+            )}
+          </p>
+        </>
+      ) : (
+        <form onSubmit={verifyOtp}>
+          <AuthHeading
+            title="Verify your number"
+            sub={
+              <>
+                Enter the 6-digit code sent to <span className="font-semibold text-ink">+91 {digits}</span>
+              </>
+            }
+          />
+          <div className="mt-6">
+            <OtpField value={otp} onChange={setOtp} />
+          </div>
+          {error && <AuthError>{error}</AuthError>}
+          <AuthSubmit loading={loading} loadingLabel="Verifying..." disabled={loading}>
+            Verify &amp; sign in
+          </AuthSubmit>
+          <AuthTextButton
+            onClick={() => {
+              setStage('details');
+              setOtp('');
+              setError(null);
+            }}
+          >
+            Use a different number
+          </AuthTextButton>
+        </form>
+      )}
+    </AuthShell>
   );
 }

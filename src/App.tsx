@@ -15,6 +15,7 @@ import { supabase } from './lib/supabaseClient';
 import MarketingSite from './marketing/MarketingSite';
 import AdminConsole from './pages/AdminConsole';
 import AdminMfaGate from './components/AdminMfaGate';
+import PageTransition from './components/PageTransition';
 import AdminLogin from './pages/AdminLogin';
 import BookingPass from './pages/BookingPass';
 import BookingStatus from './pages/BookingStatus';
@@ -210,6 +211,7 @@ export default function App() {
     <PatientOnboardingGate>
       <PatientDeclarationGate>
         <div className="min-h-screen bg-canvas pb-24">
+          <PageTransition>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/search" element={<Search />} />
@@ -229,6 +231,7 @@ export default function App() {
                 own home - never a broken/empty page. */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </PageTransition>
           <PlatformFooterNote />
           <BottomTabBar />
         </div>

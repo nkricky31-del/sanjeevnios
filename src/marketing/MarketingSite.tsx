@@ -1,5 +1,7 @@
 import { Route, Routes } from 'react-router-dom';
 
+import { useDarkBackdrop } from '../lib/useDarkBackdrop';
+
 import MarketingFooter from './components/MarketingFooter';
 import MarketingNav from './components/MarketingNav';
 import About from './pages/About';
@@ -16,8 +18,9 @@ import MarketingHome from './pages/MarketingHome';
 // the very top in main.tsx, so a nested Routes tree here works the same way
 // it does for any other sub-section of the app.
 export default function MarketingSite() {
+  useDarkBackdrop();
   return (
-    <div className="flex min-h-screen flex-col bg-canvas">
+    <div className="flex min-h-screen flex-col bg-ground font-ui text-ink">
       <MarketingNav />
       <main className="flex-1">
         <Routes>
