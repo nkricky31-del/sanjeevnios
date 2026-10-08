@@ -42,16 +42,23 @@ const TONE: Record<string, 'live' | 'warning' | 'neutral' | 'danger'> = { approv
 const fmt = (d: string) => new Date(d).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 const cap = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
-export function Panel({ title, children, delay = 0 }: { title: string; children: ReactNode; delay?: number }) {
+export function Panel({ title, children, delay = 0, onOpen, accent }: { title: string; children: ReactNode; delay?: number; onOpen?: () => void; accent?: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, duration: 0.45 }}
-      className="rounded-2xl border border-slate-100 bg-white p-4"
+      data-open={onOpen ? 'true' : undefined}
+      role={onOpen ? 'link' : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onClick={onOpen ? (e) => { if (!(e.target as HTMLElement).closest('button, a, input, select')) onOpen(); } : undefined}
+      onKeyDown={onOpen ? (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen(); } } : undefined}
+      style={accent ? ({ '--accent': accent } as React.CSSProperties) : undefined}
+      className={`${onOpen ? 'relative cursor-pointer ' : ''}rounded-2xl border border-slate-100 bg-white p-4`}
     >
       <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{title}</p>
       {children}
+      {onOpen && <span aria-hidden className="open-hint">Open</span>}
     </motion.div>
   );
 }

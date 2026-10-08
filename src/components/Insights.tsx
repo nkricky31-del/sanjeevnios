@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { supabase } from '../lib/supabaseClient';
-import { monthsBack, Panel } from './AdminDrill';
+import { Banner, monthsBack, Panel } from './AdminDrill';
 import Loading from './ui/Loading';
+import StatusPill from './ui/StatusPill';
 import { Bars, Columns, Donut, type ChartDatum } from './ui/MiniCharts';
 
 const cap = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -137,70 +138,194 @@ export function DoctorInsights({ doctorId }: { doctorId: string }) {
 }
 
 // ---- clinic / admin: patients overview ----------------------------------------------
-interface Seen { member_id: string; date: string; status: string; family_members: { name: string; mrn: string } | null }
+interface Seen {
+  id: string; member_id: string; date: string; slot_time: string; status: string;
+  doctors: { name: string } | null; family_members: { name: string; mrn: string } | null;
+}
+interface PatientAgg { memberId: string; name: string; mrn: string; visits: number; last: string; first: string }
+type Sec = null | 'patients' | 'returning' | 'visits' | 'mix' | 'months';
+
 export function PatientsOverview({ clinicId, onOpen }: { clinicId?: string; onOpen: (mrn: string) => void }) {
   const [rows, setRows] = useState<Seen[] | null>(null);
   const [q, setQ] = useState('');
+  const [sec, setSec] = useState<Sec>(null);
+  const [month, setMonth] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
   useEffect(() => {
-    let query = supabase.from('appointments').select('member_id, date, status, family_members(name, mrn)').order('date', { ascending: false }).limit(2000);
+    let query = supabase.from('appointments').select('id, member_id, date, slot_time, status, doctors(name), family_members(name, mrn)').order('date', { ascending: false }).limit(2000);
     if (clinicId) query = query.eq('clinic_id', clinicId);
     query.then(({ data }) => setRows((data ?? []) as unknown as Seen[]));
   }, [clinicId]);
 
-  const patients = useMemo(() => {
-    const m = new Map<string, { name: string; mrn: string; visits: number; last: string }>();
+  const patients = useMemo<PatientAgg[]>(() => {
+    const m = new Map<string, PatientAgg>();
     for (const r of rows ?? []) {
       if (!r.family_members) continue;
       const cur = m.get(r.member_id);
-      if (cur) cur.visits += 1;
-      else m.set(r.member_id, { name: r.family_members.name, mrn: r.family_members.mrn, visits: 1, last: r.date });
+      if (cur) { cur.visits += 1; cur.first = r.date; }
+      else m.set(r.member_id, { memberId: r.member_id, name: r.family_members.name, mrn: r.family_members.mrn, visits: 1, last: r.date, first: r.date });
     }
     return [...m.values()];
   }, [rows]);
 
   if (rows === null) return <p className="mt-4 text-sm text-slate-400"><Loading /></p>;
-  const returning = patients.filter((p) => p.visits > 1).length;
-  const list = patients.filter((p) => !q || `${p.name} ${p.mrn}`.toLowerCase().includes(q.toLowerCase()));
+  const returning = patients.filter((p) => p.visits > 1);
+  const fresh = patients.filter((p) => p.visits <= 1);
+  const matches = (p: PatientAgg) => !q || `${p.name} ${p.mrn}`.toLowerCase().includes(q.toLowerCase());
+
+  const patientCard = (p: PatientAgg, i: number) => (
+    <motion.button
+      key={p.memberId}
+      type="button"
+      onClick={() => onOpen(p.mrn)}
+      data-fx="own"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(i, 8) * 0.04 }}
+      whileHover={{ y: -2 }}
+      className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 text-left shadow-sm hover:shadow-lg"
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-pink-500 to-violet-500 text-white"><Users size={17} /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-bold text-slate-900">{p.name}</span>
+        <span className="block truncate font-mono text-[11px] text-slate-400">{p.mrn}</span>
+      </span>
+      <span className="text-right text-xs text-slate-500"><span className="block font-bold text-slate-800">{p.visits} visit{p.visits === 1 ? '' : 's'}</span>last {p.last}</span>
+    </motion.button>
+  );
+  const searchBox = (
+    <div className="mb-3 flex items-center gap-2 rounded-2xl border border-slate-100 bg-white px-3.5 py-3">
+      <Search size={16} className="text-slate-400" />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or MRN" className="w-full bg-transparent text-sm outline-none" />
+    </div>
+  );
+  const chips = [{ label: 'Patients', value: String(patients.length) }, { label: 'Returning', value: String(returning.length) }, { label: 'Visits', value: String(rows.length) }];
+  const back = () => { setSec(null); setQ(''); setMonth(null); setStatusFilter(null); };
+
+  // ---- the pages ----
+  if (sec === 'patients') {
+    const list = patients.filter(matches);
+    const top = [...patients].sort((a, b) => b.visits - a.visits).slice(0, 6).map((p) => ({ label: p.name, value: p.visits }));
+    return (
+      <div className="mt-5 space-y-4">
+        <Banner title="All patients" sub="Everyone who has booked here. Tap one to open their record." icon={Users} from="#6366f1" to="#38bdf8" onBack={back} chips={chips} />
+        <Panel title="Most visits"><Bars data={top} /></Panel>
+        {searchBox}
+        <div className="grid gap-2 md:grid-cols-2">{list.map((p, i) => patientCard(p, i))}{list.length === 0 && <p className="text-sm text-slate-400">No patients match.</p>}</div>
+      </div>
+    );
+  }
+  if (sec === 'returning') {
+    const list = returning.filter(matches).sort((a, b) => b.visits - a.visits);
+    return (
+      <div className="mt-5 space-y-4">
+        <Banner title="Returning patients" sub="People who have come back more than once." icon={Users} from="#10b981" to="#a3e635" onBack={back} chips={chips} />
+        {returning.length === 0 ? (
+          <Panel title="Nobody yet"><p className="text-sm text-slate-500">No patient has come back for a second visit so far. They will appear here as soon as one does.</p></Panel>
+        ) : (
+          <>
+            <Panel title="Visits per returning patient"><Bars data={list.slice(0, 8).map((p) => ({ label: p.name, value: p.visits }))} /></Panel>
+            {searchBox}
+            <div className="grid gap-2 md:grid-cols-2">{list.map((p, i) => patientCard(p, i))}</div>
+          </>
+        )}
+      </div>
+    );
+  }
+  if (sec === 'visits') {
+    const statusData = countBy(rows, (r) => r.status);
+    const shown = rows.filter((r) => !statusFilter || cap(r.status) === statusFilter).slice(0, 200);
+    return (
+      <div className="mt-5 space-y-4">
+        <Banner title="All visits" sub="Every booking, newest first." icon={Users} from="#0ea5e9" to="#6366f1" onBack={back} chips={chips} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Panel title="By outcome"><Donut data={statusData} centre="visits" size={116} /></Panel>
+          <Panel title="Per month" delay={0.08}><Columns color="#0ea5e9" data={perMonth(rows, (r) => r.date)} /></Panel>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[null, ...statusData.map((d) => d.label)].map((l) => (
+            <button key={l ?? 'all'} type="button" data-fx="own" onClick={() => setStatusFilter(l)} className={`cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${statusFilter === l ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-slate-400'}`}>{l ?? 'All'}</button>
+          ))}
+        </div>
+        <div className="space-y-2">
+          {shown.map((r, i) => (
+            <motion.button key={r.id} type="button" data-fx="own" onClick={() => r.family_members && onOpen(r.family_members.mrn)} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: Math.min(i, 10) * 0.03 }} className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 text-left hover:shadow-md">
+              <span className="w-24 shrink-0 text-xs font-bold text-indigo-600">{r.date}<span className="block font-normal text-slate-400">{r.slot_time.slice(0, 5)}</span></span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-900">{r.family_members?.name ?? 'Patient'}</span><span className="block truncate text-xs text-slate-500">{r.doctors?.name ?? 'Doctor'}</span></span>
+              <StatusPill label={cap(r.status)} tone={r.status === 'completed' ? 'live' : ['cancelled', 'rejected'].includes(r.status) ? 'danger' : r.status === 'booked' ? 'warning' : 'neutral'} />
+            </motion.button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (sec === 'mix') {
+    return (
+      <div className="mt-5 space-y-4">
+        <Banner title="New and returning" sub="First-time patients next to the ones who came back." icon={Users} from="#6366f1" to="#10b981" onBack={back} chips={chips} />
+        <Panel title="The split"><Donut size={160} centre="patients" data={[{ label: 'New', value: fresh.length, color: '#6366f1' }, { label: 'Returning', value: returning.length, color: '#10b981' }]} /></Panel>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div><p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-600">New ({fresh.length})</p><div className="space-y-2">{fresh.map((p, i) => patientCard(p, i))}{fresh.length === 0 && <p className="text-sm text-slate-400">None.</p>}</div></div>
+          <div><p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-600">Returning ({returning.length})</p><div className="space-y-2">{returning.map((p, i) => patientCard(p, i))}{returning.length === 0 && <p className="text-sm text-slate-400">None yet.</p>}</div></div>
+        </div>
+      </div>
+    );
+  }
+  if (sec === 'months') {
+    const months = monthsBack(12);
+    const sel = month ?? [...months].reverse().find((m) => rows.some((r) => r.date.startsWith(m.key)))?.key ?? months[months.length - 1].key;
+    const inMonth = rows.filter((r) => r.date.startsWith(sel));
+    return (
+      <div className="mt-5 space-y-4">
+        <Banner title="Visits by month" sub="Pick a month to see who came in." icon={Users} from="#0ea5e9" to="#14b8a6" onBack={back} chips={chips} />
+        <Panel title="Last 12 months"><Columns color="#0ea5e9" data={months.map((m) => ({ label: m.label, value: rows.filter((r) => r.date.startsWith(m.key)).length }))} /></Panel>
+        <div className="flex flex-wrap gap-2">
+          {months.map((m) => (
+            <button key={m.key} type="button" data-fx="own" onClick={() => setMonth(m.key)} className={`cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${sel === m.key ? 'bg-sky-600 text-white shadow-lg' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-slate-400'}`}>{m.label} · {rows.filter((r) => r.date.startsWith(m.key)).length}</button>
+          ))}
+        </div>
+        {inMonth.length === 0 ? <p className="text-sm text-slate-500">No visits in this month.</p> : (
+          <>
+            <Panel title="Outcomes that month"><Donut data={countBy(inMonth, (r) => r.status)} centre="visits" size={116} /></Panel>
+            <div className="space-y-2">
+              {inMonth.map((r, i) => (
+                <motion.button key={r.id} type="button" data-fx="own" onClick={() => r.family_members && onOpen(r.family_members.mrn)} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: Math.min(i, 10) * 0.03 }} className="flex w-full cursor-pointer items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 text-left hover:shadow-md">
+                  <span className="w-24 shrink-0 text-xs font-bold text-sky-600">{r.date}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{r.family_members?.name ?? 'Patient'}</span>
+                  <StatusPill label={cap(r.status)} tone={r.status === 'completed' ? 'live' : ['cancelled', 'rejected'].includes(r.status) ? 'danger' : 'neutral'} />
+                </motion.button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ---- the overview ----
+  const tiles: [string, number, Sec, string][] = [
+    ['Patients', patients.length, 'patients', 'from-indigo-500 to-sky-500'],
+    ['Returning', returning.length, 'returning', 'from-emerald-500 to-lime-400'],
+    ['Visits', rows.length, 'visits', 'from-sky-500 to-violet-500'],
+  ];
   return (
     <div className="mt-5">
       <div className="mb-3 grid grid-cols-3 gap-2">
-        {[['Patients', patients.length], ['Returning', returning], ['Visits', rows.length]].map(([l, v], i) => (
-          <motion.div key={l} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }} className="rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-500 p-3 text-white shadow-lg">
+        {tiles.map(([l, v, to, grad], i) => (
+          <motion.button key={l} type="button" data-fx="own" onClick={() => setSec(to)} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }} whileHover={{ y: -4, scale: 1.03 }} whileTap={{ scale: 0.96 }} className={`cursor-pointer rounded-2xl bg-gradient-to-br ${grad} p-3 text-left text-white shadow-lg hover:shadow-xl`}>
             <p className="text-[10px] uppercase tracking-wide text-white/75">{l}</p>
             <p className="font-display text-xl font-extrabold">{v}</p>
-          </motion.div>
+          </motion.button>
         ))}
       </div>
       <Grid>
-        <Panel title="New and returning"><Donut data={[{ label: 'New', value: patients.length - returning, color: '#6366f1' }, { label: 'Returning', value: returning, color: '#10b981' }]} centre="patients" size={116} /></Panel>
-        <Panel title="Visits per month" delay={0.08}><Columns color="#0ea5e9" data={perMonth(rows, (r) => r.date)} /></Panel>
+        <Panel title="New and returning" onOpen={() => setSec('mix')} accent="#6366f1"><Donut data={[{ label: 'New', value: fresh.length, color: '#6366f1' }, { label: 'Returning', value: returning.length, color: '#10b981' }]} centre="patients" size={116} /></Panel>
+        <Panel title="Visits per month" delay={0.08} onOpen={() => setSec('months')} accent="#0ea5e9"><Columns color="#0ea5e9" data={perMonth(rows, (r) => r.date)} /></Panel>
       </Grid>
-      <div className="mb-2 flex items-center gap-2 rounded-2xl border border-slate-100 bg-white px-3.5 py-3">
-        <Search size={16} className="text-slate-400" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter patients you have seen" className="w-full bg-transparent text-sm outline-none" />
-      </div>
+      {searchBox}
       <div className="grid gap-2 md:grid-cols-2">
-        {list.slice(0, 40).map((p, i) => (
-          <motion.button
-            key={p.mrn}
-            type="button"
-            onClick={() => onOpen(p.mrn)}
-            data-fx="own"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: Math.min(i, 8) * 0.04 }}
-            whileHover={{ y: -2 }}
-            className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 text-left shadow-sm hover:shadow-lg"
-          >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-pink-500 to-violet-500 text-white"><Users size={17} /></span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-bold text-slate-900">{p.name}</span>
-              <span className="block truncate font-mono text-[11px] text-slate-400">{p.mrn}</span>
-            </span>
-            <span className="text-right text-xs text-slate-500"><span className="block font-bold text-slate-800">{p.visits} visit{p.visits === 1 ? '' : 's'}</span>last {p.last}</span>
-          </motion.button>
-        ))}
-        {list.length === 0 && <p className="text-sm text-slate-400">No patients match.</p>}
+        {patients.filter(matches).slice(0, 40).map((p, i) => patientCard(p, i))}
+        {patients.filter(matches).length === 0 && <p className="text-sm text-slate-400">No patients match.</p>}
       </div>
     </div>
   );
