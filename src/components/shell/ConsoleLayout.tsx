@@ -89,7 +89,7 @@ export default function ConsoleLayout<T extends string>({
         </HeroBand>
 
         <div className="px-4">
-          {active && <p className="mt-6 hidden text-[10.5px] font-medium uppercase tracking-[0.14em] text-slate-500 lg:block">{active.label}</p>}
+          {active && <p className="mt-5 text-[10.5px] font-medium uppercase tracking-[0.14em] text-slate-500 lg:mt-6">{active.label}</p>}
           <motion.div
             key={`${value}-${tick}`}
             className="min-h-[60vh]"
