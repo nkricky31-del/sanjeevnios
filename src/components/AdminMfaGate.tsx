@@ -17,7 +17,19 @@ type Phase =
   | { kind: 'enroll'; factorId: string; qr: string; secret: string }
   | { kind: 'error'; message: string };
 
+// Currently OFF. The two-step screen only runs when the build has
+// VITE_REQUIRE_ADMIN_MFA=true (set it in Vercel > Settings > Environment
+// Variables, then redeploy). To enforce it in the database as well:
+//   update guard.settings set value = 'on' where key = 'mfa_required_admin';
+// Break-glass access (migration 78) needs the authenticator step either way.
+const REQUIRE_ADMIN_MFA = import.meta.env.VITE_REQUIRE_ADMIN_MFA === 'true';
+
 export default function AdminMfaGate({ children }: { children: ReactNode }) {
+  if (!REQUIRE_ADMIN_MFA) return <>{children}</>;
+  return <MfaGateInner>{children}</MfaGateInner>;
+}
+
+function MfaGateInner({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
