@@ -1,6 +1,7 @@
 import { Search, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { supabase } from '../lib/supabaseClient';
 import { monthsBack, Panel } from './AdminDrill';
@@ -296,16 +297,33 @@ export function PatientHistory({ memberId, clinicId }: { memberId: string; clini
 
 // ---- patient: home ---------------------------------------------------------------------
 export function HomeCharts({ rows }: { rows: { date: string; status: string }[] }) {
+  const navigate = useNavigate();
   if (rows.length === 0) return null;
   const done = rows.filter((r) => r.status === 'completed').length;
+  const tiles: [string, number, string, string][] = [
+    ['Visits', rows.length, '/bookings', 'from-indigo-500 to-sky-500'],
+    ['Completed', done, '/bookings?tab=completed', 'from-emerald-500 to-teal-500'],
+    ['This year', rows.filter((r) => r.date.startsWith(String(new Date().getFullYear()))).length, '/bookings', 'from-pink-500 to-violet-500'],
+  ];
   return (
     <div className="mt-6">
       <div className="mb-3 grid grid-cols-3 gap-2">
-        {[['Visits', rows.length], ['Completed', done], ['This year', rows.filter((r) => r.date.startsWith(String(new Date().getFullYear()))).length]].map(([l, v], i) => (
-          <motion.div key={l} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }} className="rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-500 p-3 text-white shadow-lg">
+        {tiles.map(([l, v, to, grad], i) => (
+          <motion.button
+            key={l}
+            type="button"
+            onClick={() => navigate(to)}
+            data-fx="own"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.07 }}
+            whileHover={{ y: -4, scale: 1.03 }}
+            whileTap={{ scale: 0.96 }}
+            className={`cursor-pointer rounded-2xl bg-gradient-to-br ${grad} p-3 text-left text-white shadow-lg transition-shadow hover:shadow-xl`}
+          >
             <p className="text-[10px] uppercase tracking-wide text-white/75">{l}</p>
             <p className="font-display text-xl font-extrabold">{v}</p>
-          </motion.div>
+          </motion.button>
         ))}
       </div>
       <Panel title="Your visits per month"><Columns color="#6366f1" data={perMonth(rows, (r) => r.date)} /></Panel>

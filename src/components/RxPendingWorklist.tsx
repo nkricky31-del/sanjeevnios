@@ -2,7 +2,6 @@ import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
-import Button from './ui/Button';
 import Card from './ui/Card';
 import StatusPill from './ui/StatusPill';
 
@@ -78,7 +77,7 @@ export default function RxPendingWorklist({ doctorId, onOpen }: Props) {
         {loading && <p className="text-sm text-slate-400"><Loading /></p>}
         {!loading && rows.length === 0 && <p className="text-sm text-slate-400">Nothing pending.</p>}
         {rows.map((r) => (
-          <Card key={r.visitId}>
+          <Card key={r.visitId} onOpen={() => onOpen(r.appointmentId, r.patientName)} accent="#f59e0b">
             <div className="flex items-center justify-between">
               <p className="font-semibold text-slate-900">
                 {r.tokenNo ? `#${r.tokenNo} — ` : ''}
@@ -89,9 +88,6 @@ export default function RxPendingWorklist({ doctorId, onOpen }: Props) {
             <p className="text-sm text-slate-500">
               {r.date} at {r.slotTime?.slice(0, 5)}
             </p>
-            <Button className="mt-2" onClick={() => onOpen(r.appointmentId, r.patientName)}>
-              Open visit
-            </Button>
           </Card>
         ))}
       </div>

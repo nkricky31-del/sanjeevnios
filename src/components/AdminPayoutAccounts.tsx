@@ -197,45 +197,8 @@ export default function AdminPayoutAccounts() {
     }
   };
 
-  if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
-
-  return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-slate-900">Payout accounts</h2>
-        <button onClick={load} className="text-sm font-medium text-brand-600">
-          Refresh
-        </button>
-      </div>
-      <p className="mt-1 text-xs text-slate-400">
-        Sets up each clinic's Razorpay Route linked account, so released settlements (see Settlements) transfer
-        automatically instead of needing a manual bank payment. KYC and bank details are sent straight to Razorpay -
-        nothing here is stored in our own database beyond the resulting account id and status.
-      </p>
-
-      {note && <p className="mt-2 text-sm font-semibold text-emerald-600">{note}</p>}
-
-      {loading && <p className="mt-3 text-sm text-slate-400"><Loading /></p>}
-
-      <div className="mt-3 space-y-3">
-        {clinics.map((c) => {
-          const icon = c.razorpay_account_status === 'activated' ? CheckCircle2 : c.razorpay_account_status === 'needs_clarification' || c.razorpay_account_status === 'suspended' ? ShieldAlert : c.razorpay_account_status === 'not_started' ? Banknote : Clock;
-          return (
-            <Card key={c.id} onOpen={() => setDrill({ kind: 'payout', clinicId: c.id })} accent={c.razorpay_account_status === 'activated' ? '#10b981' : '#0ea5e9'}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <IconTile icon={icon} size="sm" tone={c.razorpay_account_status === 'activated' ? 'emerald' : c.razorpay_account_status === 'needs_clarification' || c.razorpay_account_status === 'suspended' ? 'pink' : 'slate'} />
-                  <p className="truncate font-bold text-slate-900">{c.name}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <StatusPill label={STATUS_LABEL[c.razorpay_account_status]} tone={STATUS_TONE[c.razorpay_account_status]} />
-                </div>
-              </div>
-              {c.razorpay_fund_account_id && (
-                <p className="mt-1 truncate font-mono text-[11px] text-slate-400">account: {c.razorpay_fund_account_id}</p>
-              )}
-              {c.razorpay_account_note && <p className="mt-1 text-xs text-red-600">{c.razorpay_account_note}</p>}
-
+  const renderSetup = (c: ClinicRow) => (
+    <>
               {c.razorpay_account_status !== 'activated' && (
                 <div className="mt-2 flex gap-2">
                   <Button variant="secondary" onClick={() => openForm(c)}>
@@ -290,6 +253,63 @@ export default function AdminPayoutAccounts() {
                   </div>
                 </div>
               )}
+    </>
+  );
+
+  if (drill) {
+    const sel = drill.kind === 'payout' ? clinics.find((c) => c.id === drill.clinicId) : null;
+    return (
+      <div>
+        <AdminDrill view={drill} onChange={setDrill} onClose={() => { setDrill(null); setOpenFor(null); }} />
+        {sel && (
+          <Card className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Payout account setup</p>
+            {sel.razorpay_account_status === 'activated' && <p className="mt-2 text-sm text-emerald-700">This clinic's payout account is active. Nothing to set up.</p>}
+            {note && <p className="mt-2 text-sm font-semibold text-emerald-600">{note}</p>}
+            {renderSetup(sel)}
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-slate-900">Payout accounts</h2>
+        <button onClick={load} className="text-sm font-medium text-brand-600">
+          Refresh
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        Sets up each clinic's Razorpay Route linked account, so released settlements (see Settlements) transfer
+        automatically instead of needing a manual bank payment. KYC and bank details are sent straight to Razorpay -
+        nothing here is stored in our own database beyond the resulting account id and status.
+      </p>
+
+      {note && <p className="mt-2 text-sm font-semibold text-emerald-600">{note}</p>}
+
+      {loading && <p className="mt-3 text-sm text-slate-400"><Loading /></p>}
+
+      <div className="mt-3 space-y-3">
+        {clinics.map((c) => {
+          const icon = c.razorpay_account_status === 'activated' ? CheckCircle2 : c.razorpay_account_status === 'needs_clarification' || c.razorpay_account_status === 'suspended' ? ShieldAlert : c.razorpay_account_status === 'not_started' ? Banknote : Clock;
+          return (
+            <Card key={c.id} onOpen={() => setDrill({ kind: 'payout', clinicId: c.id })} accent={c.razorpay_account_status === 'activated' ? '#10b981' : '#0ea5e9'}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <IconTile icon={icon} size="sm" tone={c.razorpay_account_status === 'activated' ? 'emerald' : c.razorpay_account_status === 'needs_clarification' || c.razorpay_account_status === 'suspended' ? 'pink' : 'slate'} />
+                  <p className="truncate font-bold text-slate-900">{c.name}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusPill label={STATUS_LABEL[c.razorpay_account_status]} tone={STATUS_TONE[c.razorpay_account_status]} />
+                </div>
+              </div>
+              {c.razorpay_fund_account_id && (
+                <p className="mt-1 truncate font-mono text-[11px] text-slate-400">account: {c.razorpay_fund_account_id}</p>
+              )}
+              {c.razorpay_account_note && <p className="mt-1 text-xs text-red-600">{c.razorpay_account_note}</p>}
+
             </Card>
           );
         })}

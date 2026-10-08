@@ -1,4 +1,5 @@
 import Present from '../components/ui/Present';
+import Toggle from '../components/ui/Toggle';
 import { DoctorInsights } from '../components/Insights';
 import Loading from '../components/ui/Loading';
 import { useEffect, useState } from 'react';
@@ -47,8 +48,7 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [expandedDoctorId, setExpandedDoctorId] = useState<string | null>(null);
-  const [insightsFor, setInsightsFor] = useState<string | null>(null);
+  const [openDoctorId, setOpenDoctorId] = useState<string | null>(null);
   const [onboardingDoctor, setOnboardingDoctor] = useState<{ id: string; name: string } | null>(null);
   const [clinicDocuments, setClinicDocuments] = useState<DocumentRow[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -150,6 +150,40 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
     onClinicSaved({ status: 'pending' });
   };
 
+  const openDoc = doctors.find((d) => d.id === openDoctorId);
+  if (openDoc) {
+    return (
+      <div>
+        <button type="button" onClick={() => setOpenDoctorId(null)} className="mb-3 text-sm font-semibold text-brand-600">← All doctors</button>
+        <div className="relative overflow-hidden rounded-3xl p-5 text-white" style={{ background: 'var(--band-bg)' }}>
+          <span aria-hidden className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/15" />
+          <p className="relative font-display text-2xl font-bold">{openDoc.name}</p>
+          <p className="relative text-sm text-white/80">{openDoc.specialty ?? 'General'} · Reg. {openDoc.reg_no ?? '-'} · ₹{openDoc.consultation_fee} / visit</p>
+          <div className="relative mt-3 flex flex-wrap gap-2">
+            <StatusPill label={STATUS_LABEL[openDoc.status]} tone={STATUS_TONE[openDoc.status]} />
+            {openDoc.status === 'approved' && !openDoc.is_active && <StatusPill label="Inactive" tone="neutral" />}
+          </div>
+        </div>
+        {openDoc.status === 'rejected' && openDoc.reject_reason && <p className="mt-3 rounded-2xl bg-red-50 p-3 text-sm text-red-700">Reason: {openDoc.reject_reason}</p>}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => setOnboardingDoctor({ id: openDoc.id, name: openDoc.name })}>
+            {openDoc.status === 'draft' ? 'Continue onboarding' : 'View onboarding'}
+          </Button>
+          {openDoc.status === 'approved' && (
+            <Toggle checked={openDoc.is_active} onChange={() => toggleDoctorActive(openDoc)} label="Working at this clinic" onLabel="At clinic" offLabel="Removed" disabled={togglingActiveFor === openDoc.id} />
+          )}
+        </div>
+        {openDoc.status === 'approved' && !openDoc.is_active && (
+          <p className="mt-2 text-xs text-slate-400">No longer counted toward your plan or shown in patient search. Won't lower your bill until your next billing cycle.</p>
+        )}
+        <p className="mb-1 mt-5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Statistics</p>
+        <DoctorInsights doctorId={openDoc.id} />
+        <p className="mb-1 mt-5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Weekly availability</p>
+        <DoctorAvailabilityForm doctorId={openDoc.id} />
+      </div>
+    );
+  }
+
   return (
     <div>
       <ClinicOnboardingScreen clinic={clinic} onClinicSaved={onClinicSaved} onDocumentsChanged={loadClinicDocuments} />
@@ -184,7 +218,7 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
           <p className="text-sm text-slate-400">No doctors added yet. Add another doctor to continue.</p>
         )}
         {doctors.map((d) => (
-          <Card key={d.id}>
+          <Card key={d.id} onOpen={() => setOpenDoctorId(d.id)} accent={d.status === 'approved' ? '#10b981' : d.status === 'rejected' ? '#f43f5e' : '#f59e0b'}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-semibold text-slate-900">{d.name}</p>
@@ -202,35 +236,6 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
               </div>
             </div>
 
-            <div className="mt-2 flex flex-wrap gap-3">
-              <button
-                onClick={() => setOnboardingDoctor({ id: d.id, name: d.name })}
-                className="text-sm font-medium text-brand-600"
-              >
-                {d.status === 'draft' ? 'Continue onboarding' : 'View onboarding'}
-              </button>
-              <button
-                onClick={() => setExpandedDoctorId((prev) => (prev === d.id ? null : d.id))}
-                className="text-sm font-medium text-brand-600"
-              >
-                {expandedDoctorId === d.id ? 'Hide availability' : 'Manage availability'}
-              </button>
-              <button
-                onClick={() => setInsightsFor((prev) => (prev === d.id ? null : d.id))}
-                className="text-sm font-medium text-brand-600"
-              >
-                {insightsFor === d.id ? 'Hide stats' : 'View stats'}
-              </button>
-              {d.status === 'approved' && (
-                <button
-                  onClick={() => toggleDoctorActive(d)}
-                  disabled={togglingActiveFor === d.id}
-                  className={`text-sm font-medium ${d.is_active ? 'text-red-600' : 'text-emerald-600'}`}
-                >
-                  {togglingActiveFor === d.id ? 'Saving...' : d.is_active ? 'Remove from clinic' : 'Restore to clinic'}
-                </button>
-              )}
-            </div>
             {d.status === 'approved' && !d.is_active && (
               <p className="mt-1.5 text-xs text-slate-400">
                 No longer counted toward your plan or shown in patient search. Won't lower your bill until your next
@@ -238,8 +243,6 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
               </p>
             )}
 
-            {insightsFor === d.id && <DoctorInsights doctorId={d.id} />}
-            {expandedDoctorId === d.id && <DoctorAvailabilityForm doctorId={d.id} />}
           </Card>
         ))}
       </div>

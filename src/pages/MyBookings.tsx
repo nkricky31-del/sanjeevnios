@@ -3,7 +3,7 @@ import { BookingsCharts } from '../components/Insights';
 import { useStaggerIn } from '../lib/motionKit';
 import { Bell, CalendarDays, ChevronRight, Clock, MapPin } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import AppHeader from '../components/ui/AppHeader';
 import Card from '../components/ui/Card';
@@ -67,7 +67,8 @@ export default function MyBookings() {
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
   const [rows, setRows] = useState<Row[]>([]);
-  const [tab, setTab] = useState<Tab>('upcoming');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(['upcoming', 'completed', 'cancelled'].includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'upcoming');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

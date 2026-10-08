@@ -210,7 +210,7 @@ export default function Profile() {
 
       <div className="px-4 pb-6">
         {/* Identity card + stats */}
-        <Card className="!p-0">
+        <Card className="!p-0" onOpen={() => navigate('/profile/summary')} accent="#6366f1">
           <div className="flex items-center gap-3 p-4">
             <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-brand-100 text-2xl font-extrabold text-brand-700">
               {(profile.name ?? selfMember?.name ?? '?').charAt(0).toUpperCase()}

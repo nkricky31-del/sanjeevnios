@@ -31,6 +31,7 @@ import MyBookings from './pages/MyBookings';
 import PatientLogin from './pages/PatientLogin';
 import Payments from './pages/Payments';
 import Profile from './pages/Profile';
+import ProfileSummary from './pages/ProfileSummary';
 import Records from './pages/Records';
 import RecordsCategory from './pages/RecordsCategory';
 import Search from './pages/Search';
@@ -224,6 +225,7 @@ function AppContent() {
             {/* Kept so old links/bookmarks to the timeline still land somewhere. */}
             <Route path="/timeline" element={<Records />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/profile/summary" element={<ProfileSummary />} />
             {/* Role-aware guard's other half: a patient account typing a
                 clinic/admin-only URL (/admin, /board, /poster, or anything
                 else that isn't one of this role's own routes above) lands
