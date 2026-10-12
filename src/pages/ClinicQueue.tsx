@@ -319,7 +319,7 @@ export default function ClinicQueue() {
       return;
     }
 
-    if (a.family_members?.account_id) {
+    if (a.family_members?.account_id && a.family_members.account_id !== session?.user.id) {
       await notifyPatient({
         userId: a.family_members.account_id,
         appointmentId: a.id,
@@ -599,11 +599,9 @@ export default function ClinicQueue() {
                       appointment_only clinic only accepts a same-day walk-in once
                       it has opted into same-day booking (section 37) - otherwise
                       enforce_booking_policy would just refuse the insert. */}
-                  {(clinic.mode !== 'appointment_only' || clinic.same_day_booking_enabled) && (
-                    <Button variant="secondary" onClick={() => setWalkInOpen((s) => !s)}>
-                      {walkInOpen ? 'Cancel walk-in' : '+ Walk-in'}
-                    </Button>
-                  )}
+                  <Button variant="secondary" onClick={() => setWalkInOpen((s) => !s)}>
+                    {walkInOpen ? 'Cancel' : '+ Walk-in / Book'}
+                  </Button>
                   <Button variant="outline" onClick={() => navigate('/board')}>
                     <Monitor size={16} /> Token board
                   </Button>
@@ -619,6 +617,7 @@ export default function ClinicQueue() {
                     clinicId={clinic.id}
                     doctors={doctors}
                     defaultDoctorId={doctorId}
+                    walkInAllowed={clinic.mode !== 'appointment_only' || clinic.same_day_booking_enabled}
                     onAdded={() => {
                       loadAppointments();
                       setQueueVersion((v) => v + 1);
@@ -687,6 +686,7 @@ export default function ClinicQueue() {
           <div className="mt-4">
             <PublishDaySchedule
               clinic={clinic}
+              doctors={doctors}
               onClinicSaved={(patch) => setClinic((prev) => (prev ? { ...prev, ...patch } : prev))}
             />
           </div>

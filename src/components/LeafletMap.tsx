@@ -81,5 +81,5 @@ export default function LeafletMap({ lat, lng, zoom = 15, interactive = false, o
     mapRef.current.setView([lat, lng]);
   }, [lat, lng]);
 
-  return <div ref={containerRef} className={`w-full rounded-2xl ${heightClassName ?? DEFAULT_HEIGHT}`} />;
+  return <div ref={containerRef} className={`relative z-0 isolate w-full overflow-hidden rounded-2xl ${heightClassName ?? DEFAULT_HEIGHT}`} />;
 }

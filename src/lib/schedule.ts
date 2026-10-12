@@ -9,10 +9,11 @@ import type { DayScheduleRow } from './types';
 // anyone in and never touches token_number - see check_in_appointment() for
 // the actual arrival token, which is a separate thing entirely.
 
-export async function previewDaySchedule(clinicId: string, dateISO: string): Promise<DayScheduleRow[]> {
+export async function previewDaySchedule(clinicId: string, dateISO: string, doctorId: string | null = null): Promise<DayScheduleRow[]> {
   const { data, error } = await supabase.rpc('preview_day_schedule', {
     p_clinic_id: clinicId,
     p_date: dateISO,
+    p_doctor_id: doctorId,
   });
   if (error) return [];
   return (data ?? []) as DayScheduleRow[];
@@ -29,11 +30,13 @@ export interface PublishedRow {
 
 export async function publishDaySchedule(
   clinicId: string,
-  dateISO: string
+  dateISO: string,
+  doctorId: string | null = null
 ): Promise<{ rows: PublishedRow[] } | { error: string }> {
   const { data, error } = await supabase.rpc('publish_day_schedule', {
     p_clinic_id: clinicId,
     p_date: dateISO,
+    p_doctor_id: doctorId,
   });
   if (error) return { error: error.message };
   const rows = (
@@ -98,10 +101,12 @@ export async function addScheduleBreak(
   dateISO: string,
   beforeSeq: number,
   minutes: number,
-  label: string
+  label: string,
+  doctorId: string | null = null
 ): Promise<{ error?: string }> {
   const { error } = await supabase.from('clinic_schedule_breaks').insert({
     clinic_id: clinicId,
+    doctor_id: doctorId,
     date: dateISO,
     before_seq: beforeSeq,
     minutes,

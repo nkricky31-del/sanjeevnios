@@ -23,6 +23,7 @@ import SectionTitle from './ui/SectionTitle';
 
 interface Props {
   clinic: Clinic;
+  doctors: { id: string; name: string }[];
   onClinicSaved: (patch: Partial<Clinic>) => void;
 }
 
@@ -44,7 +45,12 @@ const STATUS_LABEL: Record<string, string> = {
 // never sets checked_in_at or token_number, so nothing here can ever make a
 // patient "present" - that still only happens at actual check-in (the
 // Today tab).
-export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
+export default function PublishDaySchedule({ clinic, doctors, onClinicSaved }: Props) {
+  // Each doctor has their own queue, so a schedule is previewed and published
+  // for one doctor at a time (migration_82).
+  const [pickedDoctorId, setDoctorId] = useState('');
+  const doctorId = pickedDoctorId || doctors[0]?.id || '';
+  const doctorName = doctors.find((d) => d.id === doctorId)?.name ?? 'this doctor';
   const [date, setDate] = useState(() => addDaysISO(todayISO(), 1));
   const [rows, setRows] = useState<DayScheduleRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,10 +74,10 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
 
   const loadPreview = useCallback(async () => {
     setLoading(true);
-    const previewRows = await previewDaySchedule(clinic.id, date);
+    const previewRows = doctorId ? await previewDaySchedule(clinic.id, date, doctorId) : [];
     setRows(previewRows);
     setLoading(false);
-  }, [clinic.id, date]);
+  }, [clinic.id, date, doctorId]);
 
   const loadBreaks = useCallback(async () => {
     const { data } = await supabase
@@ -79,9 +85,10 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
       .select('*')
       .eq('clinic_id', clinic.id)
       .eq('date', date)
+      .or(`doctor_id.is.null,doctor_id.eq.${doctorId}`)
       .order('before_seq', { ascending: true });
     setBreaks((data ?? []) as ScheduleBreak[]);
-  }, [clinic.id, date]);
+  }, [clinic.id, date, doctorId]);
 
   useEffect(() => {
     setPublished(null);
@@ -144,7 +151,7 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
       setError('Break length must be at least 1 minute.');
       return;
     }
-    const result = await addScheduleBreak(clinic.id, date, beforeSeqNum, minutesNum, breakLabel);
+    const result = await addScheduleBreak(clinic.id, date, beforeSeqNum, minutesNum, breakLabel, doctorId || null);
     if (result.error) {
       setError(result.error);
       return;
@@ -164,7 +171,7 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
     setError(null);
     setNote(null);
     setPublishing(true);
-    const result = await publishDaySchedule(clinic.id, date);
+    const result = await publishDaySchedule(clinic.id, date, doctorId || null);
     setPublishing(false);
     if ('error' in result) {
       setError(result.error);
@@ -203,6 +210,17 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
       </p>
 
       <Card className="mt-3">
+        <label className="text-xs font-bold text-slate-700">Doctor</label>
+        <select
+          value={doctorId}
+          onChange={(e) => setDoctorId(e.target.value)}
+          className="mt-1 mb-4 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        >
+          {doctors.length === 0 && <option value="">No doctors yet</option>}
+          {doctors.map((d) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </select>
         <label className="text-xs font-bold text-slate-700">Day to publish</label>
         <input
           type="date"
@@ -256,7 +274,7 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
         it.
       </p>
       <Card className="mt-2">
-        <div className="grid grid-cols-[1fr_1fr_2fr] gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_2fr] [&>input]:min-w-0">
           <input
             type="number"
             min={1}
@@ -278,7 +296,7 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
             placeholder="Label (optional)"
             value={breakLabel}
             onChange={(e) => setBreakLabel(e.target.value)}
-            className="rounded-xl border border-slate-200 px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+            className="col-span-2 rounded-xl sm:col-span-1 border border-slate-200 px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
         <Button variant="secondary" onClick={addBreak} className="mt-2">
@@ -306,7 +324,7 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
 
       {/* Preview / published order */}
       <SectionTitle className="mt-6" actionLabel="Refresh" onAction={loadPreview}>
-        {published ? 'Published order' : 'Preview'} ({(published ?? rows).length})
+        {published ? 'Published order' : 'Preview'} — {doctorName} ({(published ?? rows).length})
       </SectionTitle>
       <p className="mt-0.5 text-xs text-slate-400">
         {published
@@ -408,7 +426,7 @@ export default function PublishDaySchedule({ clinic, onClinicSaved }: Props) {
       {!published && rows.length > 0 && (
         <Button full onClick={publish} disabled={publishing} className="mt-4">
           <Send size={16} />{' '}
-          {publishing ? 'Publishing...' : `Publish ${rows.length} patient${rows.length === 1 ? '' : 's'}`}
+          {publishing ? 'Publishing...' : `Publish ${rows.length} patient${rows.length === 1 ? '' : 's'} for ${doctorName}`}
         </Button>
       )}
 

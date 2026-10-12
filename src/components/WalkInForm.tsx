@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { getDayAvailability, isFullDayError, isSlotFullError, joinWaitlist, type DayAvailability } from '../lib/bookingPolicy';
 import { addDaysISO, dobFromAge, isMinorDob, todayISO } from '../lib/date';
 import { livePhoneDigits, normalizePhone } from '../lib/phone';
+import { appointmentConfirmedMessage, notifyPatient } from '../lib/notify';
 import { bookingReference, findNextBestSlot, findWalkInSlot } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { computeSlots, formatTimeLabel } from '../lib/time';
@@ -20,6 +21,8 @@ interface Props {
   clinicId: string;
   doctors: DoctorOption[];
   defaultDoctorId: string;
+  /** False for an appointment-only clinic with no same-day booking: only "Book appointment" is offered. */
+  walkInAllowed?: boolean;
   onAdded: () => void;
   onCancel: () => void;
 }
@@ -35,14 +38,16 @@ interface WaitlistOutcome {
 }
 
 interface AddedResult {
-  today: BookingOutcome | WaitlistOutcome;
+  today: BookingOutcome | WaitlistOutcome | null;
+  /** Whether the patient has their own app account that the confirmation could reach. */
+  notified: boolean;
   mrn: string;
   matchedExisting: boolean;
   future: (BookingOutcome & { date: string; slotTime: string }) | null;
 }
 
-function isWaitlistOutcome(o: BookingOutcome | WaitlistOutcome): o is WaitlistOutcome {
-  return 'place' in o;
+function isWaitlistOutcome(o: BookingOutcome | WaitlistOutcome | null): o is WaitlistOutcome {
+  return o !== null && 'place' in o;
 }
 
 // Runs the "insert booked -> accept -> record payment" sequence used for both
@@ -157,11 +162,16 @@ interface Availability {
   dayInfo: DayAvailability | null;
   hasWindows: boolean;
   slotTime: string | null;
+  /** Every slot today with whether it is still free - shown so the desk can see availability. */
+  slots: { time: string; free: boolean }[];
 }
 
-export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded, onCancel }: Props) {
+export default function WalkInForm({ clinicId, doctors, defaultDoctorId, walkInAllowed = true, onAdded, onCancel }: Props) {
   const { session } = useAuth();
   const [doctorId, setDoctorId] = useState(defaultDoctorId);
+  // 'walkin' = standing at the desk now; 'booking' = the clinic booking a slot
+  // for someone who phoned in (or any later date) on the patient's behalf.
+  const [mode, setMode] = useState<'walkin' | 'booking'>(walkInAllowed ? 'walkin' : 'booking');
   const [name, setName] = useState('');
   const [phoneDigits, setPhoneDigits] = useState('');
   const [mrn, setMrn] = useState('');
@@ -222,6 +232,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
       dayInfo,
       hasWindows: windows.length > 0,
       slotTime: dayInfo?.isFull ? null : findWalkInSlot(allSlots, taken, nowHHMMSS, grace),
+      slots: Array.from(new Set(allSlots)).map((t) => ({ time: t, free: !taken.has(t) && t >= nowHHMMSS })),
     });
     setAvailLoading(false);
   }, [doctorId, clinicId]);
@@ -245,8 +256,15 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
     setError(null);
     if (!session) return;
 
-    if (!name.trim() && !mrn.trim()) {
-      setError('Enter the patient name, or their MRN if they already have one.');
+    // A new patient must be registered with their name exactly as on their
+    // Aadhaar and a mobile number (that number is how they get their booking
+    // details and later log in). An existing patient picked by MRN needs neither.
+    if (!mrn.trim() && !name.trim()) {
+      setError('Enter the patient name as per Aadhaar, or their MRN if they already have one.');
+      return;
+    }
+    if (!mrn.trim() && !phoneDigits) {
+      setError('Mobile number is required to register a patient.');
       return;
     }
     if (!doctorId) {
@@ -265,7 +283,11 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
       setError("This patient is under 18 - confirm a parent/guardian is present and consents to this visit.");
       return;
     }
-    if (bookFuture && (!futureDate || !futureSlot)) {
+    if (mode === 'booking' && (!futureDate || !futureSlot)) {
+      setError('Pick a day and a time slot for the appointment.');
+      return;
+    }
+    if (mode === 'walkin' && bookFuture && (!futureDate || !futureSlot)) {
       setError('Pick a date and time for the future appointment, or uncheck "Also book a future appointment".');
       return;
     }
@@ -364,8 +386,11 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
       // try to book it - the insert re-checks both caps atomically, so a
       // slot that filled up in the meantime still comes back as a clean
       // refusal (SLOT_FULL/FULL_DAY) rather than a silent overbooking.
-      let today: BookingOutcome | WaitlistOutcome;
-      if (availability?.slotTime) {
+      let today: BookingOutcome | WaitlistOutcome | null = null;
+      if (mode === 'booking') {
+        // Booking on the patient's behalf: no walk-in handling at all - only the
+        // chosen slot below.
+      } else if (availability?.slotTime) {
         const bookedResult = await createAndAcceptAppointment({
           memberId,
           doctorId,
@@ -409,7 +434,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
       }
 
       let future: AddedResult['future'] = null;
-      if (bookFuture && futureDate && futureSlot) {
+      if ((mode === 'booking' || bookFuture) && futureDate && futureSlot) {
         // 'scheduled', not 'walk_in', and NOT checked in: this is a genuine
         // future slot, not someone standing at the desk right now. They'll
         // collect a token when they arrive on the day, like anyone else.
@@ -433,14 +458,39 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
               : `Today's visit was handled, but the future appointment could not be booked: ${futureResult.error}`
           );
           setSaving(false);
-          setResult({ today, mrn: patientMrn, matchedExisting, future: null });
+          setResult({ today, notified: false, mrn: patientMrn, matchedExisting, future: null });
           return;
         }
         future = { ...futureResult, date: futureDate, slotTime: futureSlot };
       }
 
+      // Send the booking details to the patient - in-app notice plus WhatsApp
+      // when configured (see lib/notify.ts). Only possible when the patient
+      // already has their own app account: a brand-new walk-in is stored under
+      // the clinic's account until they sign in with this phone number, so
+      // there's nobody to message yet.
+      let notified = false;
+      const bookedId = future?.bookingId ?? (today && !isWaitlistOutcome(today) ? today.bookingId : null);
+      const bookedSlot = future?.slotTime ?? availability?.slotTime ?? null;
+      if (bookedId && bookedSlot) {
+        const { data: owner } = await supabase.from('family_members').select('account_id').eq('id', memberId).maybeSingle();
+        const accountId = (owner as { account_id: string } | null)?.account_id;
+        if (accountId && accountId !== session.user.id) {
+          const { data: clinicRow } = await supabase.from('clinics').select('report_before_minutes').eq('id', clinicId).maybeSingle();
+          const bookedDate = future?.date ?? todayISO();
+          const base = appointmentConfirmedMessage(bookedSlot, bookingReference(bookedId), 'pay_at_clinic', (clinicRow as { report_before_minutes: number } | null)?.report_before_minutes ?? 30);
+          await notifyPatient({
+            userId: accountId,
+            appointmentId: bookedId,
+            type: 'appointment_confirmed',
+            message: `${doctor?.name ?? 'Your doctor'} on ${bookedDate}: ${base}`,
+          });
+          notified = true;
+        }
+      }
+
       setSaving(false);
-      setResult({ today, mrn: patientMrn, matchedExisting, future });
+      setResult({ today, notified, mrn: patientMrn, matchedExisting, future });
       onAdded();
     } catch (err) {
       // Anything that THROWS rather than resolving to {error} - a network
@@ -464,7 +514,9 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
           todayWaitlisted ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
         }`}
       >
-        {isWaitlistOutcome(today) ? (
+        {today === null ? (
+          <p className="font-semibold">Appointment booked for {doctorName} on the patient's behalf.</p>
+        ) : isWaitlistOutcome(today) ? (
           <>
             <p className="font-semibold">No slot was free for {doctorName} today - added to the waitlist instead.</p>
             <p className="mt-2 text-center text-3xl font-extrabold text-amber-700">#{today.place}</p>
@@ -495,6 +547,13 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
             {bookingReference(result.future.bookingId)}. They'll get a token when they arrive that day.
           </p>
         )}
+        <p className="mt-1">
+          {result.notified
+            ? 'Booking details sent to the patient by app notification (and WhatsApp where enabled).'
+            : phoneDigits
+              ? `No app account for +91${phoneDigits} yet - tell them their booking reference; the booking appears when they sign in with this number.`
+              : ''}
+        </p>
         {phoneDigits && (
           <p className="mt-1 opacity-80">
             This patient can log in later with +91{phoneDigits} to see this visit and any history from other visits.
@@ -518,6 +577,29 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
 
   return (
     <form onSubmit={submit} className="mt-3 space-y-3 rounded-xl border border-slate-200 p-4">
+      <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="Booking type">
+        {([['walkin', 'Walk-in now'], ['booking', 'Book appointment']] as const).map(([v, label]) => (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={mode === v}
+            disabled={v === 'walkin' && !walkInAllowed}
+            onClick={() => { setMode(v); setError(null); }}
+            className={`rounded-2xl border px-3 py-2.5 text-sm font-semibold ${
+              mode === v ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500'
+            } disabled:cursor-not-allowed disabled:opacity-40`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {mode === 'booking' && (
+        <p className="text-xs text-slate-500">
+          For a patient who phones the clinic or asks for a later day: pick a free slot below. They are sent their
+          booking details and arrive and check in like any other appointment.
+        </p>
+      )}
       <div>
         <label className="text-sm font-medium text-slate-700">Doctor</label>
         <select
@@ -535,7 +617,7 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
 
       {/* Availability, checked fresh for this doctor before anything else -
           see loadAvailability() above and schema.sql section 38. */}
-      {availLoading ? (
+      {mode === 'booking' ? null : availLoading ? (
         <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">Checking availability for this doctor...</p>
       ) : slotFree ? (
         <p className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-700">
@@ -574,25 +656,50 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         </div>
       )}
 
+      {mode === 'walkin' && !availLoading && availability && availability.slots.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Today's slots</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {availability.slots.map((sl) => (
+              <span
+                key={sl.time}
+                className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                  sl.time === availability.slotTime
+                    ? 'bg-emerald-600 text-white'
+                    : sl.free
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'bg-slate-100 text-slate-400 line-through'
+                }`}
+              >
+                {formatTimeLabel(sl.time)}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-slate-400">Green = free, struck through = booked or past. The darker one is where this patient will be seated.</p>
+        </div>
+      )}
+
       <div>
-        <label className="text-sm font-medium text-slate-700">Patient name</label>
+        <label className="text-sm font-medium text-slate-700">Patient name (as per Aadhaar)</label>
         <input
           type="text"
+          required={!mrn.trim()}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Walk-in patient's name"
+          placeholder="Full name exactly as on Aadhaar"
           className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-sm font-medium text-slate-700">Mobile number (optional)</label>
+          <label className="text-sm font-medium text-slate-700">Mobile number{mrn.trim() ? ' (optional)' : ' *'}</label>
           <div className="mt-1 flex items-center rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-brand-500">
             <span className="pl-3 text-sm text-slate-500">+91</span>
             <input
               type="tel"
               inputMode="numeric"
+              required={!mrn.trim()}
               maxLength={15}
               value={phoneDigits}
               onChange={(e) => setPhoneDigits(livePhoneDigits(e.target.value))}
@@ -644,7 +751,27 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         />
       </div>
 
-      {slotFree && (
+      {mode === 'booking' && doctorId && (
+        <div>
+          <SlotPicker
+            doctorId={doctorId}
+            clinicId={clinicId}
+            selectedDate={futureDate}
+            selectedSlot={futureSlot}
+            onSelect={(d, sl) => {
+              setFutureDate(d);
+              setFutureSlot(sl);
+            }}
+          />
+          {futureDate && futureSlot && (
+            <p className="mt-2 text-xs font-semibold text-emerald-700">
+              Selected: {futureDate} at {formatTimeLabel(futureSlot)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {mode === 'walkin' && slotFree && (
         <div>
           <label className="text-sm font-medium text-slate-700">Collect payment now</label>
           <div className="mt-1.5 flex gap-2">
@@ -715,13 +842,13 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
         </label>
       )}
 
-      <p className="text-xs text-slate-400">
+      {mode === 'walkin' && <p className="text-xs text-slate-400">
         {slotFree
           ? 'Added directly to today\'s queue and checked in immediately.'
           : "No slot is free right now - added to today's waitlist instead. Payment is collected only once a slot opens up and they're actually seen."}
-      </p>
+      </p>}
 
-      <div className="rounded-lg border border-slate-200 p-3">
+      {mode === 'walkin' && <div className="rounded-lg border border-slate-200 p-3">
         <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
           <input type="checkbox" checked={bookFuture} onChange={(e) => setBookFuture(e.target.checked)} />
           Also book a future appointment for this patient
@@ -740,16 +867,16 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, onAdded
             />
           </div>
         )}
-      </div>
+      </div>}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button
           type="submit"
-          disabled={saving || availLoading}
+          disabled={saving || (mode === 'walkin' && availLoading)}
           className="rounded-2xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
         >
-          {saving ? 'Adding...' : slotFree ? 'Add to queue' : 'Add to waitlist'}
+          {saving ? 'Adding...' : mode === 'booking' ? 'Book appointment' : slotFree ? 'Add to queue' : 'Add to waitlist'}
         </button>
         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-500">
           Cancel
