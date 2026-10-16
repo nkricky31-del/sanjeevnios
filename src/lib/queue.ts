@@ -65,7 +65,11 @@ export function findWalkInSlot(allSlots: string[], takenSlots: Set<string>, nowH
     const s = allSlots[i];
     if (takenSlots.has(s)) continue;
     const start = timeToMinutes(s);
-    if (start > nowMin) return s; // hasn't started yet - soonest open slot ahead
+    // Hasn't started yet - the soonest open slot ahead, but only if check-in has
+    // opened for it (60 minutes before). A walk-in is checked in on the spot, so
+    // a slot hours away (e.g. the desk opened early) can't be used - it would be
+    // booked and then refused at check-in as "too early".
+    if (start > nowMin) return start - nowMin <= 60 ? s : null;
     const gap =
       i + 1 < allSlots.length
         ? timeToMinutes(allSlots[i + 1]) - start

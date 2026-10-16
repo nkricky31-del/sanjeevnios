@@ -452,6 +452,17 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, walkInA
         if ('error' in futureResult) {
           // Today's outcome is already settled at this point - don't lose
           // that, just report the future booking failed.
+          if (mode === 'booking') {
+            // Nothing else happened in this flow, so this is a plain failure -
+            // stay on the form (keeping what was typed) instead of a success screen.
+            setError(
+              isSlotFullError(futureResult.error)
+                ? 'That time was just taken - pick another slot.'
+                : `Could not book the appointment: ${futureResult.error.replace(/^[A-Z_]{5,}:\s*/, '')}`
+            );
+            setSaving(false);
+            return;
+          }
           setError(
             isSlotFullError(futureResult.error)
               ? "Today's visit was handled, but that future time just filled up - open Add walk-in again and pick another slot."
@@ -473,8 +484,11 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, walkInA
       const bookedId = future?.bookingId ?? (today && !isWaitlistOutcome(today) ? today.bookingId : null);
       const bookedSlot = future?.slotTime ?? availability?.slotTime ?? null;
       if (bookedId && bookedSlot) {
-        const { data: owner } = await supabase.from('family_members').select('account_id').eq('id', memberId).maybeSingle();
-        const accountId = (owner as { account_id: string } | null)?.account_id;
+        // The clinic can't read family_members directly (migration 68) - the
+        // front-desk contact lookup is the permitted way to find who owns the
+        // record, and works now that this clinic has an appointment for them.
+        const { data: owner } = await supabase.rpc('get_patient_contacts', { p_ids: [memberId] });
+        const accountId = ((owner ?? []) as { account_id: string }[])[0]?.account_id;
         if (accountId && accountId !== session.user.id) {
           const { data: clinicRow } = await supabase.from('clinics').select('report_before_minutes').eq('id', clinicId).maybeSingle();
           const bookedDate = future?.date ?? todayISO();
@@ -547,13 +561,13 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, walkInA
             {bookingReference(result.future.bookingId)}. They'll get a token when they arrive that day.
           </p>
         )}
-        <p className="mt-1">
+        {(!todayWaitlisted || result.future) && <p className="mt-1">
           {result.notified
             ? 'Booking details sent to the patient by app notification (and WhatsApp where enabled).'
             : phoneDigits
               ? `No app account for +91${phoneDigits} yet - tell them their booking reference; the booking appears when they sign in with this number.`
               : ''}
-        </p>
+        </p>}
         {phoneDigits && (
           <p className="mt-1 opacity-80">
             This patient can log in later with +91{phoneDigits} to see this visit and any history from other visits.
