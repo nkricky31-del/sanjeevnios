@@ -193,6 +193,10 @@ export interface Clinic {
   verified_by: string | null;
   // Arrival settings - see schema.sql sections 27, 28 and 29.
   checkin_grace_minutes: number;
+  // How long before the slot check-in opens (migration 84, default 60).
+  checkin_open_before_minutes: number;
+  // Part of the signed printed QR - bumping it voids old printouts.
+  static_checkin_version: number;
   timezone: string;
   self_checkin_enabled: boolean;
   self_checkin_require_location: boolean;

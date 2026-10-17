@@ -32,7 +32,7 @@ import ScreenHeader from '../components/ui/ScreenHeader';
 import StatusPill from '../components/ui/StatusPill';
 import VerifiedBadge from '../components/VerifiedBadge';
 import VisitDetails from '../components/VisitDetails';
-import { getCheckInOptions, getCurrentCoords, issueBookingQr, looksLikeClinicQr, selfCheckIn, type CheckInOptions } from '../lib/checkIn';
+import { getCheckInOptions, getCurrentCoords, isPrintedClinicQr, issueBookingQr, looksLikeClinicQr, selfCheckIn, type CheckInOptions } from '../lib/checkIn';
 import QrCode from '../components/ui/QrCode';
 import QrScanner from '../components/QrScanner';
 import { getDoctorConsultationStats } from '../lib/consultation';
@@ -466,14 +466,21 @@ export default function BookingStatus() {
   // checking the patient in so the token appears without leaving the screen.
   const handleSelfScan = async (raw: string) => {
     if (!looksLikeClinicQr(raw)) {
-      setSelfError("That isn't the clinic's check-in code. Scan the code on the screen at reception.");
+      setSelfError("That isn't the clinic's check-in QR. Scan the SanjeevniOS code at reception.");
       return;
     }
     setScanning(false);
     setSelfBusy(true);
     setSelfError(null);
-    const coords = options?.requiresLocation ? await getCurrentCoords() : null;
-    const result = await selfCheckIn(raw, coords);
+    // Location is asked only now; the printed code always needs it.
+    const needsLocation = isPrintedClinicQr(raw) || !!options?.requiresLocation;
+    const coords = needsLocation ? await getCurrentCoords() : null;
+    if (needsLocation && !coords) {
+      setSelfBusy(false);
+      setSelfError("We couldn't get your location. Allow location access for this app and scan again, or show your code at the desk.");
+      return;
+    }
+    const result = await selfCheckIn(raw, booking.id, coords);
     setSelfBusy(false);
     if (!result.ok) { setSelfError(result.error ?? 'Could not check in.'); return; }
     loadBooking();
@@ -488,7 +495,7 @@ export default function BookingStatus() {
     <div>
       <ScreenHeader title="Appointment Details" back={-1} />
       {scanning && (
-        <QrScanner onScan={handleSelfScan} onClose={() => setScanning(false)} hint="Point the camera at the check-in code on the screen at reception." />
+        <QrScanner onScan={handleSelfScan} onClose={() => setScanning(false)} hint="Point the camera at the clinic's check-in QR at reception." />
       )}
 
       <div className="mx-auto max-w-3xl px-4 py-4">
@@ -699,11 +706,12 @@ export default function BookingStatus() {
             {options?.canSelfCheckIn && (
               <div className="mt-3">
                 <Button full onClick={() => setScanning(true)} disabled={selfBusy}>
-                  <ScanLine size={17} /> {selfBusy ? 'Checking you in...' : 'Scan reception code to check in'}
+                  <ScanLine size={17} /> {selfBusy ? 'Checking you in...' : 'Scan clinic QR to check in'}
                 </Button>
                 {selfError && <p className="mt-2 text-sm text-red-600">{selfError}</p>}
                 <p className="mt-1.5 text-xs text-slate-400">
-                  It puts you in the queue at the time you arrive. It does not move you up it.
+                  Scan the QR at reception when you arrive and your token appears here. Your location is used only to
+                  confirm you're at the clinic.
                 </p>
               </div>
             )}

@@ -58,7 +58,14 @@ export function countAhead(dayQueue: QueueStatusRow[], myToken: number | null): 
 // Returns null when nothing today is both open and still reachable - the
 // caller's job at that point is to offer the waitlist or another day, not
 // to retry.
-export function findWalkInSlot(allSlots: string[], takenSlots: Set<string>, nowHHMMSS: string, graceMinutes: number): string | null {
+export function findWalkInSlot(
+  allSlots: string[],
+  takenSlots: Set<string>,
+  nowHHMMSS: string,
+  graceMinutes: number,
+  // clinics.checkin_open_before_minutes (migration 84) - default 60.
+  openBeforeMinutes = 60
+): string | null {
   const nowMin = timeToMinutes(nowHHMMSS);
 
   for (let i = 0; i < allSlots.length; i++) {
@@ -66,10 +73,10 @@ export function findWalkInSlot(allSlots: string[], takenSlots: Set<string>, nowH
     if (takenSlots.has(s)) continue;
     const start = timeToMinutes(s);
     // Hasn't started yet - the soonest open slot ahead, but only if check-in has
-    // opened for it (60 minutes before). A walk-in is checked in on the spot, so
+    // opened for it (openBeforeMinutes before the slot). A walk-in is checked in on the spot, so
     // a slot hours away (e.g. the desk opened early) can't be used - it would be
     // booked and then refused at check-in as "too early".
-    if (start > nowMin) return start - nowMin <= 60 ? s : null;
+    if (start > nowMin) return start - nowMin <= openBeforeMinutes ? s : null;
     const gap =
       i + 1 < allSlots.length
         ? timeToMinutes(allSlots[i + 1]) - start

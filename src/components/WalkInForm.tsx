@@ -218,20 +218,22 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, walkInA
     const [availRes, takenRes, clinicRes] = await Promise.all([
       supabase.from('doctor_availability').select('*').eq('doctor_id', doctorId),
       supabase.rpc('get_taken_slots', { p_doctor_id: doctorId, p_date: today }),
-      supabase.from('clinics').select('checkin_grace_minutes').eq('id', clinicId).maybeSingle(),
+      supabase.from('clinics').select('checkin_grace_minutes, checkin_open_before_minutes').eq('id', clinicId).maybeSingle(),
     ]);
     const dayInfo = await getDayAvailability(clinicId, today);
 
     const windows = ((availRes.data ?? []) as DoctorAvailability[]).filter((a) => a.weekday === weekday);
     const allSlots = computeSlots(windows);
     const taken = new Set(((takenRes.data ?? []) as { slot_time: string }[]).map((r) => r.slot_time));
-    const grace = (clinicRes.data as { checkin_grace_minutes: number } | null)?.checkin_grace_minutes ?? 30;
+    const clinicTiming = clinicRes.data as { checkin_grace_minutes: number; checkin_open_before_minutes: number | null } | null;
+    const grace = clinicTiming?.checkin_grace_minutes ?? 30;
+    const openBefore = clinicTiming?.checkin_open_before_minutes ?? 60;
     const nowHHMMSS = new Date().toTimeString().slice(0, 8);
 
     setAvailability({
       dayInfo,
       hasWindows: windows.length > 0,
-      slotTime: dayInfo?.isFull ? null : findWalkInSlot(allSlots, taken, nowHHMMSS, grace),
+      slotTime: dayInfo?.isFull ? null : findWalkInSlot(allSlots, taken, nowHHMMSS, grace, openBefore),
       slots: Array.from(new Set(allSlots)).map((t) => ({ time: t, free: !taken.has(t) && t >= nowHHMMSS })),
     });
     setAvailLoading(false);

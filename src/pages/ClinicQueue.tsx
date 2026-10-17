@@ -607,7 +607,7 @@ export default function ClinicQueue() {
                   </Button>
                   {clinic.self_checkin_enabled && (
                     <Button variant="outline" onClick={() => navigate('/poster')}>
-                      <ScanLine size={16} /> Self check-in code
+                      <ScanLine size={16} /> Clinic QR
                     </Button>
                   )}
                 </div>

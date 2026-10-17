@@ -28,8 +28,16 @@ export function looksLikeBookingQr(raw: string): boolean {
   return /^sanjeevni:appt:v2:[0-9a-f-]{36}:\d+:[0-9a-f]{16}$/i.test(raw.trim());
 }
 
+// v1 = the rotating code on the reception screen, v2 = the permanent printed
+// one (migration 84). Both go to the same self_check_in().
 export function looksLikeClinicQr(raw: string): boolean {
-  return /^sanjeevni:clinic:v1:[0-9a-f-]{36}:\d+:[0-9a-f]{16}$/i.test(raw.trim());
+  return /^sanjeevni:clinic:v[12]:[0-9a-f-]{36}:\d+:[0-9a-f]{16}$/i.test(raw.trim());
+}
+
+// The printed code is permanent, so a photo of it works anywhere - the
+// server therefore always checks location for it, and the app always asks.
+export function isPrintedClinicQr(raw: string): boolean {
+  return /^sanjeevni:clinic:v2:/i.test(raw.trim());
 }
 
 // ---------------------------------------------------------------------------
@@ -162,14 +170,18 @@ export async function lookupCheckIn(
 // Self check-in (patient scans reception's rotating code)
 // ---------------------------------------------------------------------------
 
+// appointmentId is the booking the patient scanned FROM - that exact booking
+// is checked (theirs, this clinic, today) and checked in.
 export async function selfCheckIn(
   code: string,
+  appointmentId: string,
   coords?: { lat: number; lng: number } | null
 ): Promise<CheckInOutcome> {
   const { data, error } = await supabase.rpc('self_check_in', {
     p_code: code.trim(),
     p_lat: coords?.lat ?? null,
     p_lng: coords?.lng ?? null,
+    p_appointment_id: appointmentId,
   });
   return toOutcome(data, error);
 }
@@ -237,4 +249,18 @@ export async function issueClinicCheckinCode(
   const row = ((data ?? []) as { code: string; expires_at: string }[])[0];
   if (!row) return { error: 'Could not create a reception code.' };
   return { code: row.code, expiresAt: row.expires_at };
+}
+
+// The clinic's permanent printed code (migration 84).
+export async function issueClinicStaticCode(clinicId: string): Promise<{ code: string } | { error: string }> {
+  const { data, error } = await supabase.rpc('issue_clinic_static_code', { p_clinic_id: clinicId });
+  if (error) return { error: error.message };
+  return data ? { code: data as string } : { error: 'Could not create the clinic code.' };
+}
+
+// Replaces the printed code - every copy of the old one stops working.
+export async function rotateClinicStaticCode(clinicId: string): Promise<{ code: string } | { error: string }> {
+  const { data, error } = await supabase.rpc('rotate_clinic_static_code', { p_clinic_id: clinicId });
+  if (error) return { error: error.message };
+  return data ? { code: data as string } : { error: 'Could not replace the clinic code.' };
 }

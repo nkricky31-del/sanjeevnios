@@ -1,6 +1,7 @@
-import { CalendarRange, Users } from 'lucide-react';
+import { CalendarRange, Printer, Users } from 'lucide-react';
 import { CapacityChart } from './Insights';
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { todayISO } from '../lib/date';
 import { type PatientContact, withPatientContacts } from '../lib/patientContact';
@@ -11,6 +12,7 @@ import Card from './ui/Card';
 import SectionTitle from './ui/SectionTitle';
 import Segmented from './ui/Segmented';
 import StatusPill from './ui/StatusPill';
+import Toggle from './ui/Toggle';
 
 interface Props {
   clinic: Clinic;
@@ -31,6 +33,7 @@ interface WaitlistRow {
 // mode generates. Kept together because the waitlist only exists as a
 // consequence of the cap.
 export default function ClinicBookingMode({ clinic, onSaved }: Props) {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<ClinicMode>(clinic.mode ?? 'allow_walkins');
   const [horizon, setHorizon] = useState(String(clinic.booking_horizon_days ?? 1));
   const [cap, setCap] = useState(String(clinic.daily_cap ?? 100));
@@ -50,6 +53,38 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [waitlist, setWaitlist] = useState<WaitlistRow[]>([]);
+  // Self check-in (sections 28 and 84) - saved separately from the booking
+  // mode above, since it's about arrival rather than booking.
+  const [selfEnabled, setSelfEnabled] = useState(clinic.self_checkin_enabled ?? false);
+  const [openBefore, setOpenBefore] = useState(String(clinic.checkin_open_before_minutes ?? 60));
+  const [selfSaving, setSelfSaving] = useState(false);
+  const [selfError, setSelfError] = useState<string | null>(null);
+  const [selfNote, setSelfNote] = useState<string | null>(null);
+  const hasLocation = clinic.lat != null && clinic.lng != null;
+
+  const saveSelfCheckIn = async () => {
+    setSelfError(null);
+    setSelfNote(null);
+    const openNum = Number(openBefore);
+    if (!Number.isInteger(openNum) || openNum < 5 || openNum > 180) {
+      setSelfError('Check-in opening must be between 5 and 180 minutes before the slot.');
+      return;
+    }
+    if (selfEnabled && !hasLocation) {
+      setSelfError("Set your clinic's map location in the Location tab first - self check-in uses it to confirm patients are at the clinic.");
+      return;
+    }
+    setSelfSaving(true);
+    const patch = { self_checkin_enabled: selfEnabled, checkin_open_before_minutes: openNum };
+    const { error: saveError } = await supabase.from('clinics').update(patch).eq('id', clinic.id);
+    setSelfSaving(false);
+    if (saveError) {
+      setSelfError(saveError.message);
+      return;
+    }
+    onSaved(patch);
+    setSelfNote('Saved.');
+  };
 
   const loadWaitlist = useCallback(async () => {
     const { data } = await supabase
@@ -213,9 +248,8 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
           />
           <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
             How long before their slot an accepted patient is told to arrive by. Shown on their booking as
-            "Reporting time" and sent once as a reminder as it approaches. Capped at 60 minutes either way - that's
-            when check-in itself opens, so reporting any earlier than that would ask patients to arrive before
-            they're even able to check in.
+            "Reporting time" and sent once as a reminder as it approaches. Capped at the check-in opening time set
+            under Patient self check-in below, so patients are never asked to arrive before they can check in.
           </p>
         </div>
 
@@ -262,6 +296,64 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
         <Button onClick={save} disabled={saving} className="mt-3">
           {saving ? 'Saving...' : 'Save booking mode'}
         </Button>
+      </Card>
+
+      {/* Self check-in: the patient scans the clinic's QR from their booking
+          and gets a token with no one at the desk (migration 84). */}
+      <SectionTitle className="mt-6">Patient self check-in</SectionTitle>
+      <p className="mt-0.5 text-xs text-slate-400">
+        Patients scan the clinic's QR at reception from their booking and get a token straight away. The desk can
+        still check anyone in by scanning their code or searching by name, phone or MRN.
+      </p>
+      <Card className="mt-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-bold text-slate-900">Let patients check themselves in</span>
+          <Toggle
+            checked={selfEnabled}
+            onChange={setSelfEnabled}
+            label="Let patients check themselves in"
+            onLabel="On"
+            offLabel="Off"
+          />
+        </div>
+        {!hasLocation && (
+          <p className="mt-2 text-xs font-semibold text-amber-700">
+            Set your clinic's map location in the Location tab before turning this on.
+          </p>
+        )}
+
+        <div className="mt-4 rounded-2xl border border-slate-100 p-3">
+          <label htmlFor="checkin-open-before" className="text-xs font-bold text-slate-700">
+            Check-in opens (minutes before slot)
+          </label>
+          <input
+            id="checkin-open-before"
+            type="number"
+            min={5}
+            max={180}
+            value={openBefore}
+            onChange={(e) => setOpenBefore(e.target.value)}
+            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          />
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+            Applies to every check-in, at the desk and by scan. Check-in closes {clinic.checkin_grace_minutes ?? 30}{' '}
+            minutes after the slot ends. Default 60.
+          </p>
+        </div>
+
+        {selfError && <p className="mt-2 text-sm text-red-600">{selfError}</p>}
+        {selfNote && !selfError && <p className="mt-2 text-sm font-semibold text-emerald-600">{selfNote}</p>}
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button onClick={saveSelfCheckIn} disabled={selfSaving}>
+            {selfSaving ? 'Saving...' : 'Save self check-in'}
+          </Button>
+          {clinic.self_checkin_enabled && (
+            <Button variant="outline" onClick={() => navigate('/poster')}>
+              <Printer size={16} /> Print clinic QR
+            </Button>
+          )}
+        </div>
       </Card>
 
       {/* The waitlist only exists because of the cap, so it lives here. */}

@@ -13,6 +13,7 @@ import StatusPill from '../components/ui/StatusPill';
 import {
   getCheckInOptions,
   getCurrentCoords,
+  isPrintedClinicQr,
   issueBookingQr,
   looksLikeClinicQr,
   selfCheckIn,
@@ -50,6 +51,7 @@ interface PassBooking {
     address: string | null;
     self_checkin_enabled: boolean;
     self_checkin_require_location: boolean;
+    checkin_open_before_minutes: number | null;
   } | null;
   family_members: { name: string; mrn: string } | null;
   encounters: { encounter_no: string } | null;
@@ -89,7 +91,7 @@ export default function BookingPass() {
     const { data } = await supabase
       .from('appointments')
       .select(
-        'id, date, slot_time, status, payment_status, token_number, checked_in_at, sequence_no, estimated_time, doctor_id, clinic_id, doctors(name, specialty), clinics(name, address, self_checkin_enabled, self_checkin_require_location), family_members(name, mrn), encounters(encounter_no)'
+        'id, date, slot_time, status, payment_status, token_number, checked_in_at, sequence_no, estimated_time, doctor_id, clinic_id, doctors(name, specialty), clinics(name, address, self_checkin_enabled, self_checkin_require_location, checkin_open_before_minutes), family_members(name, mrn), encounters(encounter_no)'
       )
       .eq('id', appointmentId)
       .single();
@@ -216,11 +218,12 @@ export default function BookingPass() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aheadCount, booking?.token_number, booking?.status, slotMinutes]);
 
-  // Patient scanning reception's rotating code.
+  // Patient scanning the clinic's code - the printed one at the counter, or
+  // the rotating one on a reception screen.
   const handleSelfScan = async (raw: string) => {
-    if (scanHandled.current) return;
+    if (scanHandled.current || !appointmentId) return;
     if (!looksLikeClinicQr(raw)) {
-      setSelfError("That isn't the clinic's check-in code. Scan the code on the screen at reception.");
+      setSelfError("That isn't the clinic's check-in QR. Scan the SanjeevniOS code at reception.");
       return;
     }
     scanHandled.current = true;
@@ -228,8 +231,19 @@ export default function BookingPass() {
     setSelfBusy(true);
     setSelfError(null);
 
-    const coords = options?.requiresLocation ? await getCurrentCoords() : null;
-    const result = await selfCheckIn(raw, coords);
+    // Asked only now, at the moment of scanning. The printed code always
+    // needs it (it never expires, so location is what proves you're here).
+    const needsLocation = isPrintedClinicQr(raw) || !!options?.requiresLocation;
+    const coords = needsLocation ? await getCurrentCoords() : null;
+    if (needsLocation && !coords) {
+      setSelfBusy(false);
+      scanHandled.current = false;
+      setSelfError(
+        "We couldn't get your location. Allow location access for this app and scan again, or show the code below at the desk."
+      );
+      return;
+    }
+    const result = await selfCheckIn(raw, appointmentId, coords);
     setSelfBusy(false);
     scanHandled.current = false;
 
@@ -247,16 +261,17 @@ export default function BookingPass() {
   const estimatedWait = aheadCount != null ? Math.round(aheadCount * slotMinutes) : null;
   const paidOnline = booking.payment_status === 'paid_online';
   const selfCheckInAvailable = awaitingArrival && !!options?.canSelfCheckIn;
+  const openBefore = booking.clinics?.checkin_open_before_minutes ?? 60;
 
   return (
     <div>
-      <ScreenHeader title={inQueue ? 'Your token' : 'Show this at reception'} back={-1} />
+      <ScreenHeader title={inQueue ? 'Your token' : selfCheckInAvailable ? 'Check in' : 'Show this at reception'} back={-1} />
 
       {scanning && (
         <QrScanner
           onScan={handleSelfScan}
           onClose={() => setScanning(false)}
-          hint="Point the camera at the check-in code on the screen at reception."
+          hint="Point the camera at the clinic's check-in QR at reception."
         />
       )}
 
@@ -288,6 +303,29 @@ export default function BookingPass() {
               </div>
             )}
 
+            {/* Self check-in is the main action where the clinic offers it; the
+                patient's own QR below becomes the fallback for the desk. */}
+            {selfCheckInAvailable && (
+              <div className="mt-4 text-left">
+                <Button full onClick={() => setScanning(true)} disabled={selfBusy}>
+                  <ScanLine size={17} />
+                  {selfBusy ? 'Checking you in...' : 'Scan clinic QR to check in'}
+                </Button>
+                {selfError && (
+                  <p role="alert" className="mt-2 text-sm text-red-600">
+                    {selfError}
+                  </p>
+                )}
+                <p className="mt-1.5 text-center text-xs text-slate-500">
+                  When you reach the clinic, scan the QR at reception and your token appears here. We'll ask for your
+                  location only at that moment — it's used only to confirm you're at the clinic.
+                </p>
+                <p className="mt-4 border-t border-slate-100 pt-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Or show this code at the desk
+                </p>
+              </div>
+            )}
+
             <div className="mt-4 flex justify-center">
               {qr ? (
                 <QrCode value={qr} size={220} className="ring-1 ring-slate-100" />
@@ -305,7 +343,7 @@ export default function BookingPass() {
               <>
                 <p className="mt-3 text-sm font-semibold text-slate-700">
                   {selfCheckInAvailable
-                    ? 'Already paid — scan the reception code and you’re checked in'
+                    ? 'Already paid — nothing to collect at the counter'
                     : 'Already paid — one scan at the desk and you’re checked in'}
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500">
@@ -314,9 +352,13 @@ export default function BookingPass() {
               </>
             ) : (
               <>
-                <p className="mt-3 text-sm font-semibold text-slate-700">Show this code at the reception desk</p>
+                <p className="mt-3 text-sm font-semibold text-slate-700">
+                  {selfCheckInAvailable ? 'Staff can scan this code instead' : 'Show this code at the reception desk'}
+                </p>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  You'll check in at the counter when you pay.
+                  {selfCheckInAvailable
+                    ? 'Pay at the clinic as usual.'
+                    : "You'll check in at the counter when you pay."}
                 </p>
               </>
             )}
@@ -511,31 +553,17 @@ export default function BookingPass() {
           </p>
         )}
 
-        {/* ---------------- Self check-in / fast lane ---------------- */}
-        {selfCheckInAvailable && (
-          <div className="mt-3">
-            <Button full onClick={() => setScanning(true)} disabled={selfBusy}>
-              <ScanLine size={17} />
-              {selfBusy ? 'Checking you in...' : paidOnline ? 'Fast check-in — skip the counter' : 'Scan reception code to check in'}
-            </Button>
-            {selfError && <p className="mt-2 text-sm text-red-600">{selfError}</p>}
-            <p className="mt-1.5 text-center text-xs text-slate-400">
-              {paidOnline
-                ? 'Because you paid online, you can check yourself in by scanning the code at reception'
-                : 'This clinic lets you check yourself in by scanning the code displayed at reception'}
-              {options?.requiresLocation ? ', while you are at the clinic' : ''}. It puts you in the queue at the
-              time you arrive — it doesn't move you up it.
-            </p>
-          </div>
-        )}
-
         {awaitingArrival && (
           <div className="mt-3">
             <InfoNote
               title="When you arrive"
               bullets={[
-                'Check in at the desk from 60 minutes before your slot.',
-                'Show the code above, or just give your name, phone or MRN.',
+                selfCheckInAvailable
+                  ? `Check-in opens ${openBefore} minutes before your slot — scan the clinic's QR at reception.`
+                  : `Check in at the desk from ${openBefore} minutes before your slot.`,
+                selfCheckInAvailable
+                  ? 'No location or camera? Show the code above at the desk, or give your name, phone or MRN.'
+                  : 'Show the code above, or just give your name, phone or MRN.',
                 'Your token number appears on this screen the moment you are checked in.',
                 <>
                   Tokens are handed out in <strong>arrival order</strong>, so arriving on time is what secures your
