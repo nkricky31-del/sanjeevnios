@@ -44,6 +44,10 @@ import BrandName from '../components/ui/BrandName';
 
 const RELATION_LABEL: Record<string, string> = {
   self: 'Self',
+  daughter: 'Daughter',
+  son: 'Son',
+  mother: 'Mother',
+  father: 'Father',
   spouse: 'Spouse',
   child: 'Child',
   parent: 'Parent',
@@ -394,6 +398,7 @@ export default function Profile() {
               {showForm ? (
                 <FamilyMemberForm
                   accountId={session.user.id}
+                  existingNames={members.map((m) => m.name)}
                   onAdded={() => {
                     setShowForm(false);
                     loadMembers();

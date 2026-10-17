@@ -1,4 +1,4 @@
-import { Eye, Info } from 'lucide-react';
+import { ChevronDown, ExternalLink, Info } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -6,6 +6,7 @@ import { getStoredActingMode } from '../lib/actingMode';
 import { ageFromDob } from '../lib/date';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember, HasKnownConditions } from '../lib/types';
+import EncounterFullDetail from './EncounterFullDetail';
 import StatusPill from './ui/StatusPill';
 
 interface Props {
@@ -88,6 +89,24 @@ export default function PatientProfile({ mrn }: Props) {
   const [encounters, setEncounters] = useState<EncounterRow[]>([]);
   const [conditions, setConditions] = useState<ConditionRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState<string | null>(null);
+  // Encounters whose audited open has finished - clinic staff only see a
+  // visit's clinical data after open_encounter_health_record (migration 68),
+  // same as EncounterDetail.tsx; for a patient or admin it's a no-op.
+  const [auditedIds, setAuditedIds] = useState<Set<string>>(new Set());
+
+  const toggleEncounter = (id: string) => {
+    if (openId === id) {
+      setOpenId(null);
+      return;
+    }
+    setOpenId(id);
+    if (!auditedIds.has(id)) {
+      supabase
+        .rpc('open_encounter_health_record', { p_encounter_id: id })
+        .then(() => setAuditedIds((prev) => new Set(prev).add(id)));
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -222,66 +241,72 @@ export default function PatientProfile({ mrn }: Props) {
       )}
 
       <p className="mt-3 text-xs text-slate-400">
-        How it works: open a patient by MRN, see their encounters below, click the eye icon on any row to view its
-        full details.
+        Tap any visit below to see its full details.
       </p>
 
       <div className="mt-4 flex items-center justify-between">
         <h3 className="text-base font-bold text-slate-900">Encounters / Visits</h3>
         <p className="text-xs text-slate-400">
-          {encounters.length === 0
-            ? 'No visits.'
-            : `Showing 1 to ${encounters.length} of ${encounters.length} visits`}
+          {encounters.length === 0 ? 'No visits.' : `${encounters.length} ${encounters.length === 1 ? 'visit' : 'visits'}`}
         </p>
       </div>
 
-      <div className="mt-2 overflow-x-auto rounded-2xl border border-slate-200">
-        <table className="w-full min-w-[720px] text-left text-sm">
-          <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-400">
-            <tr>
-              <th className="px-3 py-2">Encounter No.</th>
-              <th className="px-3 py-2">Visit Date &amp; Time</th>
-              <th className="px-3 py-2">Doctor / Department</th>
-              <th className="px-3 py-2">Clinic</th>
-              <th className="px-3 py-2">Visit Type</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {encounters.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
-                  No encounters visible for this patient.
-                </td>
-              </tr>
-            )}
-            {encounters.map((e) => (
-              <tr key={e.id} className="hover:bg-slate-50">
-                <td className="px-3 py-2 font-mono text-xs font-bold text-brand-700">{e.encounter_no}</td>
-                <td className="px-3 py-2 text-slate-600">{new Date(e.visit_datetime).toLocaleString()}</td>
-                <td className="px-3 py-2 text-slate-600">
-                  {e.doctors?.name ?? '—'}
-                  {e.department && <span className="text-slate-400"> · {e.department}</span>}
-                </td>
-                <td className="px-3 py-2 text-slate-600">{e.clinics?.name ?? '—'}</td>
-                <td className="px-3 py-2 text-slate-600">{e.visit_type}</td>
-                <td className="px-3 py-2">
-                  <StatusPill label={e.status} tone="info" />
-                </td>
-                <td className="px-3 py-2">
-                  <Link
-                    to={`/encounters/${e.id}`}
-                    className="inline-flex rounded-lg p-1.5 text-slate-500 hover:bg-brand-50 hover:text-brand-600"
-                    aria-label={`View encounter ${e.encounter_no}`}
-                  >
-                    <Eye size={16} />
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mt-2 space-y-2">
+        {encounters.length === 0 && (
+          <p className="rounded-2xl border border-slate-200 px-3 py-6 text-center text-sm text-slate-400">
+            No encounters visible for this patient.
+          </p>
+        )}
+        {encounters.map((e) => {
+          const isOpen = openId === e.id;
+          return (
+            <div key={e.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <button
+                type="button"
+                onClick={() => toggleEncounter(e.id)}
+                aria-expanded={isOpen}
+                aria-controls={`encounter-${e.id}`}
+                className="flex w-full items-start gap-3 p-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs font-bold text-brand-700">{e.encounter_no}</span>
+                    <StatusPill label={e.status} tone="info" />
+                  </span>
+                  <span className="mt-1 block truncate text-sm font-bold text-slate-900">
+                    {e.doctors?.name ?? '—'}
+                    {e.department && <span className="font-normal text-slate-400"> · {e.department}</span>}
+                  </span>
+                  <span className="block truncate text-xs text-slate-500">
+                    {new Date(e.visit_datetime).toLocaleString()}
+                    {e.clinics?.name ? ` · ${e.clinics.name}` : ''} · {e.visit_type}
+                  </span>
+                </span>
+                <ChevronDown
+                  size={18}
+                  className={`mt-1 shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {isOpen && (
+                <div id={`encounter-${e.id}`} className="border-t border-slate-100 p-3">
+                  {auditedIds.has(e.id) ? (
+                    <>
+                      <EncounterFullDetail encounter={e} />
+                      <Link
+                        to={`/encounters/${e.id}`}
+                        className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:underline"
+                      >
+                        Open full page <ExternalLink size={12} />
+                      </Link>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-400">Loading visit details...</p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

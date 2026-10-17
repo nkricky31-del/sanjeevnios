@@ -7,21 +7,33 @@ import type { FamilyRelation } from '../lib/types';
 
 interface Props {
   accountId: string;
+  // Names already on this account - a second person with the same name
+  // isn't allowed (migration 83 enforces the same rule in the database).
+  existingNames: string[];
   onAdded: () => void;
   onCancel: () => void;
 }
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
-export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props) {
+const RELATIONS: { value: FamilyRelation; label: string }[] = [
+  { value: 'daughter', label: 'Daughter' },
+  { value: 'son', label: 'Son' },
+  { value: 'mother', label: 'Mother' },
+  { value: 'father', label: 'Father' },
+];
+
+const normalizeName = (n: string) => n.trim().replace(/\s+/g, ' ').toLowerCase();
+
+export default function FamilyMemberForm({ accountId, existingNames, onAdded, onCancel }: Props) {
   const [name, setName] = useState('');
-  const [relation, setRelation] = useState<FamilyRelation>('self');
+  const [relation, setRelation] = useState<FamilyRelation | ''>('');
   const [dob, setDob] = useState('');
   const [phoneDigits, setPhoneDigits] = useState('');
   const [email, setEmail] = useState('');
   const [bloodGroup, setBloodGroup] = useState('');
   const [city, setCity] = useState('');
-  const [govtId, setGovtId] = useState('');
+  const [aadhaar, setAadhaar] = useState('');
   const [guardianConsent, setGuardianConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,12 +48,24 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
       setError('Enter a name.');
       return;
     }
+    if (existingNames.some((n) => normalizeName(n) === normalizeName(name))) {
+      setError(`Someone named "${name.trim()}" is already on your account. Use a different name.`);
+      return;
+    }
+    if (!relation) {
+      setError('Choose a relation.');
+      return;
+    }
     if (!dob) {
       setError('Enter a date of birth.');
       return;
     }
     if (new Date(dob) > new Date()) {
       setError('Date of birth cannot be in the future.');
+      return;
+    }
+    if (aadhaar.length !== 12) {
+      setError('Enter the 12-digit Aadhaar number.');
       return;
     }
     if (phoneDigits && phoneDigits.length !== 10) {
@@ -56,14 +80,14 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
     setLoading(true);
     const { error: insertError } = await supabase.from('family_members').insert({
       account_id: accountId,
-      name: name.trim(),
+      name: name.trim().replace(/\s+/g, ' '),
       relation,
       dob,
       phone: phoneDigits ? normalizePhone(phoneDigits) : null,
       email: email.trim() || null,
       blood_group: bloodGroup || null,
       city: city.trim() || null,
-      govt_id: govtId.trim() || null,
+      govt_id: aadhaar,
       guardian_consent: guardianConsent,
     });
     setLoading(false);
@@ -78,9 +102,11 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
   return (
     <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl border border-slate-200 p-4">
       <div>
-        <label className="text-sm font-medium text-slate-700">Name</label>
+        <label htmlFor="fm-name" className="text-sm font-medium text-slate-700">Name</label>
         <input
+          id="fm-name"
           type="text"
+          required
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
@@ -88,23 +114,31 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
       </div>
 
       <div>
-        <label className="text-sm font-medium text-slate-700">Relation</label>
+        <label htmlFor="fm-relation" className="text-sm font-medium text-slate-700">Relation</label>
         <select
+          id="fm-relation"
+          required
           value={relation}
           onChange={(e) => setRelation(e.target.value as FamilyRelation)}
           className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         >
-          <option value="self">Self</option>
-          <option value="spouse">Spouse</option>
-          <option value="child">Child</option>
-          <option value="parent">Parent</option>
+          <option value="" disabled>
+            Choose relation
+          </option>
+          {RELATIONS.map((r) => (
+            <option key={r.value} value={r.value}>
+              {r.label}
+            </option>
+          ))}
         </select>
       </div>
 
       <div>
-        <label className="text-sm font-medium text-slate-700">Date of birth</label>
+        <label htmlFor="fm-dob" className="text-sm font-medium text-slate-700">Date of birth</label>
         <input
+          id="fm-dob"
           type="date"
+          required
           value={dob}
           onChange={(e) => setDob(e.target.value)}
           max={new Date().toISOString().slice(0, 10)}
@@ -167,12 +201,16 @@ export default function FamilyMemberForm({ accountId, onAdded, onCancel }: Props
       </div>
 
       <div>
-        <label className="text-sm font-medium text-slate-700">Government ID (optional)</label>
+        <label htmlFor="fm-aadhaar" className="text-sm font-medium text-slate-700">Aadhaar number</label>
         <input
+          id="fm-aadhaar"
           type="text"
-          value={govtId}
-          onChange={(e) => setGovtId(e.target.value)}
-          placeholder="Aadhaar, passport, etc."
+          inputMode="numeric"
+          autoComplete="off"
+          required
+          value={aadhaar.replace(/(\d{4})(?=\d)/g, '$1 ')}
+          onChange={(e) => setAadhaar(e.target.value.replace(/\D/g, '').slice(0, 12))}
+          placeholder="1234 5678 9012"
           className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500"
         />
         <p className="mt-1 text-xs text-slate-400">

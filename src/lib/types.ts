@@ -13,7 +13,9 @@ export interface Profile {
   created_at: string;
 }
 
-export type FamilyRelation = 'self' | 'spouse' | 'child' | 'parent';
+// spouse/child/parent are legacy values kept only for rows created before
+// migration 83 - new family members use daughter/son/mother/father.
+export type FamilyRelation = 'self' | 'daughter' | 'son' | 'mother' | 'father' | 'spouse' | 'child' | 'parent';
 export type Gender = 'male' | 'female' | 'other';
 
 export type HasKnownConditions = 'yes' | 'no' | 'not_answered';
