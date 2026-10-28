@@ -56,8 +56,11 @@ export default function EncounterFullDetail({ encounter, onLoaded, patientName }
   useEffect(() => {
     supabase
       .from('appointments')
+      // visits!visits_appointment_id_fkey: appointments also links to visits through
+      // follow_up_of (migration 46), so the embed has to name which link it means -
+      // a bare visits(...) is refused as ambiguous and the whole query fails.
       .select(
-        'id, date, slot_time, status, visits(id, appointment_id, notes:notes_plain, diagnosis:diagnosis_plain, follow_up_date, follow_up_due_date, no_prescription, created_at, prescriptions(*)), files(id, member_id, appointment_id, type, storage_path, created_at)'
+        'id, date, slot_time, status, visits!visits_appointment_id_fkey(id, appointment_id, notes:notes_plain, diagnosis:diagnosis_plain, follow_up_date, follow_up_due_date, no_prescription, created_at, prescriptions(*)), files(id, member_id, appointment_id, type, storage_path, created_at)'
       )
       .eq('encounter_id', encounter.id)
       .limit(1)
