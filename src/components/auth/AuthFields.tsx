@@ -3,6 +3,7 @@ import { animate, motion, useMotionTemplate, useMotionValue } from 'motion/react
 import { useEffect, useId, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { Link, type LinkProps } from 'react-router-dom';
 
+import { CLINIC_CODE_PREFIX, clinicNumberInput } from '../../lib/clinicCode';
 import { livePhoneDigits } from '../../lib/phone';
 
 // Building blocks for the three sign-in screens. They read the screen's accent
@@ -90,6 +91,44 @@ export function PhoneField({
           </div>
         </GlowField>
       </div>
+    </div>
+  );
+}
+
+// Clinic ID: the letters part (CLINIC_CODE_PREFIX, e.g. "SNJ-CL-") is fixed
+// in front of the box and the clinic types only the number. Pasting a full ID
+// still works - the letters part is dropped.
+export function ClinicIdField({
+  label, value, onChange,
+}: { label: string; value: string; onChange: (number: string) => void }) {
+  const id = useId();
+  return (
+    <div>
+      <AuthLabel htmlFor={id}>{label}</AuthLabel>
+      <div className="mt-2">
+        <GlowField>
+          <div className="flex items-center rounded-[10px] border border-hairline bg-ground">
+            <span className="shrink-0 select-none whitespace-nowrap border-r border-hairline px-3 py-3 font-mono text-sm font-semibold tracking-wide text-ink">
+              {CLINIC_CODE_PREFIX}
+            </span>
+            <input
+              id={id}
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={20}
+              value={value}
+              onChange={(e) => onChange(clinicNumberInput(e.target.value))}
+              placeholder="000123"
+              aria-describedby={`${id}-hint`}
+              className={`${INPUT_BASE} font-mono tracking-wide`}
+            />
+          </div>
+        </GlowField>
+      </div>
+      <p id={`${id}-hint`} className="mt-1.5 text-xs text-ink-2">
+        Enter only the number of your Clinic ID - e.g. 123 for {CLINIC_CODE_PREFIX}000123.
+      </p>
     </div>
   );
 }

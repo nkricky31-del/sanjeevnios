@@ -2,10 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
-  AuthDivider, AuthError, AuthHeading, AuthLink, AuthLinkButton, AuthSubmit, AuthTextButton, OtpField, PhoneField, TextField,
+  AuthDivider, AuthError, AuthHeading, AuthLink, AuthLinkButton, AuthSubmit, AuthTextButton, ClinicIdField, OtpField, PhoneField,
 } from '../components/auth/AuthFields';
 import AuthShell from '../components/auth/AuthShell';
 import { setActingMode } from '../lib/actingMode';
+import { clinicCodeFromNumber } from '../lib/clinicCode';
 import { CLINIC_SIGNUP_INTENT_KEY } from '../lib/clinicSignupIntent';
 import { safeNext } from '../lib/loginRedirect';
 import { normalizePhone } from '../lib/phone';
@@ -33,7 +34,9 @@ import TurnstileWidget from '../components/TurnstileWidget';
 export default function ClinicLogin() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [stage, setStage] = useState<'details' | 'otp'>('details');
-  const [clinicId, setClinicId] = useState('');
+  // Only the NUMBER part of the Clinic ID - the fixed letters part
+  // (CLINIC_CODE_PREFIX) is added back by clinicCodeFromNumber().
+  const [clinicNumber, setClinicNumber] = useState('');
   const [digits, setDigits] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
@@ -73,8 +76,9 @@ export default function ClinicLogin() {
   const sendOtp = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (mode === 'login' && !clinicId.trim()) {
-      setError('Enter your Clinic ID.');
+    const clinicCode = clinicCodeFromNumber(clinicNumber);
+    if (mode === 'login' && !clinicCode) {
+      setError('Enter the number of your Clinic ID.');
       return;
     }
     if (digits.length !== 10) {
@@ -96,7 +100,7 @@ export default function ClinicLogin() {
     if (mode === 'login') {
       const normalizedPhone = normalizePhone(digits);
       const { data: verified, error: verifyError } = await supabase.rpc('verify_clinic_login', {
-        p_clinic_code: clinicId.trim(),
+        p_clinic_code: clinicCode,
         p_phone: normalizedPhone,
       });
       if (verifyError) {
@@ -165,7 +169,7 @@ export default function ClinicLogin() {
 
           <form onSubmit={sendOtp} className="mt-6 space-y-4">
             {mode === 'login' && (
-              <TextField label="Clinic ID" value={clinicId} onChange={setClinicId} placeholder="e.g. SNJ-CL-000123" />
+              <ClinicIdField label="Clinic ID" value={clinicNumber} onChange={setClinicNumber} />
             )}
             <PhoneField
               label="Registered mobile number"

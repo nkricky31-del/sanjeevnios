@@ -1,4 +1,5 @@
-import { Route, Routes } from 'react-router-dom';
+import { useEffect, useLayoutEffect } from 'react';
+import { Route, Routes, useLocation } from 'react-router-dom';
 
 import { useDarkBackdrop } from '../lib/useDarkBackdrop';
 
@@ -19,6 +20,29 @@ import MarketingHome from './pages/MarketingHome';
 // it does for any other sub-section of the app.
 export default function MarketingSite() {
   useDarkBackdrop();
+  const location = useLocation();
+
+  // Every page opens at the top. The home page's opening animation is driven
+  // by scroll position, so arriving part-way down (the previous page's scroll
+  // carried over, or the browser restoring it on reload/back) showed it
+  // already finished, as if it had been skipped. A link to a section
+  // (state.scrollTo, see sectionNav.ts) still scrolls to that section.
+  useLayoutEffect(() => {
+    if ((location.state as { scrollTo?: string } | null)?.scrollTo) return;
+    window.scrollTo(0, 0);
+  }, [location.pathname, location.state]);
+
+  // Stop the browser restoring an old scroll position on reload/back while the
+  // marketing site is showing; the app's own screens keep the default.
+  useEffect(() => {
+    if (!('scrollRestoration' in history)) return;
+    const previous = history.scrollRestoration;
+    history.scrollRestoration = 'manual';
+    return () => {
+      history.scrollRestoration = previous;
+    };
+  }, []);
+
   return (
     <div className="flex min-h-screen flex-col bg-ground font-ui text-ink">
       <MarketingNav />
