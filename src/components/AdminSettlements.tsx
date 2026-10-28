@@ -37,7 +37,30 @@ interface ClinicGroup {
   clinicName: string;
   rows: SettlementRow[];
   total: number;
+  // How many payments the total covers - can be more than rows loaded.
+  count: number;
 }
+
+// admin_settlement_totals() (migration 88): exact per clinic and status.
+interface TotalsRow {
+  clinic_id: string;
+  clinic_name: string;
+  status: SettlementStatus;
+  rows_count: number;
+  net_total: number | string;
+}
+
+// How many of each are listed, newest first - each status on its own, so a
+// long eligible list can never push a payout on hold off the screen. Settled
+// ones are history. Totals and counts always cover all of them.
+const ROW_LIMIT: Record<'eligible' | 'on_hold' | 'released' | 'settled', number> = {
+  eligible: 1000,
+  on_hold: 500,
+  released: 500,
+  settled: 200,
+};
+const SETTLEMENT_SELECT =
+  '*, clinics(name), appointments(date, slot_time, family_members(name)), profiles!settlements_released_by_fkey(name)';
 
 const STATUS_TONE: Record<SettlementStatus, 'live' | 'warning' | 'info' | 'neutral' | 'danger' | 'sky' | 'violet'> = {
   collected: 'sky',
@@ -62,8 +85,10 @@ function groupByClinic(rows: SettlementRow[]): ClinicGroup[] {
       clinicName: r.clinics?.name ?? 'Unknown clinic',
       rows: [],
       total: 0,
+      count: 0,
     };
     entry.rows.push(r);
+    entry.count += 1;
     entry.total = round2(entry.total + (r.net_amount - r.platform_fee));
     byClinic.set(r.clinic_id, entry);
   }
@@ -85,6 +110,9 @@ type ConfirmTarget =
 // Route) - see this file's releaseIds() for exactly where that split happens.
 export default function AdminSettlements() {
   const [rows, setRows] = useState<SettlementRow[]>([]);
+  // Null until migration 88 is run - then everything below falls back to
+  // adding up the rows loaded here.
+  const [totals, setTotals] = useState<TotalsRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [drill, setDrill] = useState<DrillView | null>(null);
   const [view, setView] = useState<'eligible' | 'on_hold' | 'released' | 'settled'>('eligible');
@@ -96,14 +124,22 @@ export default function AdminSettlements() {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('settlements')
-      .select(
-        '*, clinics(name), appointments(date, slot_time, family_members(name)), profiles!settlements_released_by_fkey(name)'
-      )
-      .neq('status', 'collected')
-      .order('created_at', { ascending: false });
-    setRows((data ?? []) as unknown as SettlementRow[]);
+    const statuses = ['eligible', 'on_hold', 'released', 'settled'] as const;
+    const [lists, sums] = await Promise.all([
+      Promise.all(
+        statuses.map((st) =>
+          supabase
+            .from('settlements')
+            .select(SETTLEMENT_SELECT)
+            .eq('status', st)
+            .order(st === 'settled' ? 'settled_at' : 'created_at', { ascending: false })
+            .limit(ROW_LIMIT[st])
+        )
+      ),
+      supabase.rpc('admin_settlement_totals'),
+    ]);
+    setRows(lists.flatMap((l) => l.data ?? []) as unknown as SettlementRow[]);
+    setTotals(sums.error ? null : ((sums.data ?? []) as TotalsRow[]));
     setLoading(false);
   };
 
@@ -115,8 +151,26 @@ export default function AdminSettlements() {
   const onHold = rows.filter((r) => r.status === 'on_hold');
   const released = rows.filter((r) => r.status === 'released');
   const settled = rows.filter((r) => r.status === 'settled');
-  const eligibleGroups = groupByClinic(eligible);
-  const grandTotal = round2(eligible.reduce((sum, r) => sum + (r.net_amount - r.platform_fee), 0));
+  // Counts and money from the database when available, so "Release all" says
+  // exactly what it will release, however many payments are waiting.
+  const countOf = (st: SettlementStatus) =>
+    totals
+      ? totals.filter((t) => t.status === st).reduce((n, t) => n + t.rows_count, 0)
+      : rows.filter((r) => r.status === st).length;
+  const eligibleGroups: ClinicGroup[] = totals
+    ? totals
+        .filter((t) => t.status === 'eligible')
+        .map((t) => ({
+          clinicId: t.clinic_id,
+          clinicName: t.clinic_name,
+          total: round2(Number(t.net_total)),
+          count: t.rows_count,
+          rows: eligible.filter((r) => r.clinic_id === t.clinic_id),
+        }))
+        .sort((a, b) => b.total - a.total)
+    : groupByClinic(eligible);
+  const grandTotal = round2(eligibleGroups.reduce((sum, g) => sum + g.total, 0));
+  const settledCount = countOf('settled');
 
   // The actual side effect for every "Release" action, one-by-one or bulk:
   // the DB transition (release_settlement / release_eligible_settlements)
@@ -233,10 +287,10 @@ export default function AdminSettlements() {
       <div className="mt-4">
         <Segmented
           options={[
-            { value: 'eligible', label: `Eligible (${eligible.length})` },
-            { value: 'on_hold', label: `On hold (${onHold.length})` },
-            { value: 'released', label: `Released (${released.length})` },
-            { value: 'settled', label: `Settled (${settled.length})` },
+            { value: 'eligible', label: `Eligible (${countOf('eligible')})` },
+            { value: 'on_hold', label: `On hold (${countOf('on_hold')})` },
+            { value: 'released', label: `Released (${countOf('released')})` },
+            { value: 'settled', label: `Settled (${settledCount})` },
           ]}
           value={view}
           onChange={setView}
@@ -248,7 +302,7 @@ export default function AdminSettlements() {
 
       {!loading && view === 'eligible' && (
         <>
-          {eligible.length > 0 && (
+          {eligibleGroups.length > 0 && (
             <div className="mt-3 flex items-center justify-between rounded-2xl bg-emerald-50 p-3.5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Total eligible</p>
@@ -264,7 +318,7 @@ export default function AdminSettlements() {
             </div>
           )}
 
-          {eligible.length === 0 && <p className="mt-3 text-sm text-slate-400">Nothing eligible right now.</p>}
+          {eligibleGroups.length === 0 && <p className="mt-3 text-sm text-slate-400">Nothing eligible right now.</p>}
 
           <div className="mt-3 space-y-3">
             {eligibleGroups.map((g) => (
@@ -288,6 +342,11 @@ export default function AdminSettlements() {
                   Release all for this clinic
                 </Button>
 
+                {g.rows.length < g.count && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Showing the latest {g.rows.length} of {g.count} payments - the amount covers all {g.count}.
+                  </p>
+                )}
                 <div className="mt-3 divide-y divide-slate-50 border-t border-slate-100">
                   {g.rows.map((r) => {
                     const net = round2(r.net_amount - r.platform_fee);
@@ -408,6 +467,11 @@ export default function AdminSettlements() {
       {!loading && view === 'settled' && (
         <div className="mt-3 space-y-2">
           {settled.length === 0 && <p className="text-sm text-slate-400">Nothing settled yet.</p>}
+          {settled.length < settledCount && (
+            <p className="text-xs text-slate-500">
+              Showing the latest {settled.length} of {settledCount} settled payouts.
+            </p>
+          )}
           {settled.map((r) => (
             <Card key={r.id}>
               <div className="flex items-center justify-between gap-2">

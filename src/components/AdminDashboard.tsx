@@ -17,6 +17,15 @@ interface Stats {
   platformRevenue: number;
 }
 
+interface PlatformTotals {
+  clinics_by_status: Partial<Record<ClinicStatus, number>>;
+  doctors: number;
+  patients: number;
+  appointments_today: number;
+  online_collected: number | string;
+  commission_revenue: number | string;
+}
+
 const EMPTY_STATS: Stats = {
   clinicsByStatus: { draft: 0, pending: 0, approved: 0, rejected: 0 },
   doctorCount: 0,
@@ -26,6 +35,37 @@ const EMPTY_STATS: Stats = {
   platformRevenue: 0,
 };
 
+// Before migration 88 is run: counts that are exact at any size, sums over
+// what one request returns (up to 1,000 rows).
+async function loadInBrowser(): Promise<Stats> {
+  const statuses: ClinicStatus[] = ['draft', 'pending', 'approved', 'rejected'];
+  const [statusCounts, { count: doctorCount }, { count: patientCount }, { count: apptToday }, { data: capturedPayments }, { data: settlements }] =
+    await Promise.all([
+      Promise.all(statuses.map((st) => supabase.from('clinics').select('id', { count: 'exact', head: true }).eq('status', st))),
+      supabase.from('doctors').select('id', { count: 'exact', head: true }),
+      supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'patient'),
+      supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('date', todayISO()),
+      // Only ONLINE captured payments are money the platform actually
+      // touched - COD is paid straight to the clinic, never collected here.
+      supabase.from('payments').select('amount').eq('status', 'captured').eq('method', 'online'),
+      // Revenue rule as Billing (migration 59): a fee counts once it is
+      // final - not while collected or on hold, and not if refunded.
+      supabase.from('settlements').select('platform_fee').in('status', ['eligible', 'released', 'settled']),
+    ]);
+  const clinicsByStatus = { ...EMPTY_STATS.clinicsByStatus };
+  statuses.forEach((st, i) => {
+    clinicsByStatus[st] = statusCounts[i].count ?? 0;
+  });
+  return {
+    clinicsByStatus,
+    doctorCount: doctorCount ?? 0,
+    patientCount: patientCount ?? 0,
+    appointmentsToday: apptToday ?? 0,
+    grossCollected: (capturedPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0),
+    platformRevenue: (settlements ?? []).reduce((sum, st) => sum + Number(st.platform_fee), 0),
+  };
+}
+
 export default function AdminDashboard({ onNavigate }: { onNavigate?: (tab: 'patients' | 'billing') => void }) {
   const [drill, setDrill] = useState<DrillView | null>(null);
   const [stats, setStats] = useState<Stats>(EMPTY_STATS);
@@ -33,38 +73,22 @@ export default function AdminDashboard({ onNavigate }: { onNavigate?: (tab: 'pat
 
   const load = async () => {
     setLoading(true);
-    const [{ data: clinicStatuses }, { count: doctorCount }, { count: patientCount }, { count: apptToday }, { data: capturedPayments }, { data: settlements }] =
-      await Promise.all([
-        supabase.from('clinics').select('status'),
-        supabase.from('doctors').select('id', { count: 'exact', head: true }),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'patient'),
-        supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('date', todayISO()),
-        // Only ONLINE captured payments are money the platform actually
-        // touched - COD is paid straight to the clinic, never collected here.
-        supabase.from('payments').select('amount').eq('status', 'captured').eq('method', 'online'),
-        // Real per-plan commission (migration 59), not a flat guess - only
-        // counts a row once its fee is actually known (past 'collected'),
-        // same reasoning the settlement console itself uses.
-        supabase.from('settlements').select('platform_fee').neq('status', 'collected'),
-      ]);
-
-    const clinicsByStatus: Record<ClinicStatus, number> = { draft: 0, pending: 0, approved: 0, rejected: 0 };
-    for (const c of clinicStatuses ?? []) {
-      const status = c.status as ClinicStatus;
-      clinicsByStatus[status] = (clinicsByStatus[status] ?? 0) + 1;
+    // Added up in the database (migration 88), so the figures stay right
+    // however many clinics and payments there are.
+    const { data, error } = await supabase.rpc('admin_platform_totals', { p_today: todayISO() });
+    if (!error && data) {
+      const t = data as PlatformTotals;
+      setStats({
+        clinicsByStatus: { ...EMPTY_STATS.clinicsByStatus, ...t.clinics_by_status },
+        doctorCount: t.doctors,
+        patientCount: t.patients,
+        appointmentsToday: t.appointments_today,
+        grossCollected: Number(t.online_collected),
+        platformRevenue: Number(t.commission_revenue),
+      });
+    } else {
+      setStats(await loadInBrowser());
     }
-
-    const grossCollected = (capturedPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
-    const platformRevenue = (settlements ?? []).reduce((sum, s) => sum + Number(s.platform_fee), 0);
-
-    setStats({
-      clinicsByStatus,
-      doctorCount: doctorCount ?? 0,
-      patientCount: patientCount ?? 0,
-      appointmentsToday: apptToday ?? 0,
-      grossCollected,
-      platformRevenue,
-    });
     setLoading(false);
   };
 

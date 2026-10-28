@@ -2,7 +2,7 @@ import Present from './ui/Present';
 import { EarningsCharts } from './Insights';
 import Loading from './ui/Loading';
 import { Clock3, Download, IndianRupee, Printer, Wallet } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { bookingReference } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
@@ -34,6 +34,16 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+type Bucket = 'pending' | 'ready' | 'paid' | 'other';
+type BucketTotals = Record<Bucket, { count: number; total: number }>;
+
+// The list shows up to this many payments, newest first; the totals always
+// cover every payment in the range, and the CSV fetches them all.
+const PAGE = 1000;
+const MAX_EXPORT_PAGES = 50;
+const EARNINGS_COLUMNS =
+  'id, appointment_id, net_amount, platform_fee, net_payout, status, hold_reason, released_at, settled_at, payout_reference, razorpay_transfer_id';
+
 // The clinic-side view of migration 59's settlement ledger - same table,
 // same RLS (settlements_select already reads `is_admin() or
 // is_own_clinic(clinic_id)`, so a clinic reading its own rows here needs no
@@ -44,43 +54,58 @@ function round2(n: number): number {
 // true, which is exactly what keeps the two views honest with each other.
 export default function ClinicEarnings({ clinic }: Props) {
   const [rows, setRows] = useState<EarningsRow[]>([]);
+  // Exact totals from the database (migration 88); null until it is run, and
+  // then the totals are added up from the listed rows instead.
+  const [totals, setTotals] = useState<BucketTotals | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [view, setView] = useState<'pending' | 'ready' | 'paid' | 'other'>('ready');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const loadSeq = useRef(0);
+
+  // One page of this clinic's payments, newest first. The visit-date range
+  // (yyyy-mm-dd, as the date inputs give it) is applied by the database, so
+  // an older range works however many payments came after it.
+  const fetchPage = (from: number, to: number) => {
+    const ranged = !!(dateFrom || dateTo);
+    let query = supabase
+      .from('settlements')
+      .select(`${EARNINGS_COLUMNS}, ${ranged ? 'appointments!inner' : 'appointments'}(date, slot_time)`)
+      .eq('clinic_id', clinic.id);
+    if (dateFrom) query = query.gte('appointments.date', dateFrom);
+    if (dateTo) query = query.lte('appointments.date', dateTo);
+    return query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to);
+  };
 
   const load = async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
-    const { data } = await supabase
-      .from('settlements')
-      .select(
-        'id, appointment_id, net_amount, platform_fee, net_payout, status, hold_reason, released_at, settled_at, payout_reference, razorpay_transfer_id, appointments(date, slot_time)'
-      )
-      .eq('clinic_id', clinic.id)
-      .order('created_at', { ascending: false })
-      .limit(1000);
+    const [{ data }, sums] = await Promise.all([
+      fetchPage(0, PAGE - 1),
+      supabase.rpc('clinic_earnings_totals', { p_clinic_id: clinic.id, p_from: dateFrom || null, p_to: dateTo || null }),
+    ]);
+    if (seq !== loadSeq.current) return; // a newer range was picked meanwhile
     setRows((data ?? []) as unknown as EarningsRow[]);
+    if (sums.error) {
+      setTotals(null);
+    } else {
+      const t: BucketTotals = { pending: { count: 0, total: 0 }, ready: { count: 0, total: 0 }, paid: { count: 0, total: 0 }, other: { count: 0, total: 0 } };
+      for (const r of (sums.data ?? []) as { bucket: Bucket; rows_count: number; total: number | string }[]) {
+        t[r.bucket] = { count: r.rows_count, total: round2(Number(r.total)) };
+      }
+      setTotals(t);
+    }
     setLoading(false);
   };
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clinic.id]);
+  }, [clinic.id, dateFrom, dateTo]);
 
-  // Same date-range box the filter inputs use natively (yyyy-mm-dd) -
-  // appointments.date already comes back in that exact form, so this is a
-  // plain string comparison, not a date parse.
-  const filtered = useMemo(
-    () =>
-      rows.filter((r) => {
-        const date = r.appointments?.date;
-        if (dateFrom && (!date || date < dateFrom)) return false;
-        if (dateTo && (!date || date > dateTo)) return false;
-        return true;
-      }),
-    [rows, dateFrom, dateTo]
-  );
+  // Already limited to the date range by the database (fetchPage).
+  const filtered = rows;
 
   const pending = filtered.filter((r) => r.status === 'collected');
   const ready = filtered.filter((r) => r.status === 'eligible');
@@ -92,9 +117,15 @@ export default function ClinicEarnings({ clinic }: Props) {
   // net out to isn't decided until it becomes Ready. Ready/Paid both use
   // net_amount - platform_fee, the same formula AdminSettlements.tsx uses,
   // so the two views can never quietly disagree.
-  const pendingTotal = round2(pending.reduce((sum, r) => sum + r.net_amount, 0));
-  const readyTotal = round2(ready.reduce((sum, r) => sum + (r.net_amount - r.platform_fee), 0));
-  const paidTotal = round2(paid.reduce((sum, r) => sum + (r.net_payout ?? r.net_amount - r.platform_fee), 0));
+  const pendingTotal = totals?.pending.total ?? round2(pending.reduce((sum, r) => sum + r.net_amount, 0));
+  const readyTotal = totals?.ready.total ?? round2(ready.reduce((sum, r) => sum + (r.net_amount - r.platform_fee), 0));
+  const paidTotal =
+    totals?.paid.total ?? round2(paid.reduce((sum, r) => sum + (r.net_payout ?? r.net_amount - r.platform_fee), 0));
+  const pendingCount = totals?.pending.count ?? pending.length;
+  const readyCount = totals?.ready.count ?? ready.length;
+  const paidCount = totals?.paid.count ?? paid.length;
+  const otherCount = totals?.other.count ?? other.length;
+  const allCount = pendingCount + readyCount + paidCount + otherCount;
 
   const visitLabel = (r: EarningsRow) =>
     r.appointments ? `${r.appointments.date} at ${r.appointments.slot_time?.slice(0, 5)}` : '—';
@@ -113,10 +144,19 @@ export default function ClinicEarnings({ clinic }: Props) {
 
   // A plain client-side CSV, no library needed - Excel/Sheets/every
   // accounting tool a clinic is likely to already use opens this directly.
-  const downloadStatement = () => {
-    const all = [...pending, ...ready, ...paid, ...other].sort((a, b) =>
-      (b.appointments?.date ?? '').localeCompare(a.appointments?.date ?? '')
-    );
+  // Every payment in the range, fetched page by page - not just the ones
+  // listed on screen.
+  const downloadStatement = async () => {
+    setExporting(true);
+    const fetched: EarningsRow[] = [];
+    for (let page = 0; page < MAX_EXPORT_PAGES; page++) {
+      const { data, error } = await fetchPage(page * PAGE, (page + 1) * PAGE - 1);
+      if (error) break;
+      fetched.push(...((data ?? []) as unknown as EarningsRow[]));
+      if (!data || data.length < PAGE) break;
+    }
+    setExporting(false);
+    const all = fetched.sort((a, b) => (b.appointments?.date ?? '').localeCompare(a.appointments?.date ?? ''));
     const data = csvRows(all);
     if (data.length === 0) return;
     const headers = Object.keys(data[0]);
@@ -221,7 +261,7 @@ export default function ClinicEarnings({ clinic }: Props) {
               <Clock3 size={16} className="mx-auto text-sky-500" />
               <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Pending</p>
               <p className="mt-0.5 text-base font-extrabold text-slate-900">₹{pendingTotal.toLocaleString()}</p>
-              <p className="text-[11px] text-slate-400">{pending.length} visit(s) not yet completed</p>
+              <p className="text-[11px] text-slate-400">{pendingCount} visit(s) not yet completed</p>
             </Card>
             </button>
             <button type="button" onClick={() => setView('ready')} className={`block rounded-2xl text-left transition ${view === 'ready' ? 'ring-2 ring-brand-500 shadow-lg' : ''}`}>
@@ -229,7 +269,7 @@ export default function ClinicEarnings({ clinic }: Props) {
               <IndianRupee size={16} className="mx-auto text-amber-500" />
               <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Ready</p>
               <p className="mt-0.5 text-base font-extrabold text-amber-700">₹{readyTotal.toLocaleString()}</p>
-              <p className="text-[11px] text-slate-400">{ready.length} awaiting release</p>
+              <p className="text-[11px] text-slate-400">{readyCount} awaiting release</p>
             </Card>
             </button>
             <button type="button" onClick={() => setView('paid')} className={`block rounded-2xl text-left transition ${view === 'paid' ? 'ring-2 ring-brand-500 shadow-lg' : ''}`}>
@@ -237,7 +277,7 @@ export default function ClinicEarnings({ clinic }: Props) {
               <Wallet size={16} className="mx-auto text-emerald-500" />
               <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Paid</p>
               <p className="mt-0.5 text-base font-extrabold text-emerald-700">₹{paidTotal.toLocaleString()}</p>
-              <p className="text-[11px] text-slate-400">{paid.length} released/settled</p>
+              <p className="text-[11px] text-slate-400">{paidCount} released/settled</p>
             </Card>
             </button>
           </div>
@@ -275,8 +315,8 @@ export default function ClinicEarnings({ clinic }: Props) {
               </button>
             )}
             <div className="ml-auto flex gap-2">
-              <Button variant="secondary" onClick={downloadStatement}>
-                <Download size={15} /> CSV
+              <Button variant="secondary" onClick={downloadStatement} disabled={exporting}>
+                <Download size={15} /> {exporting ? 'Preparing…' : 'CSV'}
               </Button>
               <Button variant="secondary" onClick={printStatement}>
                 <Printer size={15} /> Print / Save PDF
@@ -287,16 +327,24 @@ export default function ClinicEarnings({ clinic }: Props) {
           <div className="mt-4 print:hidden">
             <Segmented
               options={[
-                { value: 'pending', label: `Pending (${pending.length})` },
-                { value: 'ready', label: `Ready (${ready.length})` },
-                { value: 'paid', label: `Paid (${paid.length})` },
-                { value: 'other', label: `Other (${other.length})` },
+                { value: 'pending', label: `Pending (${pendingCount})` },
+                { value: 'ready', label: `Ready (${readyCount})` },
+                { value: 'paid', label: `Paid (${paidCount})` },
+                { value: 'other', label: `Other (${otherCount})` },
               ]}
               value={view}
               onChange={setView}
               variant="scroll"
             />
           </div>
+
+          {rows.length < allCount && (
+            <p className="mt-3 text-xs text-slate-500">
+              Showing the latest {rows.length.toLocaleString()} of {allCount.toLocaleString()} payments
+              {dateFrom || dateTo ? ' in these dates' : ''}. The totals above include all of them, and the CSV has the
+              full list.
+            </p>
+          )}
 
           {/* Screen: whichever tab is selected. Print: every non-empty
               section, one after another, labelled - a statement should

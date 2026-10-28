@@ -2,6 +2,7 @@ import Loading from './ui/Loading';
 import AdminDrill, { type DrillView } from './AdminDrill';
 import { useEffect, useState } from 'react';
 
+import { todayISO } from '../lib/date';
 import { supabase } from '../lib/supabaseClient';
 import type { BillingStatus, Plan } from '../lib/types';
 import AdminPlans from './AdminPlans';
@@ -67,6 +68,9 @@ export default function AdminBilling() {
   // get_clinic_doctor_usage() (that RPC is right for ClinicBilling.tsx's
   // single-clinic view; a whole admin list needs the aggregate instead).
   const [doctorCounts, setDoctorCounts] = useState<Record<string, number>>({});
+  // Revenue added up in the database (migration 88) - every invoice and fee,
+  // not just the latest rows listed below. Null until that migration is run.
+  const [revenue, setRevenue] = useState<{ subscriptions: number; commissions: number } | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<Record<string, string>>({});
   const [assigning, setAssigning] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -74,7 +78,14 @@ export default function AdminBilling() {
 
   const load = async () => {
     setLoading(true);
-    const [{ data: clinicData }, { data: invoiceData }, { data: commissionData }, { data: planData }, { data: doctorRows }] =
+    const [
+      { data: clinicData },
+      { data: invoiceData },
+      { data: commissionData },
+      { data: planData },
+      { data: doctorUsage, error: usageError },
+      { data: totals, error: totalsError },
+    ] =
       await Promise.all([
         supabase
           .from('clinics')
@@ -96,17 +107,33 @@ export default function AdminBilling() {
           .order('created_at', { ascending: false })
           .limit(FETCH_LIMIT),
         supabase.from('plans').select('*').eq('active', true).order('monthly_price', { ascending: true }),
-        supabase.from('doctors').select('clinic_id').eq('status', 'approved').eq('is_verified', true).eq('is_active', true),
+        supabase.rpc('admin_billable_doctor_counts'),
+        supabase.rpc('admin_platform_totals', { p_today: todayISO() }),
       ]);
     setClinics((clinicData ?? []) as unknown as ClinicRow[]);
     setInvoices((invoiceData ?? []) as unknown as InvoiceRow[]);
     setCommissions((commissionData ?? []) as unknown as CommissionRow[]);
     setPlans((planData ?? []) as Plan[]);
     const counts: Record<string, number> = {};
-    for (const d of (doctorRows ?? []) as { clinic_id: string }[]) {
-      counts[d.clinic_id] = (counts[d.clinic_id] ?? 0) + 1;
+    if (!usageError) {
+      for (const d of (doctorUsage ?? []) as { clinic_id: string; doctors_used: number }[]) counts[d.clinic_id] = d.doctors_used;
+    } else {
+      // Before migration 88: count from the list (up to 1,000 doctors).
+      const { data: doctorRows } = await supabase
+        .from('doctors')
+        .select('clinic_id')
+        .eq('status', 'approved')
+        .eq('is_verified', true)
+        .eq('is_active', true);
+      for (const d of (doctorRows ?? []) as { clinic_id: string }[]) counts[d.clinic_id] = (counts[d.clinic_id] ?? 0) + 1;
     }
     setDoctorCounts(counts);
+    const t = totals as { subscription_revenue?: number | string; commission_revenue?: number | string } | null;
+    setRevenue(
+      !totalsError && t
+        ? { subscriptions: Number(t.subscription_revenue ?? 0), commissions: Number(t.commission_revenue ?? 0) }
+        : null
+    );
     setLoading(false);
   };
 
@@ -151,8 +178,11 @@ export default function AdminBilling() {
     load();
   };
 
-  const subscriptionRevenue = invoices.filter((i) => i.status === 'paid').reduce((sum, i) => sum + i.amount, 0);
-  const commissionRevenue = commissions.reduce((sum, c) => sum + c.platform_fee, 0);
+  // All-time, from the database; before migration 88, only what the latest
+  // rows below add up to (and the card says so).
+  const subscriptionRevenue =
+    revenue?.subscriptions ?? invoices.filter((i) => i.status === 'paid').reduce((sum, i) => sum + Number(i.amount), 0);
+  const commissionRevenue = revenue?.commissions ?? commissions.reduce((sum, c) => sum + Number(c.platform_fee), 0);
   const totalRevenue = subscriptionRevenue + commissionRevenue;
 
   if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
@@ -171,7 +201,9 @@ export default function AdminBilling() {
       </p>
 
       <Card className="mt-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total revenue</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {revenue ? 'Total revenue' : `Revenue in the latest ${FETCH_LIMIT} rows`}
+        </p>
         <p className="mt-1 text-2xl font-extrabold text-slate-900">₹{totalRevenue.toLocaleString('en-IN')}</p>
         <p className="mt-1 text-xs text-slate-500">
           ₹{subscriptionRevenue.toLocaleString('en-IN')} subscriptions + ₹{commissionRevenue.toLocaleString('en-IN')}{' '}
