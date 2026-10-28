@@ -3,9 +3,11 @@
 @theme {
   /* "Modern Premium": indigo primary, sky tint, emerald accent, off-white
      ground, near-black text. Inter for reading, Plus Jakarta Sans for headings. */
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Noto Sans Devanagari follows each Latin face so Hindi (prescriptions)
+     renders in one consistent typeface on every device. */
+  --font-sans: "Inter", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "Inter", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
 
   /* Primary: indigo-blue #3B5BDB at 600. */
   --color-brand-50: #edf2ff;
@@ -108,7 +110,7 @@ body {
 /* Clinics get the warmer Nunito Sans for body text. */
 .app-scope[data-app-role='clinic'] {
   --accent: var(--color-leaf-text);
-  --font-ui: "Nunito Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "Nunito Sans", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
 }
 .app-scope[data-app-role='admin'] {
   --accent: var(--color-admin);
@@ -416,4 +418,23 @@ body {
   .blob { filter: blur(34px); animation-duration: 22s; }
   .app-scope main .bg-white[class*='rounded-'].border:not([data-card]) { animation: none; }
   .app-scope main [class*='rounded-full'][class*='px-'][class*='text-xs'] { animation: none; }
+}
+
+/* Printing a prescription (components/rx/PrescriptionSheet.tsx): only the
+   sheet prints - the app behind it is hidden while the sheet is open. */
+@media print {
+  html.rx-printing body > *:not([data-rx-sheet]) {
+    display: none !important;
+  }
+  html.rx-printing [data-rx-sheet] {
+    position: static !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  html.rx-printing .rx-no-print {
+    display: none !important;
+  }
+  @page {
+    margin: 14mm;
+  }
 }

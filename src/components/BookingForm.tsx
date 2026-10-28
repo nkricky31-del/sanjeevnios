@@ -1,6 +1,6 @@
 import { ShieldAlert } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import TurnstileWidget from './TurnstileWidget';
 import { useNavigate } from 'react-router-dom';
@@ -25,7 +25,8 @@ import { getCurrentCoords } from '../lib/checkIn';
 import { createPaymentWithCoupon, releaseCouponReservation, reserveCoupon } from '../lib/coupons';
 import { todayISO } from '../lib/date';
 import { DPDP_CONSENT_TEXT } from '../lib/dpdpConsent';
-import { bookingReceivedMessage, notifyPatient } from '../lib/notify';
+import { appointmentConfirmedMessage, checkInHowFor, notifyPatient } from '../lib/notify';
+import { bookingReference } from '../lib/queue';
 import { EMERGENCY_NOTE, PATIENT_DECLARATION_TEXT, PLATFORM_DISCLAIMER_SHORT } from '../lib/platformDisclaimer';
 import { createRazorpayOrder, loadRazorpayScript, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay';
 import { CAPTCHA_ENABLED, redeemBookingCaptcha } from '../lib/captcha';
@@ -85,7 +86,10 @@ export default function BookingForm({
   const { session, profile } = useAuth();
   const navigate = useNavigate();
   const [reason, setReason] = useState('');
-  const [method, setMethod] = useState<PaymentMethod>('online');
+  // Pay at the clinic until the clinic's settings load - online only once we
+  // know the clinic accepts it (migration 85's online_payments_enabled).
+  const [method, setMethod] = useState<PaymentMethod>('cod');
+  const methodTouched = useRef(false);
   const [loading, setLoading] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaReset, setCaptchaReset] = useState(0);
@@ -134,8 +138,14 @@ export default function BookingForm({
   const looksLikeFreeFollowUp = !!followUpOfVisitId && !!followUpDueDate && date <= followUpDueDate;
 
   useEffect(() => {
-    getBookingPolicy(clinicId).then(setPolicy);
+    getBookingPolicy(clinicId).then((p) => {
+      setPolicy(p);
+      // Online is the default where it's offered, unless the patient already chose.
+      if (p.onlinePaymentsEnabled && !methodTouched.current) setMethod('online');
+    });
   }, [clinicId]);
+
+  const onlineOffered = policy.onlinePaymentsEnabled;
 
   const sameDayAutoCheckin = date === todayISO() && policy.mode === 'appointment_only' && policy.sameDayBookingEnabled && policy.autoCheckinVerifiedSameDay;
 
@@ -175,6 +185,7 @@ export default function BookingForm({
   };
 
   const changeMethod = (m: PaymentMethod) => {
+    methodTouched.current = true;
     if (m === method) return;
     if (appliedCoupon) {
       releaseCouponReservation(appliedCoupon.redemptionId);
@@ -256,7 +267,9 @@ export default function BookingForm({
     // patient was picking a slot) falls back to a normal COD-style booking
     // rather than blocking - create_payment_with_coupon() below is still the
     // one true source of what actually gets charged, either way.
-    const effectiveMethod = looksLikeFreeFollowUp ? 'cod' : method;
+    // A clinic that doesn't take online payments is always pay-at-clinic,
+    // whatever the form state says (the server refuses online too).
+    const effectiveMethod = looksLikeFreeFollowUp || !onlineOffered ? 'cod' : method;
 
     const { data: appointment, error: apptError } = await supabase
       .from('appointments')
@@ -267,10 +280,10 @@ export default function BookingForm({
         date,
         slot_time: slotTime,
         reason: reason.trim() || null,
-        // 'booked' = waiting for the clinic to confirm. No token is issued
-        // here - the patient collects one when they arrive and check in,
-        // UNLESS this is a same-day booking the clinic can auto-check-in
-        // from the location fix above (still decided server-side).
+        // Confirmed on the spot by the database (migration 85 - there's no
+        // clinic Accept step). No token is issued here - the patient collects
+        // one when they arrive and check in, UNLESS this is a same-day booking
+        // the clinic can auto-check-in from the location fix above.
         status: 'booked',
         // Payment is recorded, and that is ALL it does: paying online buys no
         // queue priority and does not check anyone in. It only means there's
@@ -341,21 +354,29 @@ export default function BookingForm({
       return;
     }
 
+    const confirmedMessage = (paymentStatus: 'paid_online' | 'pay_at_clinic' | 'free_followup') =>
+      appointmentConfirmedMessage(
+        slotTime,
+        bookingReference(appointment.id),
+        paymentStatus,
+        policy.reportBeforeMinutes,
+        checkInHowFor(policy),
+        { doctorName, date, amountDue: paymentResult.netAmount }
+      );
+
     // Free (server-confirmed, not just this page's preview) or COD - either
     // way there's no gateway step, so this is done the moment the payment row
     // exists.
     if (effectiveMethod === 'cod' || paymentResult.isFree) {
-      // BOOKING RECEIVED - see notify.ts. Best-effort: a failure here must
-      // never strand the patient on a stuck "Booking..." button when the
-      // booking + payment above already succeeded.
+      // CONFIRMED - see notify.ts. Best-effort: a failure here must never
+      // strand the patient on a stuck "Booking..." button when the booking +
+      // payment above already succeeded.
       if (session) {
         await notifyPatient({
           userId: session.user.id,
           appointmentId: appointment.id,
-          type: 'booking_received',
-          message: paymentResult.isFree
-            ? `We've received your free follow-up booking request for ${doctorName} on ${date}. Nothing is due - you'll be confirmed once the clinic approves.`
-            : bookingReceivedMessage(doctorName, date, effectiveMethod, paymentResult.netAmount),
+          type: 'appointment_confirmed',
+          message: confirmedMessage(paymentResult.isFree ? 'free_followup' : 'pay_at_clinic'),
         });
       }
       setLoading(false);
@@ -363,10 +384,9 @@ export default function BookingForm({
       return;
     }
 
-    // Online: open Razorpay Checkout against the order this creates. Nothing
-    // charges yet - razorpay-create-order authorizes only (payment_capture: 0),
-    // the actual hold. Capture only ever happens later, when the clinic taps
-    // Accept (ClinicQueue.tsx).
+    // Online: open Razorpay Checkout against the order this creates.
+    // razorpay-create-order only authorises; razorpay-verify-payment captures
+    // it once the signature checks out (migration 85 - no clinic Accept).
     const scriptOk = await loadRazorpayScript();
     if (!scriptOk) {
       setLoading(false);
@@ -402,8 +422,8 @@ export default function BookingForm({
           await notifyPatient({
             userId: session.user.id,
             appointmentId: appointment.id,
-            type: 'booking_received',
-            message: bookingReceivedMessage(doctorName, date, effectiveMethod, paymentResult.netAmount),
+            type: 'appointment_confirmed',
+            message: confirmedMessage('paid_online'),
           });
         }
         setLoading(false);
@@ -620,7 +640,16 @@ export default function BookingForm({
         />
       </div>
 
-      {!looksLikeFreeFollowUp && (
+      {!looksLikeFreeFollowUp && !onlineOffered && (
+        <div className="mt-4 rounded-2xl border border-slate-200 p-3">
+          <p className="text-sm font-semibold text-slate-700">Pay at the clinic</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+            This clinic takes payment at the clinic. Pay ₹{bill.netAmount} at the desk when you arrive.
+          </p>
+        </div>
+      )}
+
+      {!looksLikeFreeFollowUp && onlineOffered && (
         <div className="mt-4">
           <p className="text-sm font-semibold text-slate-700">Payment method</p>
           <div className="mt-1.5 flex gap-2">
@@ -652,20 +681,20 @@ export default function BookingForm({
                   transition={{ type: 'spring', stiffness: 380, damping: 30 }}
                 />
               )}
-              <span className="relative">Cash at clinic</span>
+              <span className="relative">Pay at clinic</span>
             </button>
           </div>
           {/* What paying online does and does not buy, said up front - so
               nobody arrives expecting to be seen sooner for it. */}
           {method === 'online' ? (
             <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-              You'll complete payment via Razorpay (UPI/card). This only places a <strong>hold</strong> — nothing is
-              charged until the clinic accepts your booking. It does <strong>not</strong> move you up the queue — turn
-              order follows appointment time, then arrival.
+              You'll pay now via Razorpay (UPI/card) and your booking is confirmed as soon as the payment goes through.
+              Paying online does <strong>not</strong> move you up the queue — turn order follows appointment time, then
+              arrival.
             </p>
           ) : (
             <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-              You'll check in at the counter when you pay. Your place in the queue is the same either way.
+              Pay at the desk when you arrive. Your place in the queue is the same either way.
             </p>
           )}
         </div>

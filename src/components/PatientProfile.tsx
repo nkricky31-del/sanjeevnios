@@ -291,7 +291,7 @@ export default function PatientProfile({ mrn }: Props) {
                 <div id={`encounter-${e.id}`} className="border-t border-slate-100 p-3">
                   {auditedIds.has(e.id) ? (
                     <>
-                      <EncounterFullDetail encounter={e} />
+                      <EncounterFullDetail encounter={e} patientName={profile?.name} />
                       <Link
                         to={`/encounters/${e.id}`}
                         className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:underline"

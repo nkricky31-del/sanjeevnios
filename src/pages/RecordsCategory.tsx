@@ -1,15 +1,18 @@
-import { ArrowLeft, ChevronDown, Download, ExternalLink, FileText, FlaskConical, Pill, ScanLine, UploadCloud, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Download, ExternalLink, FileText, FlaskConical, Pill, Printer, ScanLine, UploadCloud, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 
 import FileUpload from '../components/FileUpload';
+import PrescriptionItems, { RxLanguageToggle } from '../components/rx/PrescriptionItems';
+import PrescriptionSheet from '../components/rx/PrescriptionSheet';
 import HeroBand from '../components/ui/HeroBand';
 import Loading from '../components/ui/Loading';
 import { downloadPrescriptionText } from '../lib/encounterExport';
 import { downloadAppointmentFile, openAppointmentFile } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
 import type { AppointmentFile, FamilyMember, FileCategory, Prescription } from '../lib/types';
+import { useRxLanguage } from '../lib/useRxLanguage';
 
 type CategoryKey = 'encounters' | 'prescriptions' | 'lab_report' | 'xray' | 'documents';
 
@@ -20,7 +23,7 @@ interface Appt {
   slot_time: string;
   doctors: { name: string; specialty: string | null } | null;
   clinics: { name: string } | null;
-  visits: { id: string; diagnosis: string | null; notes: string | null; prescriptions: Prescription[] }[];
+  visits: { id: string; diagnosis: string | null; notes: string | null; follow_up_due_date?: string | null; prescriptions: Prescription[] }[];
   files: AppointmentFile[];
 }
 
@@ -64,6 +67,8 @@ export default function RecordsCategory() {
   const [uploadFor, setUploadFor] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [rxLanguage, setRxLanguage] = useRxLanguage();
+  const [printing, setPrinting] = useState<{ p: Prescription; a: Appt; diagnosis: string | null; followUp: string | null } | null>(null);
 
   const load = useCallback(async () => {
     const { data: m } = await supabase.from('family_members').select('*');
@@ -76,7 +81,7 @@ export default function RecordsCategory() {
         ? supabase
             .from('appointments')
             .select(
-              'id, member_id, date, slot_time, doctors(name, specialty), clinics(name), visits(id, notes:notes_plain, diagnosis:diagnosis_plain, prescriptions(id, visit_id, items, file_url, signed_by, status, created_at)), files(id, member_id, appointment_id, type, storage_path, created_at)'
+              'id, member_id, date, slot_time, doctors(name, specialty), clinics(name), visits(id, notes:notes_plain, diagnosis:diagnosis_plain, follow_up_due_date, prescriptions(*)), files(id, member_id, appointment_id, type, storage_path, created_at)'
             )
             .in('member_id', ids)
             .order('date', { ascending: false })
@@ -106,7 +111,9 @@ export default function RecordsCategory() {
   const rx = useMemo(
     () =>
       appts.flatMap((a) =>
-        a.visits.flatMap((v) => (v.prescriptions ?? []).map((p) => ({ p, a, diagnosis: v.diagnosis }))),
+        a.visits.flatMap((v) =>
+          (v.prescriptions ?? []).map((p) => ({ p, a, diagnosis: v.diagnosis, followUp: v.follow_up_due_date ?? null })),
+        ),
       ),
     [appts],
   );
@@ -314,7 +321,7 @@ export default function RecordsCategory() {
         {/* prescriptions: expandable cards with the medicines */}
         {key === 'prescriptions' && rx.length > 0 && (
           <div className="space-y-3">
-            {rx.map(({ p, a, diagnosis }, i) => {
+            {rx.map(({ p, a, diagnosis, followUp }, i) => {
               const isOpen = open === p.id;
               return (
                 <motion.div
@@ -346,31 +353,30 @@ export default function RecordsCategory() {
                       <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                         <div className="border-t border-slate-100 bg-slate-50/60 p-4">
                           {diagnosis && <p className="mb-3 text-xs text-slate-600"><span className="font-semibold text-slate-800">Diagnosis:</span> {diagnosis}</p>}
-                          <div className="space-y-2">
-                            {(p.items ?? []).map((it, n) => (
-                              <motion.div
-                                key={n}
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: n * 0.06 }}
-                                className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-100"
-                              >
-                                <span className="min-w-0">
-                                  <span className="block truncate text-sm font-semibold text-slate-900">{it.name}</span>
-                                  <span className="block text-xs text-slate-500">{it.dosage} · {it.frequency}</span>
-                                </span>
-                                <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">{it.durationDays} day{it.durationDays === 1 ? '' : 's'}</span>
-                              </motion.div>
-                            ))}
+                          <div className="mb-2 flex justify-end">
+                            <RxLanguageToggle value={rxLanguage} onChange={setRxLanguage} />
                           </div>
-                          {p.signed_by && <p className="mt-3 text-xs text-slate-500">Signed by {p.signed_by}</p>}
+                          <PrescriptionItems
+                            items={p.items ?? []}
+                            adviceEn={p.advice_en}
+                            adviceHi={p.advice_hi}
+                            language={rxLanguage}
+                          />
+                          {p.signed_by && <p className="mt-3 text-xs text-slate-500">Signed by {a.doctors?.name ?? 'the doctor'}</p>}
                           <div className="mt-3 flex flex-wrap gap-2">
                             <button
                               type="button"
-                              onClick={() => downloadPrescriptionText(p, { doctor: a.doctors?.name, clinic: a.clinics?.name, patient: members.find((m) => m.id === a.member_id)?.name })}
+                              onClick={() => setPrinting({ p, a, diagnosis, followUp })}
                               className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white"
                             >
-                              <Download size={14} /> Download
+                              <Printer size={14} /> Print / PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadPrescriptionText(p, { doctor: a.doctors?.name, clinic: a.clinics?.name, patient: members.find((m) => m.id === a.member_id)?.name })}
+                              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
+                            >
+                              <Download size={14} /> Text copy
                             </button>
                             <button type="button" onClick={() => navigate(`/bookings/${a.id}`)} className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
                               <ExternalLink size={14} /> Open the visit
@@ -423,6 +429,18 @@ export default function RecordsCategory() {
           </>
         )}
       </div>
+
+      {printing && (
+        <PrescriptionSheet
+          prescription={printing.p}
+          patientName={members.find((m) => m.id === printing.a.member_id)?.name}
+          diagnosis={printing.diagnosis}
+          followUpDate={printing.followUp}
+          fallbackDoctorName={printing.a.doctors?.name}
+          fallbackClinicName={printing.a.clinics?.name}
+          onClose={() => setPrinting(null)}
+        />
+      )}
     </div>
   );
 }

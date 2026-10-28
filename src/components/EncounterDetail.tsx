@@ -143,7 +143,11 @@ export default function EncounterDetail({ encounterId }: Props) {
               animate={{ opacity: 1 }}
               transition={{ delay: 0.15 }}
             >
-              <EncounterFullDetail encounter={encounter} onLoaded={handleLoaded} />
+              <EncounterFullDetail
+                encounter={encounter}
+                onLoaded={handleLoaded}
+                patientName={encounter.family_members?.name}
+              />
             </motion.div>
           </motion.div>
         )}

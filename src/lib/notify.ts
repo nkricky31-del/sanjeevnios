@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { formatTimeLabel, reportingTimeFor } from './time';
-import type { AppointmentPaymentStatus, NotificationChannel, PaymentMethod } from './types';
+import type { AppointmentPaymentStatus, NotificationChannel } from './types';
 
 // How close to the reporting time (not the slot time) the one-shot "please
 // head over" nudge fires - see BookingStatus.tsx's reminder effect and
@@ -69,26 +69,34 @@ export async function notifyPatient(args: NotifyArgs): Promise<void> {
 // "next best slot" suggestion (lib/queue.ts's findNextBestSlot).
 // ----------------------------------------------------------------------------
 
-// Sent the moment a booking is created (status 'booked' - the "pending,
-// awaiting the clinic" state). Payment itself was already placed on hold (or,
-// for COD, left as nothing-collected-yet) by BookingForm.tsx before this is
-// called - this message only describes that fact to the patient.
-export function bookingReceivedMessage(doctorName: string, date: string, method: PaymentMethod, amount: number): string {
-  const paymentLine = method === 'online' ? 'Payment is on hold.' : `Payment (₹${amount}) is due at the clinic.`;
-  return `We've received your booking request for ${doctorName} on ${date}. ${paymentLine} You'll be confirmed once the clinic approves.`;
+// How this clinic checks patients in - decides the one line of instructions
+// in the confirmation (migration 84/85 clinic settings).
+export type CheckInHow = 'clinic_qr' | 'patient_qr' | 'desk';
+
+export function checkInHowFor(clinic: { selfCheckinEnabled: boolean; patientQrEnabled: boolean }): CheckInHow {
+  if (clinic.selfCheckinEnabled) return 'clinic_qr';
+  if (clinic.patientQrEnabled) return 'patient_qr';
+  return 'desk';
 }
 
-// Sent only once the clinic taps Accept - never before. By this point
-// migration_39's handle_appointment_status_change() has already captured any
-// held online payment, so paymentStatus here just decides which payment line
-// to show, not whether to capture anything. reportBeforeMinutes is the
-// clinic's own setting (section 40) - clamped inside reportingTimeFor so the
+const CHECK_IN_LINE: Record<CheckInHow, string> = {
+  clinic_qr: "When you arrive, open this booking and scan the clinic's QR at reception to check in.",
+  patient_qr: 'Show the QR on your booking at the desk to check in.',
+  desk: 'Give your name or booking ref at the desk to check in.',
+};
+
+// The confirmation, sent the moment a booking is made - bookings no longer
+// wait for the clinic to accept them (migration 85). For an online payment
+// it's sent once the payment has gone through. reportBeforeMinutes is the
+// clinic's own setting (section 40), clamped inside reportingTimeFor so the
 // quoted time can never fall outside the check-in window.
 export function appointmentConfirmedMessage(
   slotTime: string,
   bookingRef: string,
   paymentStatus: AppointmentPaymentStatus,
-  reportBeforeMinutes: number
+  reportBeforeMinutes: number,
+  checkInHow: CheckInHow = 'desk',
+  details?: { doctorName?: string; date?: string; amountDue?: number }
 ): string {
   const reportBy = formatTimeLabel(reportingTimeFor(slotTime, reportBeforeMinutes));
   const paymentNote =
@@ -96,10 +104,12 @@ export function appointmentConfirmedMessage(
       ? "This is a free follow-up visit, so there's nothing to pay."
       : paymentStatus === 'paid_online' || paymentStatus === 'paid_at_clinic'
         ? "You've already paid, so there's nothing to pay at the desk."
-        : 'Payment is due at the desk when you arrive.';
-  return `Confirmed! Please reach the clinic by ${reportBy} (your reporting time) for your ${formatTimeLabel(
-    slotTime
-  )} slot. Show your QR at the desk to check in. Booking ref ${bookingRef}. ${paymentNote}`;
+        : details?.amountDue != null
+          ? `Please pay ₹${details.amountDue} at the clinic.`
+          : 'Payment is due at the desk when you arrive.';
+  const who = details?.doctorName ? ` with ${details.doctorName}` : '';
+  const when = details?.date ? ` on ${details.date}` : '';
+  return `Confirmed! Your appointment${who}${when} at ${formatTimeLabel(slotTime)} is booked. Please reach the clinic by ${reportBy} (your reporting time). ${CHECK_IN_LINE[checkInHow]} Booking ref ${bookingRef}. ${paymentNote}`;
 }
 
 // The single "reporting time is approaching" nudge (see BookingStatus.tsx) -
@@ -111,7 +121,21 @@ export function reportingTimeReminderMessage(reportingTime: string, slotTime: st
   )} slot.`;
 }
 
-// Sent only when the clinic taps Reject. `refunded` should reflect whether
+// Sent when the clinic cancels a confirmed booking (doctor unavailable, etc.).
+export function appointmentCancelledByClinicMessage(
+  reason: string,
+  refunded: boolean,
+  suggestion: { date: string; slotTime: string } | null
+): string {
+  const refundLine = refunded ? 'Your payment is refunded.' : 'Nothing was collected.';
+  const nextLine = suggestion
+    ? `The next open slot with this doctor is ${suggestion.date} at ${formatTimeLabel(suggestion.slotTime)}.`
+    : 'Please book another slot or doctor when convenient.';
+  return `Sorry, the clinic had to cancel your appointment (${reason}). ${refundLine} ${nextLine}`;
+}
+
+// Sent only when the clinic taps Reject (bookings from before instant
+// confirmation, migration 85). `refunded` should reflect whether
 // there was actually money on hold to give back (an online booking) - a COD
 // booking never had anything collected, so it gets the "no payment was
 // collected" line instead of a refund claim that isn't true.

@@ -7,19 +7,23 @@
 // actually proves the payment_id genuinely belongs to the order_id Razorpay
 // issued) before the app is allowed to treat this booking as paid.
 //
-// This does not capture anything - the order was created with
-// payment_capture: 0 (see razorpay-create-order), so at this point Razorpay
-// has only authorized the amount. It stays authorized (held) until
-// razorpay-capture-payment actually captures it, on Accept.
+// Bookings are confirmed the moment they're made (migration 85 - there is no
+// clinic Accept step any more), so once the signature checks out this also
+// CAPTURES the payment: the order was created with payment_capture: 0 (see
+// razorpay-create-order), so until now Razorpay had only authorised it. Only
+// after Razorpay confirms the capture is the booking recorded as paid
+// (record_online_payment_captured). If the capture fails, nothing is charged
+// and the app cancels the booking - the authorisation lapses on its own.
 //
 // Deploy: npx supabase functions deploy razorpay-verify-payment
-// Secrets: shares RAZORPAY_KEY_SECRET with the other razorpay-* functions.
+// Secrets: shares RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET with the other razorpay-* functions.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 import { audit, authenticate } from '../_shared/authorize.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const RAZORPAY_KEY_ID = Deno.env.get('RAZORPAY_KEY_ID')!;
 const RAZORPAY_KEY_SECRET = Deno.env.get('RAZORPAY_KEY_SECRET')!;
 
 // Only our own site may call this from a browser (set ALLOWED_ORIGIN as a function
@@ -100,7 +104,7 @@ Deno.serve(async (req) => {
   const serviceClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const { data: payment, error: paymentError } = await serviceClient
     .from('payments')
-    .select('id, status, razorpay_order_id')
+    .select('id, status, razorpay_order_id, net_amount, amount')
     .eq('appointment_id', appointmentId)
     .maybeSingle();
   if (paymentError || !payment) {
@@ -120,15 +124,54 @@ Deno.serve(async (req) => {
     return json({ verified: false, error: 'Payment signature did not match - this callback could not be trusted.' }, 400);
   }
 
-  const { error: updateError } = await serviceClient
-    .from('payments')
-    .update({ razorpay_payment_id: razorpayPaymentId })
-    .eq('id', payment.id);
-  if (updateError) {
-    return json({ verified: false, error: `Verified but could not be saved: ${updateError.message}` }, 500);
+  // The booking may have been released while the patient was paying (the
+  // abandoned-checkout sweep, migration 85). Don't take money for it.
+  const { data: liveAppt } = await serviceClient
+    .from('appointments')
+    .select('status')
+    .eq('id', appointmentId)
+    .maybeSingle();
+  if (!liveAppt || liveAppt.status === 'cancelled' || liveAppt.status === 'rejected') {
+    return json(
+      {
+        verified: false,
+        error: 'This booking was released before the payment finished, so nothing has been charged. Your bank will release the amount. Please book again.',
+      },
+      409
+    );
+  }
+
+  // Capture now - see this file's header.
+  const amountPaise = Math.round(Number(payment.net_amount ?? payment.amount) * 100);
+  const captureRes = await fetch(`https://api.razorpay.com/v1/payments/${razorpayPaymentId}/capture`, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Basic ' + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ amount: amountPaise, currency: 'INR' }),
+  });
+  if (!captureRes.ok) {
+    const detail = await captureRes.text();
+    // A retried call after a capture that already went through is fine.
+    if (!/already been captured/i.test(detail)) {
+      return json({ verified: false, error: `The payment could not be completed: ${detail}` }, 502);
+    }
+  }
+
+  const { error: recordError } = await serviceClient.rpc('record_online_payment_captured', {
+    p_appointment_id: appointmentId,
+    p_razorpay_payment_id: razorpayPaymentId,
+  });
+  if (recordError) {
+    // The money HAS been captured - never tell the app to cancel the booking
+    // now. Keep it confirmed and leave an audit trail for an admin to fix the
+    // ledger by hand.
+    await audit(serviceClient, caller, 'payment_captured_unrecorded', appointmentId);
+    return json({ verified: true, captured: true, warning: `Payment taken, ledger not updated: ${recordError.message}` });
   }
 
   // 6. Audit.
-  await audit(serviceClient, caller, 'payment_verified', appointmentId);
-  return json({ verified: true });
+  await audit(serviceClient, caller, 'payment_captured', appointmentId);
+  return json({ verified: true, captured: true });
 });

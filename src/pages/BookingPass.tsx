@@ -52,6 +52,8 @@ interface PassBooking {
     self_checkin_enabled: boolean;
     self_checkin_require_location: boolean;
     checkin_open_before_minutes: number | null;
+    // Migration 85 - the patient's own QR only exists when the clinic uses it.
+    patient_qr_enabled?: boolean | null;
   } | null;
   family_members: { name: string; mrn: string } | null;
   encounters: { encounter_no: string } | null;
@@ -91,7 +93,7 @@ export default function BookingPass() {
     const { data } = await supabase
       .from('appointments')
       .select(
-        'id, date, slot_time, status, payment_status, token_number, checked_in_at, sequence_no, estimated_time, doctor_id, clinic_id, doctors(name, specialty), clinics(name, address, self_checkin_enabled, self_checkin_require_location, checkin_open_before_minutes), family_members(name, mrn), encounters(encounter_no)'
+        'id, date, slot_time, status, payment_status, token_number, checked_in_at, sequence_no, estimated_time, doctor_id, clinic_id, doctors(name, specialty), clinics(*), family_members(name, mrn), encounters(encounter_no)'
       )
       .eq('id', appointmentId)
       .single();
@@ -126,13 +128,14 @@ export default function BookingPass() {
   }, [appointmentId]);
 
   const awaitingArrival = booking?.status === 'accepted';
+  const patientQrOn = !!booking?.clinics?.patient_qr_enabled;
 
   useEffect(() => {
-    if (!awaitingArrival) return;
+    if (!awaitingArrival || !patientQrOn) return;
     refreshQr();
     const timer = setInterval(refreshQr, QR_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [awaitingArrival, refreshQr]);
+  }, [awaitingArrival, patientQrOn, refreshQr]);
 
   // Live queue numbers, once the patient is actually in the queue.
   const loadQueue = useCallback(async () => {
@@ -265,7 +268,10 @@ export default function BookingPass() {
 
   return (
     <div>
-      <ScreenHeader title={inQueue ? 'Your token' : selfCheckInAvailable ? 'Check in' : 'Show this at reception'} back={-1} />
+      <ScreenHeader
+        title={inQueue ? 'Your token' : selfCheckInAvailable || !patientQrOn ? 'Check in' : 'Show this at reception'}
+        back={-1}
+      />
 
       {scanning && (
         <QrScanner
@@ -297,8 +303,7 @@ export default function BookingPass() {
                   </p>
                 )}
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                  This is your place in the published order, not a check-in — scan or show the code below when you
-                  arrive.
+                  This is your place in the published order, not a check-in — check in below when you arrive.
                 </p>
               </div>
             )}
@@ -321,11 +326,29 @@ export default function BookingPass() {
                   location only at that moment — it's used only to confirm you're at the clinic.
                 </p>
                 <p className="mt-4 border-t border-slate-100 pt-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Or show this code at the desk
+                  {patientQrOn ? 'Or show this code at the desk' : 'Or check in at the desk'}
                 </p>
               </div>
             )}
 
+            {/* No patient QR at this clinic: the desk finds the booking by name,
+                phone or this booking ID. */}
+            {!patientQrOn && (
+              <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Booking ID</p>
+                <p className="mt-1 font-mono text-3xl font-extrabold tracking-wider text-slate-900">
+                  {bookingReference(booking.id)}
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  {selfCheckInAvailable
+                    ? "Can't scan? Give this booking ID, your name or your phone number at the desk."
+                    : 'At the desk, give this booking ID, your name or your phone number to check in.'}
+                </p>
+              </div>
+            )}
+
+            {patientQrOn && (
+            <>
             <div className="mt-4 flex justify-center">
               {qr ? (
                 <QrCode value={qr} size={220} className="ring-1 ring-slate-100" />
@@ -371,6 +394,12 @@ export default function BookingPass() {
             >
               <RefreshCw size={13} /> Refresh code
             </button>
+            </>
+            )}
+
+            {!patientQrOn && paidOnline && (
+              <p className="mt-3 text-sm font-semibold text-slate-700">Already paid — nothing to collect at the counter</p>
+            )}
           </Card>
         )}
 
@@ -457,7 +486,7 @@ export default function BookingPass() {
             <StatusPill label={booking.status.replace(/_/g, ' ')} tone="neutral" />
             <p className="mt-3 text-sm text-slate-500">
               {booking.status === 'booked'
-                ? "This booking is still waiting for the clinic to confirm it. You'll get a code to show once it's accepted."
+                ? "This booking is waiting for the clinic to confirm the online payment."
                 : 'There is no check-in code for this booking.'}
             </p>
           </Card>
@@ -562,8 +591,12 @@ export default function BookingPass() {
                   ? `Check-in opens ${openBefore} minutes before your slot — scan the clinic's QR at reception.`
                   : `Check in at the desk from ${openBefore} minutes before your slot.`,
                 selfCheckInAvailable
-                  ? 'No location or camera? Show the code above at the desk, or give your name, phone or MRN.'
-                  : 'Show the code above, or just give your name, phone or MRN.',
+                  ? patientQrOn
+                    ? 'No location or camera? Show the code above at the desk, or give your name, phone or MRN.'
+                    : 'No location or camera? Give your booking ID, name or phone at the desk.'
+                  : patientQrOn
+                    ? 'Show the code above, or just give your name, phone or MRN.'
+                    : 'Give your booking ID, name or phone at the desk.',
                 'Your token number appears on this screen the moment you are checked in.',
                 <>
                   Tokens are handed out in <strong>arrival order</strong>, so arriving on time is what secures your
@@ -578,7 +611,7 @@ export default function BookingPass() {
           <div className="mt-3">
             <InfoNote>
               <span className="flex items-center gap-1.5">
-                <QrCodeIcon size={13} /> Your check-in code appears here once the clinic accepts the booking.
+                <QrCodeIcon size={13} /> Check-in opens here once the booking is confirmed.
               </span>
             </InfoNote>
           </div>

@@ -51,7 +51,7 @@ const STATUS_TONE: Record<AppointmentStatus, 'live' | 'warning' | 'info' | 'neut
 };
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
-  booked: 'Awaiting clinic',
+  booked: 'Pending',
   accepted: 'Confirmed',
   checked_in: 'Checked in',
   called: "You're being called",

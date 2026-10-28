@@ -206,6 +206,11 @@ export interface Clinic {
   // Online-payment perks (section 32) - convenience only, never priority.
   fast_checkin_paid_online: boolean;
   auto_confirm_paid_online: boolean;
+  // Migration 85: whether patients can pay online at all (off = pay at the
+  // clinic only), and whether bookings carry a patient QR for the desk to
+  // scan (off = patients scan the clinic QR, or the desk finds them by name).
+  online_payments_enabled: boolean;
+  patient_qr_enabled: boolean;
   reschedule_window_hours: number;
   reschedule_window_hours_paid_online: number;
   // Booking mode (section 33).
@@ -580,9 +585,15 @@ export interface DoctorAvailability {
   weekday: number; // 0 = Sunday ... 6 = Saturday
   start_time: string; // "HH:MM:SS"
   end_time: string;
+  // Number of slots in the window (the name is historical - for a window set
+  // by patients per hour it's derived server-side, migration 85).
   max_patients_per_day: number;
   // How many patients ONE computed slot in this window can hold - section 36.
   slot_capacity: number;
+  // Migration 85: set together, or both null for a window saved the old way.
+  // slot_capacity = floor(patients_per_hour * slot_minutes / 60).
+  patients_per_hour: number | null;
+  slot_minutes: number | null;
 }
 
 export interface ClinicHoliday {
@@ -727,11 +738,28 @@ export interface QueueStatusRow {
   status: AppointmentStatus;
 }
 
+export type MedicineForm = 'tablet' | 'capsule' | 'syrup' | 'drops' | 'injection' | 'ointment' | 'inhaler' | 'sachet' | 'other';
+export type TimeOfDay = 'morning' | 'afternoon' | 'evening' | 'night';
+export type FoodTiming = 'before_food' | 'after_food' | 'with_food' | 'empty_stomach' | 'any';
+
+// One medicine in prescriptions.items (jsonb). name/dosage/frequency/
+// durationDays are the original free-text shape; the optional fields below
+// are the structured form (src/lib/rx.ts turns them into English and Hindi).
+// For a structured item dosage/frequency hold an English summary too, so
+// older readers still show something sensible.
 export interface PrescriptionDrug {
   name: string;
   dosage: string;
   frequency: string;
   durationDays: number;
+  form?: MedicineForm;
+  strength?: string; // e.g. "500 mg"
+  dose?: string; // amount each time, e.g. "1", "1/2", "5 ml"
+  times?: TimeOfDay[];
+  asNeeded?: boolean; // SOS - only when needed
+  food?: FoodTiming;
+  noteEn?: string;
+  noteHi?: string;
 }
 
 export interface Visit {
@@ -764,6 +792,9 @@ export interface Prescription {
   id: string;
   visit_id: string;
   items: PrescriptionDrug[];
+  // Migration 85 - the doctor's general advice, in each language.
+  advice_en?: string | null;
+  advice_hi?: string | null;
   file_url: string | null;
   signed_by: string | null;
   status: string;

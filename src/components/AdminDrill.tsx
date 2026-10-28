@@ -524,13 +524,15 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 function DoctorDetail({ id, onBack, onOpenClinic }: { id: string; onBack: () => void; onOpenClinic: (id: string) => void }) {
   const [doc, setDoc] = useState<(DoctorRow & { reg_no: string | null; reject_reason: string | null; created_at: string; clinics: { name: string } | null }) | null | undefined>(undefined);
   const [appts, setAppts] = useState<{ date: string; status: string }[]>([]);
-  const [avail, setAvail] = useState<{ weekday: number; start_time: string; end_time: string; max_patients_per_day: number }[]>([]);
+  const [avail, setAvail] = useState<
+    { weekday: number; start_time: string; end_time: string; max_patients_per_day: number; slot_capacity: number | null; patients_per_hour: number | null }[]
+  >([]);
   useEffect(() => {
     (async () => {
       const [d, a, v] = await Promise.all([
         supabase.from('doctors').select('id, clinic_id, name, specialty, status, consultation_fee, is_active, is_verified, reg_no, reject_reason, created_at, clinics(name)').eq('id', id).maybeSingle(),
         supabase.from('appointments').select('date, status').eq('doctor_id', id).limit(2000),
-        supabase.from('doctor_availability').select('weekday, start_time, end_time, max_patients_per_day').eq('doctor_id', id).order('weekday'),
+        supabase.from('doctor_availability').select('weekday, start_time, end_time, max_patients_per_day, slot_capacity, patients_per_hour').eq('doctor_id', id).order('weekday'),
       ]);
       setDoc((d.data as unknown as typeof doc) ?? null);
       setAppts((a.data ?? []) as typeof appts);
@@ -563,7 +565,9 @@ function DoctorDetail({ id, onBack, onOpenClinic }: { id: string; onBack: () => 
               <motion.div key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm">
                 <span className="font-semibold text-slate-800">{DAYS[w.weekday]}</span>
                 <span className="text-slate-500">{w.start_time.slice(0, 5)} to {w.end_time.slice(0, 5)}</span>
-                <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700">up to {w.max_patients_per_day}/day</span>
+                <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700">
+                  {w.patients_per_hour ? `${w.patients_per_hour}/hour · ` : ''}up to {w.max_patients_per_day * (w.slot_capacity ?? 1)}/day
+                </span>
               </motion.div>
             ))}
           </div>

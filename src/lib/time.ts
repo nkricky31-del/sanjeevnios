@@ -47,11 +47,26 @@ export function reportingTimeFor(slotTime: string, reportBeforeMinutes: number):
 // divided into exactly max_patients_per_day evenly-spaced slots. A window
 // with end <= start or a non-positive capacity contributes no slots instead
 // of throwing, since clinic-entered data shouldn't crash the booking page.
-export function computeSlots(windows: { start_time: string; end_time: string; max_patients_per_day: number }[]): string[] {
+//
+// A window set by patients per hour (migration 85) carries its own
+// slot_minutes instead: slots start every slot_minutes from start_time, and
+// the last one must END by end_time.
+export interface SlotWindow {
+  start_time: string;
+  end_time: string;
+  max_patients_per_day: number;
+  slot_minutes?: number | null;
+}
+
+export function computeSlots(windows: SlotWindow[]): string[] {
   const slots: string[] = [];
   for (const w of windows) {
     const start = timeToMinutes(w.start_time);
     const end = timeToMinutes(w.end_time);
+    if (w.slot_minutes && w.slot_minutes > 0) {
+      for (let t = start; t + w.slot_minutes <= end; t += w.slot_minutes) slots.push(minutesToTime(t));
+      continue;
+    }
     const count = w.max_patients_per_day;
     if (count <= 0 || end <= start) continue;
     const step = (end - start) / count;
@@ -62,12 +77,15 @@ export function computeSlots(windows: { start_time: string; end_time: string; ma
   return slots.sort();
 }
 
-// The doctor's working window divided evenly by their daily capacity - the
-// same math DoctorPage uses to lay out bookable slots, reused here to
-// estimate how many minutes one queue position is worth.
-export function estimateSlotMinutes(windows: { start_time: string; end_time: string; max_patients_per_day: number }[]): number {
+// Roughly how many minutes one queue position is worth, for "est. wait".
+// A window set by patients per hour answers directly (10/hour = 6 min); an
+// old-style window is its length divided by its slot count.
+export function estimateSlotMinutes(
+  windows: { start_time: string; end_time: string; max_patients_per_day: number; patients_per_hour?: number | null }[]
+): number {
   if (windows.length === 0) return 15;
   const w = windows[0];
+  if (w.patients_per_hour && w.patients_per_hour > 0) return 60 / w.patients_per_hour;
   const start = timeToMinutes(w.start_time);
   const end = timeToMinutes(w.end_time);
   const count = w.max_patients_per_day || 1;

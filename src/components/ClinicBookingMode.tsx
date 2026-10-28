@@ -56,6 +56,28 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
   // Self check-in (sections 28 and 84) - saved separately from the booking
   // mode above, since it's about arrival rather than booking.
   const [selfEnabled, setSelfEnabled] = useState(clinic.self_checkin_enabled ?? false);
+  // Migration 85: the patient's own booking QR, for the desk to scan.
+  const [patientQr, setPatientQr] = useState(clinic.patient_qr_enabled ?? false);
+  // Migration 85: whether patients may pay online at all.
+  const [onlinePay, setOnlinePay] = useState(clinic.online_payments_enabled ?? false);
+  const [paySaving, setPaySaving] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+  const [payNote, setPayNote] = useState<string | null>(null);
+
+  const savePayments = async () => {
+    setPayError(null);
+    setPayNote(null);
+    setPaySaving(true);
+    const patch = { online_payments_enabled: onlinePay };
+    const { error: saveError } = await supabase.from('clinics').update(patch).eq('id', clinic.id);
+    setPaySaving(false);
+    if (saveError) {
+      setPayError(saveError.message);
+      return;
+    }
+    onSaved(patch);
+    setPayNote('Saved.');
+  };
   const [openBefore, setOpenBefore] = useState(String(clinic.checkin_open_before_minutes ?? 60));
   const [selfSaving, setSelfSaving] = useState(false);
   const [selfError, setSelfError] = useState<string | null>(null);
@@ -75,7 +97,7 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
       return;
     }
     setSelfSaving(true);
-    const patch = { self_checkin_enabled: selfEnabled, checkin_open_before_minutes: openNum };
+    const patch = { self_checkin_enabled: selfEnabled, checkin_open_before_minutes: openNum, patient_qr_enabled: patientQr };
     const { error: saveError } = await supabase.from('clinics').update(patch).eq('id', clinic.id);
     setSelfSaving(false);
     if (saveError) {
@@ -177,13 +199,13 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
             <>
               Patients book <strong>in advance only</strong> — no walk-ins from the app or this desk, and no
               same-day bookings unless you turn that on below. Bookings inside the daily cap are confirmed
-              automatically; you can still cancel any individual one. When a day is full, patients are offered the
+              instantly; you can still cancel any individual one. When a day is full, patients are offered the
               waitlist or the next day with room.
             </>
           ) : (
             <>
-              Same-day bookings and walk-ins are accepted, and you approve bookings yourself from the inbox. The
-              daily cap, horizon and same-day settings below don't apply in this mode.
+              Same-day bookings and walk-ins are accepted. Every booking is confirmed the moment it's made, as long as
+              the slot has room. The daily cap, horizon and same-day settings below don't apply in this mode.
             </>
           )}
         </p>
@@ -303,7 +325,7 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
       <SectionTitle className="mt-6">Patient self check-in</SectionTitle>
       <p className="mt-0.5 text-xs text-slate-400">
         Patients scan the clinic's QR at reception from their booking and get a token straight away. The desk can
-        still check anyone in by scanning their code or searching by name, phone or MRN.
+        still check anyone in by searching by name, phone or MRN.
       </p>
       <Card className="mt-2">
         <div className="flex items-center justify-between gap-3">
@@ -321,6 +343,17 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
             Set your clinic's map location in the Location tab before turning this on.
           </p>
         )}
+
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+          <span>
+            <span className="block text-sm font-bold text-slate-900">Patient QR on bookings</span>
+            <span className="block text-xs text-slate-500">
+              Optional. A QR on each booking that your desk scans. Off: patients scan your clinic QR, or the desk finds
+              them by name, phone or booking ID.
+            </span>
+          </span>
+          <Toggle checked={patientQr} onChange={setPatientQr} label="Patient QR on bookings" onLabel="On" offLabel="Off" />
+        </div>
 
         <div className="mt-4 rounded-2xl border border-slate-100 p-3">
           <label htmlFor="checkin-open-before" className="text-xs font-bold text-slate-700">
@@ -354,6 +387,30 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
             </Button>
           )}
         </div>
+      </Card>
+
+      {/* Payments (migration 85) */}
+      <SectionTitle className="mt-6">Payments</SectionTitle>
+      <p className="mt-0.5 text-xs text-slate-400">
+        Patients can always pay at the clinic. Turn this on to also let them pay online (UPI or card) when they book.
+      </p>
+      <Card className="mt-2">
+        <div className="flex items-center justify-between gap-3">
+          <span>
+            <span className="block text-sm font-bold text-slate-900">Accept online payments</span>
+            <span className="block text-xs text-slate-500">
+              {onlinePay
+                ? 'Patients see "Pay online" and "Pay at clinic".'
+                : 'Patients see "Pay at clinic" only.'}
+            </span>
+          </span>
+          <Toggle checked={onlinePay} onChange={setOnlinePay} label="Accept online payments" onLabel="On" offLabel="Off" />
+        </div>
+        {payError && <p className="mt-2 text-sm text-red-600">{payError}</p>}
+        {payNote && !payError && <p className="mt-2 text-sm font-semibold text-emerald-600">{payNote}</p>}
+        <Button onClick={savePayments} disabled={paySaving} className="mt-3">
+          {paySaving ? 'Saving...' : 'Save payments'}
+        </Button>
       </Card>
 
       {/* The waitlist only exists because of the cap, so it lives here. */}

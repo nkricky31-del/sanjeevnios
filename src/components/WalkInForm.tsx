@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 import { useAuth } from '../lib/AuthContext';
-import { getDayAvailability, isFullDayError, isSlotFullError, joinWaitlist, type DayAvailability } from '../lib/bookingPolicy';
+import { getBookingPolicy, getDayAvailability, isFullDayError, isSlotFullError, joinWaitlist, type DayAvailability } from '../lib/bookingPolicy';
 import { addDaysISO, dobFromAge, isMinorDob, todayISO } from '../lib/date';
 import { livePhoneDigits, normalizePhone } from '../lib/phone';
-import { appointmentConfirmedMessage, notifyPatient } from '../lib/notify';
+import { appointmentConfirmedMessage, checkInHowFor, notifyPatient } from '../lib/notify';
 import { bookingReference, findNextBestSlot, findWalkInSlot } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { computeSlots, formatTimeLabel } from '../lib/time';
@@ -492,14 +492,21 @@ export default function WalkInForm({ clinicId, doctors, defaultDoctorId, walkInA
         const { data: owner } = await supabase.rpc('get_patient_contacts', { p_ids: [memberId] });
         const accountId = ((owner ?? []) as { account_id: string }[])[0]?.account_id;
         if (accountId && accountId !== session.user.id) {
-          const { data: clinicRow } = await supabase.from('clinics').select('report_before_minutes').eq('id', clinicId).maybeSingle();
+          const policy = await getBookingPolicy(clinicId);
           const bookedDate = future?.date ?? todayISO();
-          const base = appointmentConfirmedMessage(bookedSlot, bookingReference(bookedId), 'pay_at_clinic', (clinicRow as { report_before_minutes: number } | null)?.report_before_minutes ?? 30);
+          const message = appointmentConfirmedMessage(
+            bookedSlot,
+            bookingReference(bookedId),
+            'pay_at_clinic',
+            policy.reportBeforeMinutes,
+            checkInHowFor(policy),
+            { doctorName: doctor?.name ?? undefined, date: bookedDate }
+          );
           await notifyPatient({
             userId: accountId,
             appointmentId: bookedId,
             type: 'appointment_confirmed',
-            message: `${doctor?.name ?? 'Your doctor'} on ${bookedDate}: ${base}`,
+            message,
           });
           notified = true;
         }

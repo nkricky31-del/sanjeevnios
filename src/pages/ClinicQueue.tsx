@@ -17,6 +17,7 @@ import ClinicLocationPicker from '../components/ClinicLocationPicker';
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
 import ClinicAuditLog from '../components/ClinicAuditLog';
 import ClinicStaffAccess from '../components/ClinicStaffAccess';
+import CancelBookingForm from '../components/CancelBookingForm';
 import FullDayCancelForm from '../components/FullDayCancelForm';
 import PatientLookup from '../components/PatientLookup';
 import PublishDaySchedule from '../components/PublishDaySchedule';
@@ -36,7 +37,7 @@ import { setActingMode } from '../lib/actingMode';
 import { useAuth } from '../lib/AuthContext';
 import { todayISO } from '../lib/date';
 import { type PatientContact, patientContextLine, withPatientContacts } from '../lib/patientContact';
-import { appointmentConfirmedMessage, notifyPatient } from '../lib/notify';
+import { appointmentConfirmedMessage, checkInHowFor, notifyPatient } from '../lib/notify';
 import { bookingReference } from '../lib/queue';
 import { captureRazorpayPayment } from '../lib/razorpay';
 import { supabase } from '../lib/supabaseClient';
@@ -167,6 +168,7 @@ export default function ClinicQueue() {
   const [loading, setLoading] = useState(true);
   const [openVisit, setOpenVisit] = useState<OpenVisit | null>(null);
   const [rejectOpenFor, setRejectOpenFor] = useState<string | null>(null);
+  const [cancelOpenFor, setCancelOpenFor] = useState<string | null>(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [fullDayCancelOpen, setFullDayCancelOpen] = useState(false);
   const [holidaysOpen, setHolidaysOpen] = useState(false);
@@ -222,9 +224,9 @@ export default function ClinicQueue() {
       return;
     }
 
-    // Bookings awaiting approval can be for ANY future date (patients book
-    // ahead) - this must NOT be limited to today, or bookings for tomorrow
-    // onward would never show up for the clinic to act on.
+    // Bookings are confirmed the moment they're made (migration 85). The only
+    // 'booked' rows left are older requests whose online payment is still on
+    // hold - they can be for ANY future date, so this isn't limited to today.
     const pendingQuery = supabase
       .from('appointments')
       .select(APPOINTMENT_COLUMNS)
@@ -328,7 +330,12 @@ export default function ClinicQueue() {
           a.slot_time,
           bookingReference(a.id),
           updated.payment_status,
-          clinic?.report_before_minutes ?? 30
+          clinic?.report_before_minutes ?? 30,
+          checkInHowFor({
+            selfCheckinEnabled: !!clinic?.self_checkin_enabled,
+            patientQrEnabled: !!clinic?.patient_qr_enabled,
+          }),
+          { date: a.date }
         ),
       });
     }
@@ -630,6 +637,7 @@ export default function ClinicQueue() {
                   doctorId={doctorId}
                   date={queueDate}
                   clinicId={clinic.id}
+                  patientQrEnabled={!!clinic.patient_qr_enabled}
                   onCheckedIn={() => {
                     loadAppointments();
                     setQueueVersion((v) => v + 1);
@@ -774,12 +782,19 @@ export default function ClinicQueue() {
 
             {doctors.length > 0 && (
               <>
-                {/* 1. Bookings waiting for the clinic to confirm */}
+                {/* Bookings confirm themselves now (migration 85) - this only
+                    ever lists older requests whose online payment is still on
+                    hold, and disappears once they're dealt with. */}
+                {pending.length > 0 && (
+                <>
                 <SectionTitle className="mt-6" actionLabel="Refresh" onAction={loadAppointments}>
-                  Pending approval
+                  Older booking requests ({pending.length})
                 </SectionTitle>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  Made before bookings were confirmed instantly, with an online payment still on hold. Confirm to take
+                  the payment, or decline to release it. New bookings never appear here.
+                </p>
                 <div className="mt-2 space-y-2">
-                  {pending.length === 0 && <p className="text-sm text-slate-400">Nothing waiting.</p>}
                   {pending.map((a) => {
                     const showDateHeader = a.date !== lastRenderedDate;
                     lastRenderedDate = a.date;
@@ -808,7 +823,7 @@ export default function ClinicQueue() {
                           </div>
                           {historyFor === a.id && <PatientHistory memberId={a.member_id} clinicId={clinic.id} />}
                           <div className="mt-3 flex flex-wrap gap-2">
-                            <Button onClick={() => acceptAppointment(a)}>Accept</Button>
+                            <Button onClick={() => acceptAppointment(a)}>Confirm</Button>
                             <Button variant="outline" onClick={() => setHistoryFor((prev) => (prev === a.id ? null : a.id))}>
                               {historyFor === a.id ? 'Hide history' : 'Patient history'}
                             </Button>
@@ -816,7 +831,7 @@ export default function ClinicQueue() {
                               variant="danger"
                               onClick={() => setRejectOpenFor((prev) => (prev === a.id ? null : a.id))}
                             >
-                              {rejectOpenFor === a.id ? 'Cancel' : 'Reject'}
+                              {rejectOpenFor === a.id ? 'Keep' : 'Decline'}
                             </Button>
                           </div>
                           {rejectOpenFor === a.id && a.family_members && (
@@ -838,6 +853,8 @@ export default function ClinicQueue() {
                     );
                   })}
                 </div>
+                </>
+                )}
 
                 <div className="mt-6 flex items-center justify-between gap-2">
                   <h2 className="text-base font-bold text-slate-900">The day's list</h2>
@@ -892,6 +909,12 @@ export default function ClinicQueue() {
                         <Button variant="secondary" onClick={() => setStatus(a.id, 'no_show')}>
                           No-show
                         </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => setCancelOpenFor((prev) => (prev === a.id ? null : a.id))}
+                        >
+                          {cancelOpenFor === a.id ? 'Keep booking' : 'Cancel booking'}
+                        </Button>
                         <span className="text-xs text-slate-400">
                           Reminders: {a.reminder_count}/{REMINDER_LIMIT}
                         </span>
@@ -907,6 +930,21 @@ export default function ClinicQueue() {
                         <p className="mt-1.5 text-xs text-slate-400">
                           Check-in is only possible on the day of the appointment.
                         </p>
+                      )}
+                      {cancelOpenFor === a.id && (
+                        <CancelBookingForm
+                          appointmentId={a.id}
+                          doctorId={doctorId}
+                          date={a.date}
+                          patientName={a.family_members?.name ?? 'this patient'}
+                          patientAccountId={a.family_members?.account_id ?? null}
+                          paymentStatus={a.payment_status}
+                          onCancelled={() => {
+                            setCancelOpenFor(null);
+                            loadAppointments();
+                          }}
+                          onClose={() => setCancelOpenFor(null)}
+                        />
                       )}
                     </Card>
                   ))}

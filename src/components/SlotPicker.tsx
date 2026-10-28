@@ -31,6 +31,9 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
   const [date, setDate] = useState(initialDate ?? selectedDate ?? todayISO());
   const [takenSlots, setTakenSlots] = useState<Set<string>>(new Set());
+  // Seats booked / available per slot (get_slot_occupancy, migration 85) -
+  // only slots with at least one booking appear here.
+  const [occupancy, setOccupancy] = useState<Map<string, { booked: number; capacity: number }>>(new Map());
   const [policy, setPolicy] = useState<BookingPolicy>(DEFAULT_POLICY);
   const [dayInfo, setDayInfo] = useState<DayAvailability | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,8 +60,19 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
   useEffect(() => {
     if (!doctorId || !date) return;
     (async () => {
-      const { data } = await supabase.rpc('get_taken_slots', { p_doctor_id: doctorId, p_date: date });
+      const [{ data }, { data: occ }] = await Promise.all([
+        supabase.rpc('get_taken_slots', { p_doctor_id: doctorId, p_date: date }),
+        supabase.rpc('get_slot_occupancy', { p_doctor_id: doctorId, p_date: date }),
+      ]);
       setTakenSlots(new Set((data ?? []).map((r: { slot_time: string }) => r.slot_time)));
+      setOccupancy(
+        new Map(
+          ((occ ?? []) as { slot_time: string; booked: number; capacity: number }[]).map((r) => [
+            r.slot_time,
+            { booked: r.booked, capacity: r.capacity },
+          ])
+        )
+      );
       // How many seats are left in the clinic's daily cap for this date.
       setDayInfo(await getDayAvailability(clinicId, date));
     })();
@@ -81,6 +95,12 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
   // Dedupe: rounding in computeSlots can occasionally land two starts on the
   // same minute for a very tight capacity/window combo.
   const allSlots = isHolidayToday ? [] : Array.from(new Set(computeSlots(windowsToday)));
+  // Seats per slot for this day's window(s), for the "x left" hint.
+  const capacityOf = (s: string) =>
+    occupancy.get(s)?.capacity ??
+    windowsToday.find((w) => w.start_time <= s && s < w.end_time)?.slot_capacity ??
+    1;
+  const seatsLeft = (s: string) => Math.max(capacityOf(s) - (occupancy.get(s)?.booked ?? 0), 0);
 
   // A same-day slot that has already started, or starts within the buffer
   // below, is greyed out here purely so the grid doesn't invite a tap the
@@ -193,6 +213,15 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
               {formatTimeLabel(s)}
               {full && <span className="ml-1 text-xs font-normal">· Full</span>}
               {cutoff && <span className="ml-1 text-xs font-normal">· Closed</span>}
+              {!full && !cutoff && capacityOf(s) > 1 && (
+                <span
+                  className={`block text-[11px] font-medium ${
+                    selectedDate === date && selectedSlot === s ? 'text-white/80' : 'text-slate-400'
+                  }`}
+                >
+                  {seatsLeft(s)} of {capacityOf(s)} left
+                </span>
+              )}
             </button>
           );
         })}

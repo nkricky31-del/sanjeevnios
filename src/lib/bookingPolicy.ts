@@ -21,6 +21,14 @@ export interface BookingPolicy {
   // clinic that both allows same-day booking AND opted into this. Gates
   // whether BookingForm bothers asking for location / promising it at all.
   autoCheckinVerifiedSameDay: boolean;
+  // Migration 85: off = patients only see "pay at the clinic".
+  onlinePaymentsEnabled: boolean;
+  // How the patient checks in: scan the clinic QR (self check-in), and/or
+  // show their own booking QR at the desk (only when the clinic uses it).
+  selfCheckinEnabled: boolean;
+  patientQrEnabled: boolean;
+  // Section 40 - quoted in the confirmation message.
+  reportBeforeMinutes: number;
 }
 
 export interface DayAvailability {
@@ -38,16 +46,17 @@ export const DEFAULT_POLICY: BookingPolicy = {
   sameDayCutoffMinutes: 30,
   pastSlotBufferMinutes: 10,
   autoCheckinVerifiedSameDay: false,
+  onlinePaymentsEnabled: false,
+  selfCheckinEnabled: false,
+  patientQrEnabled: false,
+  reportBeforeMinutes: 30,
 };
 
 export async function getBookingPolicy(clinicId: string): Promise<BookingPolicy> {
-  const { data } = await supabase
-    .from('clinics')
-    .select(
-      'mode, booking_horizon_days, daily_cap, same_day_booking_enabled, same_day_cutoff_minutes, past_slot_buffer_minutes, auto_checkin_verified_same_day'
-    )
-    .eq('id', clinicId)
-    .maybeSingle();
+  // '*' rather than a column list so a newer setting that isn't in the
+  // database yet (a migration not run) reads as its default instead of
+  // failing the whole query.
+  const { data } = await supabase.from('clinics').select('*').eq('id', clinicId).maybeSingle();
   if (!data) return DEFAULT_POLICY;
   return {
     mode: (data.mode ?? 'allow_walkins') as ClinicMode,
@@ -57,6 +66,10 @@ export async function getBookingPolicy(clinicId: string): Promise<BookingPolicy>
     sameDayCutoffMinutes: data.same_day_cutoff_minutes ?? 30,
     pastSlotBufferMinutes: data.past_slot_buffer_minutes ?? 10,
     autoCheckinVerifiedSameDay: data.auto_checkin_verified_same_day ?? false,
+    onlinePaymentsEnabled: data.online_payments_enabled ?? false,
+    selfCheckinEnabled: data.self_checkin_enabled ?? false,
+    patientQrEnabled: data.patient_qr_enabled ?? false,
+    reportBeforeMinutes: data.report_before_minutes ?? 30,
   };
 }
 

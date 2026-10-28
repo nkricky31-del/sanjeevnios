@@ -1,9 +1,13 @@
 import Loading from './ui/Loading';
-import { ArrowLeft, Clock } from 'lucide-react';
+import { ArrowLeft, Clock, Printer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { supabase } from '../lib/supabaseClient';
 import type { FollowUpInterval, PrescriptionDrug } from '../lib/types';
+import PrescriptionEditor from './rx/PrescriptionEditor';
+import PrescriptionItems, { RxLanguageToggle } from './rx/PrescriptionItems';
+import { useRxLanguage } from '../lib/useRxLanguage';
+import PrescriptionSheet from './rx/PrescriptionSheet';
 import Button from './ui/Button';
 import Card from './ui/Card';
 import StatusPill from './ui/StatusPill';
@@ -41,6 +45,9 @@ const FOLLOW_UP_OPTIONS: { value: FollowUpInterval; label: string }[] = [
 interface AttachedRxRow {
   id: string;
   items: PrescriptionDrug[];
+  advice_en?: string | null;
+  advice_hi?: string | null;
+  signed_by: string | null;
   created_at: string;
 }
 
@@ -61,13 +68,10 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
   const [notesError, setNotesError] = useState<string | null>(null);
   const [notesSaved, setNotesSaved] = useState(false);
 
-  const [drugs, setDrugs] = useState<PrescriptionDrug[]>([]);
-  const [drugName, setDrugName] = useState('');
-  const [dosage, setDosage] = useState('');
-  const [frequency, setFrequency] = useState('');
-  const [duration, setDuration] = useState('');
   const [signingRx, setSigningRx] = useState(false);
   const [rxError, setRxError] = useState<string | null>(null);
+  const [printing, setPrinting] = useState(false);
+  const [rxLanguage, setRxLanguage] = useRxLanguage();
 
   const load = async () => {
     setLoading(true);
@@ -103,7 +107,8 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
 
       const { data: rxRows } = await supabase
         .from('prescriptions')
-        .select('id, items, created_at')
+        // '*' so the advice columns (migration 85) come back when they exist.
+        .select('*')
         .eq('visit_id', visitData.id)
         .eq('status', 'attached')
         .order('created_at', { ascending: false })
@@ -146,23 +151,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
     load();
   };
 
-  const addDrug = () => {
-    if (!drugName.trim()) return;
-    setDrugs((prev) => [
-      ...prev,
-      { name: drugName.trim(), dosage: dosage.trim(), frequency: frequency.trim(), durationDays: Number(duration) || 0 },
-    ]);
-    setDrugName('');
-    setDosage('');
-    setFrequency('');
-    setDuration('');
-  };
-
-  const removeDrug = (index: number) => {
-    setDrugs((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const signAndAttach = async () => {
+  const signAndAttach = async (drugs: PrescriptionDrug[], adviceEn: string, adviceHi: string) => {
     setRxError(null);
     if (drugs.length === 0) {
       setRxError('Add at least one medicine before signing.');
@@ -198,6 +187,10 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
       items: drugs,
       signed_by: doctorId,
       status: 'attached',
+      // Only sent when written, so a database without migration 85 still
+      // accepts a prescription that has no advice.
+      ...(adviceEn ? { advice_en: adviceEn } : {}),
+      ...(adviceHi ? { advice_hi: adviceHi } : {}),
     });
 
     setSigningRx(false);
@@ -205,7 +198,6 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
       setRxError(rxInsertError.message);
       return;
     }
-    setDrugs([]);
     load();
   };
 
@@ -341,76 +333,40 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
             </Card>
 
             <Card className="mt-4">
-              <p className="text-sm font-semibold text-slate-900">E-prescription</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-900">E-prescription</p>
+                {attachedRx && <RxLanguageToggle value={rxLanguage} onChange={setRxLanguage} />}
+              </div>
 
               {attachedRx ? (
-                <div className="mt-2 space-y-1">
-                  {attachedRx.items.map((drug, i) => (
-                    <p key={i} className="text-sm text-slate-600">
-                      • {drug.name} — {drug.dosage} · {drug.frequency} · {drug.durationDays}d
-                    </p>
-                  ))}
-                  <p className="mt-2 text-xs text-slate-400">Signed and attached.</p>
+                <div className="mt-3">
+                  <PrescriptionItems
+                    items={attachedRx.items}
+                    adviceEn={attachedRx.advice_en}
+                    adviceHi={attachedRx.advice_hi}
+                    language={rxLanguage}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <Button variant="secondary" onClick={() => setPrinting(true)}>
+                      <Printer size={16} /> Print prescription
+                    </Button>
+                    <p className="text-xs text-slate-400">Signed and attached.</p>
+                  </div>
                 </div>
               ) : (
-                <>
-                  {drugs.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {drugs.map((d, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs text-slate-600">
-                          <span>
-                            • {d.name} — {d.dosage} · {d.frequency} · {d.durationDays}d
-                          </span>
-                          <button onClick={() => removeDrug(i)} className="font-medium text-red-600">
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <input
-                      type="text"
-                      placeholder="Drug"
-                      value={drugName}
-                      onChange={(e) => setDrugName(e.target.value)}
-                      className="min-w-[100px] flex-1 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Dosage"
-                      value={dosage}
-                      onChange={(e) => setDosage(e.target.value)}
-                      className="w-24 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Freq"
-                      value={frequency}
-                      onChange={(e) => setFrequency(e.target.value)}
-                      className="w-20 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Days"
-                      inputMode="numeric"
-                      value={duration}
-                      onChange={(e) => setDuration(e.target.value)}
-                      className="w-16 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
-                    />
-                    <button onClick={addDrug} className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm font-medium">
-                      + Add
-                    </button>
-                  </div>
-
-                  {rxError && <p className="mt-2 text-sm text-red-600">{rxError}</p>}
-                  <Button onClick={signAndAttach} disabled={signingRx} className="mt-3">
-                    {signingRx ? 'Signing...' : 'Sign & attach prescription'}
-                  </Button>
-                </>
+                <PrescriptionEditor signing={signingRx} error={rxError} onSign={signAndAttach} />
               )}
             </Card>
+
+            {printing && attachedRx && (
+              <PrescriptionSheet
+                prescription={attachedRx}
+                patientName={patientName}
+                diagnosis={diagnosis.trim() || null}
+                followUpDate={followUpInterval !== 'none' ? visit?.follow_up_due_date ?? null : null}
+                onClose={() => setPrinting(false)}
+              />
+            )}
 
             {!rxComplete && (
               <p className="mt-3 text-xs text-slate-400">

@@ -1,4 +1,5 @@
-import type { AppointmentFile, Prescription, Visit } from './types';
+import { itemTextLines } from './rx';
+import type { AppointmentFile, Prescription, PrescriptionDrug, Visit } from './types';
 
 interface ExportEncounter {
   encounter_no: string;
@@ -47,9 +48,8 @@ export function downloadEncounterSummary(
   lines.push('Prescription');
   lines.push('-'.repeat(40));
   if (prescription && prescription.items.length > 0) {
-    for (const item of prescription.items) {
-      lines.push(`- ${item.name} - ${item.dosage} - ${item.frequency} - ${item.durationDays}d`);
-    }
+    prescription.items.forEach((item, i) => lines.push(...itemTextLines(item, i)));
+    lines.push(...adviceLines(prescription));
   } else {
     lines.push('No prescription recorded.');
   }
@@ -73,9 +73,25 @@ export function downloadEncounterSummary(
   URL.revokeObjectURL(url);
 }
 
-// One prescription as a plain-text copy the patient can keep or hand over.
+function adviceLines(p: { advice_en?: string | null; advice_hi?: string | null }): string[] {
+  const out: string[] = [];
+  if (p.advice_en?.trim()) out.push('', `Advice: ${p.advice_en.trim()}`);
+  if (p.advice_hi?.trim()) out.push(`सलाह: ${p.advice_hi.trim()}`);
+  return out;
+}
+
+// One prescription as a plain-text copy the patient can keep or hand over -
+// each medicine in English, then Hindi (src/lib/rx.ts).
 export function downloadPrescriptionText(
-  p: { id: string; items: { name: string; dosage: string; frequency: string; durationDays: number }[]; signed_by: string | null; status: string; created_at: string },
+  p: {
+    id: string;
+    items: PrescriptionDrug[];
+    advice_en?: string | null;
+    advice_hi?: string | null;
+    signed_by: string | null;
+    status: string;
+    created_at: string;
+  },
   meta: { doctor?: string | null; clinic?: string | null; patient?: string | null }
 ) {
   const lines = [
@@ -85,12 +101,12 @@ export function downloadPrescriptionText(
     `Doctor: ${meta.doctor ?? '-'}`,
     `Clinic: ${meta.clinic ?? '-'}`,
     ...(meta.patient ? [`Patient: ${meta.patient}`] : []),
-    `Status: ${p.status}`,
-    ...(p.signed_by ? [`Signed by: ${p.signed_by}`] : []),
+    ...(p.signed_by && meta.doctor ? [`Signed by: ${meta.doctor}`] : []),
     '',
-    'Medicines',
+    'Medicines / दवाइयाँ',
     '-'.repeat(40),
-    ...(p.items.length ? p.items.map((i) => `- ${i.name} - ${i.dosage} - ${i.frequency} - ${i.durationDays} day(s)`) : ['None recorded.']),
+    ...(p.items.length ? p.items.flatMap((item, i) => itemTextLines(item, i)) : ['None recorded.']),
+    ...adviceLines(p),
   ];
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);

@@ -40,6 +40,8 @@ interface Props {
   // loading (or resolve to "none found") - EncounterDetail.tsx uses this to
   // build the Export/Download file without re-fetching the same data.
   onLoaded?: (appointment: LinkedAppointment | null) => void;
+  // For the printable prescription's header.
+  patientName?: string | null;
 }
 
 // Everything about ONE visit below the encounter's own header fields
@@ -48,14 +50,14 @@ interface Props {
 // clinical notes, diagnosis, prescription, and files - pulled from the
 // appointment/visit this encounter is linked to (see schema.sql section 18,
 // create_encounter_for_appointment()).
-export default function EncounterFullDetail({ encounter, onLoaded }: Props) {
+export default function EncounterFullDetail({ encounter, onLoaded, patientName }: Props) {
   const [appointment, setAppointment] = useState<LinkedAppointment | null | undefined>(undefined); // undefined = loading
 
   useEffect(() => {
     supabase
       .from('appointments')
       .select(
-        'id, date, slot_time, status, visits(id, appointment_id, notes:notes_plain, diagnosis:diagnosis_plain, follow_up_date, no_prescription, created_at, prescriptions(id, visit_id, items, file_url, signed_by, status, created_at)), files(id, member_id, appointment_id, type, storage_path, created_at)'
+        'id, date, slot_time, status, visits(id, appointment_id, notes:notes_plain, diagnosis:diagnosis_plain, follow_up_date, follow_up_due_date, no_prescription, created_at, prescriptions(*)), files(id, member_id, appointment_id, type, storage_path, created_at)'
       )
       .eq('encounter_id', encounter.id)
       .limit(1)
@@ -96,7 +98,13 @@ export default function EncounterFullDetail({ encounter, onLoaded }: Props) {
 
       {appointment && (
         <>
-          <VisitDetails visit={visit ?? null} prescription={prescription ?? null} />
+          <VisitDetails
+            visit={visit ?? null}
+            prescription={prescription ?? null}
+            patientName={patientName}
+            doctorName={encounter.doctors?.name}
+            clinicName={encounter.clinics?.name}
+          />
           {appointment.files.length > 0 && (
             <div className="mt-3 rounded-xl border border-slate-200 p-4">
               <p className="text-sm font-semibold text-slate-900">Tests / Reports</p>

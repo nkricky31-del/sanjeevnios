@@ -36,10 +36,10 @@ function StepIcon({ step, index }: { step: string; index: number }) {
 // narrow screen each row collapses to a two-column grid.
 const ROWS = [
   { step: 'Find', who: 'Patient', what: 'Searches verified clinics and picks a doctor and a slot.', where: 'Patient app' },
-  { step: 'Confirm', who: 'Clinic', what: 'The clinic confirms; the patient is notified at each step.', where: 'Clinic console' },
-  { step: 'Arrive', who: 'Front desk', what: 'Check-in by QR or at the desk. The live token is issued in arrival order.', where: 'Queue board' },
-  { step: 'Consult', who: 'Doctor', what: 'Notes and prescription are written once, then saved to the record.', where: 'Clinic console' },
-  { step: 'Pay', who: 'Patient', what: 'Online or at the counter. Online payment never buys queue priority.', where: 'Payments' },
+  { step: 'Confirm', who: 'Patient', what: 'The booking is confirmed instantly while the slot has room; the patient is notified at each step.', where: 'Patient app' },
+  { step: 'Arrive', who: 'Patient', what: "Scan the clinic's QR at reception to check in. The live token is issued in arrival order.", where: 'Queue board' },
+  { step: 'Consult', who: 'Doctor', what: 'Notes and a prescription in English and Hindi, written once and saved to the record.', where: 'Clinic console' },
+  { step: 'Pay', who: 'Patient', what: 'At the counter, or online where the clinic accepts it. Online payment never buys queue priority.', where: 'Payments' },
   { step: 'Keep', who: 'Patient', what: 'The visit, prescription and history stay in the patient\'s own account.', where: 'Records' },
 ];
 

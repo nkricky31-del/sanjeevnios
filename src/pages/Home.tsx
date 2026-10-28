@@ -68,7 +68,7 @@ const STATUS_TONE: Partial<Record<AppointmentStatus, 'live' | 'warning' | 'info'
 };
 
 const STATUS_LABEL: Partial<Record<AppointmentStatus, string>> = {
-  booked: 'Awaiting clinic',
+  booked: 'Pending',
   accepted: 'Confirmed',
   checked_in: 'Checked in',
   called: "You're being called",

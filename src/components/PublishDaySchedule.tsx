@@ -31,7 +31,7 @@ interface Props {
 // anything past "arrived", since publishing runs on the plan, not the day
 // actually happening.
 const STATUS_LABEL: Record<string, string> = {
-  booked: 'Pending approval',
+  booked: 'Pending',
   accepted: 'Confirmed',
   checked_in: 'Already checked in',
   called: 'Already checked in',

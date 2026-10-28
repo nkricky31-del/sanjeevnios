@@ -75,7 +75,16 @@ interface BookingDetail {
   paid_amount: number | null;
   paid_at: string | null;
   doctors: { name: string; specialty: string | null } | null;
-  clinics: { name: string; address: string | null; lat: number | null; lng: number | null; formatted_address: string | null } | null;
+  clinics: {
+    name: string;
+    address: string | null;
+    lat: number | null;
+    lng: number | null;
+    formatted_address: string | null;
+    // Migration 84/85 settings - optional so an older database still loads.
+    patient_qr_enabled?: boolean | null;
+    checkin_open_before_minutes?: number | null;
+  } | null;
   family_members: { name: string; mrn: string } | null;
   encounters: { encounter_no: string } | null;
   // The COD amount still owed - a payments row exists for every booking
@@ -97,7 +106,7 @@ const WATCHED_STATUSES: AppointmentStatus[] = [
 ];
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
-  booked: 'Booking received - waiting for clinic approval',
+  booked: 'Booking received - waiting for the payment to be confirmed',
   accepted: 'Confirmed — check in when you arrive',
   checked_in: 'Checked in — waiting',
   called: "You're being called now",
@@ -162,7 +171,7 @@ export default function BookingStatus() {
     const { data } = await supabase
       .from('appointments')
       .select(
-        '*, doctors(name, specialty), clinics(name, address, lat, lng, formatted_address), family_members(name, mrn), encounters(encounter_no), payments(amount, net_amount)'
+        '*, doctors(name, specialty), clinics(*), family_members(name, mrn), encounters(encounter_no), payments(amount, net_amount)'
       )
       .eq('id', appointmentId)
       .single();
@@ -396,10 +405,13 @@ export default function BookingStatus() {
 
   const bookingId = booking?.id;
   const acceptedNow = booking?.status === 'accepted';
+  // The patient's own QR exists only when the clinic uses it (migration 85).
+  const patientQrOn = !!booking?.clinics?.patient_qr_enabled;
   useEffect(() => {
     if (!acceptedNow || !bookingId) return;
     let live = true;
     const mint = async () => {
+      if (!patientQrOn) return;
       const result = await issueBookingQr(bookingId);
       if (!live) return;
       if ('error' in result) { setQrError(result.error); setQr(null); } else { setQrError(null); setQr(result.code); }
@@ -409,7 +421,7 @@ export default function BookingStatus() {
     const watch = window.setInterval(() => loadBooking(), 8000);
     return () => { live = false; window.clearInterval(refresh); window.clearInterval(watch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acceptedNow, bookingId]);
+  }, [acceptedNow, bookingId, patientQrOn]);
 
   if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
@@ -666,7 +678,24 @@ export default function BookingStatus() {
                 </p>
               </>
             )}
+            {/* No patient QR at this clinic - the desk finds the booking by ID. */}
+            {!patientQrOn && (
+              <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Booking ID</p>
+                <p className="mt-1 font-mono text-3xl font-extrabold tracking-wider text-slate-900">
+                  {bookingReference(booking.id)}
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  {options?.canSelfCheckIn
+                    ? "Scan the clinic's QR at reception to check in. Can't scan? Give this booking ID, your name or phone at the desk."
+                    : 'At the desk, give this booking ID, your name or your phone number to check in.'}
+                </p>
+                {isPaid && <p className="mt-2 text-sm font-semibold text-slate-700">Already paid — nothing to collect at the counter.</p>}
+              </div>
+            )}
             {/* the check-in code, right on this page */}
+            {patientQrOn && (
+            <>
             <div className="mt-4 flex justify-center">
               <motion.div
                 initial={{ opacity: 0, scale: 0.85 }}
@@ -703,6 +732,8 @@ export default function BookingStatus() {
             <p className="text-xs text-slate-500">
               Booking ref <span className="font-mono font-bold text-brand-700">{bookingReference(booking.id)}</span> · the code refreshes every few minutes.
             </p>
+            </>
+            )}
             {options?.canSelfCheckIn && (
               <div className="mt-3">
                 <Button full onClick={() => setScanning(true)} disabled={selfBusy}>
@@ -720,15 +751,19 @@ export default function BookingStatus() {
               onClick={() => navigate(`/bookings/${booking.id}/pass`)}
               className="mx-auto mt-3 flex items-center gap-1.5 text-xs font-bold text-brand-600"
             >
-              <QrCodeIcon size={14} /> Open full-screen pass
+              <QrCodeIcon size={14} /> {patientQrOn ? 'Open full-screen pass' : 'Open check-in screen'}
             </button>
             <div className="mt-4 text-left">
               <InfoNote
                 title="When you arrive"
                 bullets={[
-                  `Check in at the desk from 60 minutes before your ${formatTimeLabel(booking.slot_time)} slot.`,
-                  'Show your check-in code — or just give them your name, phone or MRN.',
-                  'Your token number appears here as soon as the desk checks you in.',
+                  `Check-in opens ${booking.clinics?.checkin_open_before_minutes ?? 60} minutes before your ${formatTimeLabel(booking.slot_time)} slot.`,
+                  options?.canSelfCheckIn
+                    ? "Scan the clinic's QR at reception, or give your name, phone or booking ID at the desk."
+                    : patientQrOn
+                      ? 'Show your check-in code — or just give them your name, phone or MRN.'
+                      : 'Give your name, phone or booking ID at the desk.',
+                  'Your token number appears here as soon as you are checked in.',
                 ]}
               />
             </div>
@@ -802,11 +837,14 @@ export default function BookingStatus() {
           </div>
         )}
 
-        {booking.status === 'rejected' && booking.reject_reason && (
+        {(booking.status === 'rejected' || booking.status === 'cancelled') && booking.reject_reason && (
           <Card className="mt-3">
+            {booking.status === 'cancelled' && (
+              <p className="text-sm font-semibold text-slate-900">The clinic cancelled this appointment.</p>
+            )}
             <p className="text-sm text-slate-600">Reason: {booking.reject_reason}</p>
             <p className="mt-2 text-sm text-amber-600">
-              If you paid online, your payment hold has been released automatically.
+              If you paid online, your payment is refunded automatically.
             </p>
           </Card>
         )}
@@ -890,7 +928,13 @@ export default function BookingStatus() {
           </motion.div>
         )}
 
-        <VisitDetails visit={visit} prescription={visit?.prescriptions[0] ?? null} />
+        <VisitDetails
+          visit={visit}
+          prescription={visit?.prescriptions[0] ?? null}
+          patientName={booking.family_members?.name}
+          doctorName={booking.doctors?.name}
+          clinicName={booking.clinics?.name}
+        />
 
         {/* Follow-up scheduling (schema.sql section 46) - only once this visit
             actually has a due date, and only on the COMPLETED appointment,

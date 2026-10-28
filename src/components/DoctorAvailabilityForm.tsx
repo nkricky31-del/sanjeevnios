@@ -2,22 +2,26 @@ import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { WEEKDAY_LABELS } from '../lib/date';
+import { exactSlotLengths, formatMinutes, planSlots, SLOT_LENGTH_OPTIONS } from '../lib/slotRate';
 import { supabase } from '../lib/supabaseClient';
-import { computeSlots, formatTimeLabel } from '../lib/time';
+import { computeSlots, formatTimeLabel, timeToMinutes } from '../lib/time';
 import type { DoctorAvailability } from '../lib/types';
 
 interface Props {
   doctorId: string;
 }
 
+// A doctor's weekly hours, set as "how many patients an hour" plus a slot
+// length (migration 85): 10 patients an hour is 6 minutes each, so a
+// 15-minute slot takes 2 bookings and is then shown as full.
 export default function DoctorAvailabilityForm({ doctorId }: Props) {
   const [windows, setWindows] = useState<DoctorAvailability[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDays, setSelectedDays] = useState<Set<number>>(new Set());
   const [startTime, setStartTime] = useState('10:00');
   const [endTime, setEndTime] = useState('13:00');
-  const [maxPerDay, setMaxPerDay] = useState('12');
-  const [slotCapacity, setSlotCapacity] = useState('1');
+  const [perHour, setPerHour] = useState('10');
+  const [slotMinutes, setSlotMinutes] = useState(15);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,15 +50,16 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
     });
   };
 
-  const maxNum = Number(maxPerDay);
-  const slotCapacityNum = Number(slotCapacity);
-  // Same math patients see turned into slots on DoctorPage - shown here so
-  // the clinic can see exactly what "12 patients/day, 10:00-13:00" produces
-  // before they save it.
+  const perHourNum = Number(perHour);
+  const windowMinutes = startTime && endTime ? timeToMinutes(`${endTime}:00`) - timeToMinutes(`${startTime}:00`) : 0;
+  const plan = windowMinutes > 0 && perHour !== '' ? planSlots(windowMinutes, perHourNum, slotMinutes) : null;
   const previewSlots =
-    selectedDays.size > 0 && maxNum > 0
-      ? computeSlots([{ start_time: `${startTime}:00`, end_time: `${endTime}:00`, max_patients_per_day: maxNum }])
+    plan && !('error' in plan)
+      ? computeSlots([
+          { start_time: `${startTime}:00`, end_time: `${endTime}:00`, max_patients_per_day: plan.slotCount, slot_minutes: slotMinutes },
+        ])
       : [];
+  const exactFits = Number.isInteger(perHourNum) && perHourNum > 0 ? exactSlotLengths(perHourNum) : [];
 
   const submit = async () => {
     setError(null);
@@ -67,12 +72,12 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
       setError('End time must be after start time.');
       return;
     }
-    if (!Number.isFinite(maxNum) || maxNum <= 0) {
-      setError('Max patients per day must be a positive number.');
+    if (!plan) {
+      setError('Enter how many patients the doctor can see in an hour.');
       return;
     }
-    if (!Number.isFinite(slotCapacityNum) || slotCapacityNum <= 0) {
-      setError('Capacity per slot must be a positive number.');
+    if ('error' in plan) {
+      setError(plan.error);
       return;
     }
 
@@ -82,8 +87,12 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
       weekday,
       start_time: `${startTime}:00`,
       end_time: `${endTime}:00`,
-      max_patients_per_day: maxNum,
-      slot_capacity: slotCapacityNum,
+      patients_per_hour: perHourNum,
+      slot_minutes: slotMinutes,
+      // Also derived by the database (derive_availability_capacity) - sent so
+      // the row is right even before that trigger runs.
+      max_patients_per_day: plan.slotCount,
+      slot_capacity: plan.perSlot,
     }));
     const { error: insertError } = await supabase.from('doctor_availability').insert(rows);
     setSaving(false);
@@ -101,6 +110,15 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
     load();
   };
 
+  const describeWindow = (w: DoctorAvailability) => {
+    const hours = `${formatTimeLabel(w.start_time)} – ${formatTimeLabel(w.end_time)}`;
+    if (w.patients_per_hour && w.slot_minutes) {
+      const perDay = w.max_patients_per_day * (w.slot_capacity ?? 1);
+      return `${hours} · ${w.patients_per_hour} patients/hour · ${w.slot_minutes}-min slots of ${w.slot_capacity} · up to ${perDay}/day`;
+    }
+    return `${hours} · ${w.max_patients_per_day} slots/day · ${w.slot_capacity ?? 1} per slot`;
+  };
+
   return (
     <div className="mt-3 space-y-4 rounded-xl border border-slate-200 p-4">
       <div>
@@ -111,15 +129,12 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
         )}
         <div className="mt-2 space-y-1">
           {windows.map((w) => (
-            <div key={w.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-              <span>
+            <div key={w.id} className="flex items-start justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <span className="min-w-0">
                 <span className="font-medium text-slate-800">{WEEKDAY_LABELS[w.weekday]}</span>{' '}
-                <span className="text-slate-600">
-                  {formatTimeLabel(w.start_time)} – {formatTimeLabel(w.end_time)} · {w.max_patients_per_day}{' '}
-                  patients/day · {w.slot_capacity ?? 1} per slot
-                </span>
+                <span className="text-slate-600">{describeWindow(w)}</span>
               </span>
-              <button onClick={() => removeWindow(w.id)} className="text-xs font-medium text-red-600">
+              <button onClick={() => removeWindow(w.id)} className="shrink-0 text-xs font-medium text-red-600">
                 Remove
               </button>
             </div>
@@ -129,11 +144,12 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
 
       <div>
         <p className="text-sm font-medium text-slate-700">Add availability</p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Weekdays">
           {WEEKDAY_LABELS.map((label, day) => (
             <button
               key={day}
               type="button"
+              aria-pressed={selectedDays.has(day)}
               onClick={() => toggleDay(day)}
               className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
                 selectedDays.has(day)
@@ -148,8 +164,11 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
 
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <div>
-            <label className="text-xs font-medium text-slate-600">Start</label>
+            <label htmlFor="avail-start" className="text-xs font-medium text-slate-600">
+              Start
+            </label>
             <input
+              id="avail-start"
               type="time"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
@@ -157,8 +176,11 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600">End</label>
+            <label htmlFor="avail-end" className="text-xs font-medium text-slate-600">
+              End
+            </label>
             <input
+              id="avail-end"
               type="time"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}
@@ -166,35 +188,70 @@ export default function DoctorAvailabilityForm({ doctorId }: Props) {
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600">Max patients/day</label>
+            <label htmlFor="avail-per-hour" className="text-xs font-medium text-slate-600">
+              Patients per hour
+            </label>
             <input
+              id="avail-per-hour"
               type="number"
               inputMode="numeric"
               min={1}
-              value={maxPerDay}
-              onChange={(e) => setMaxPerDay(e.target.value)}
+              max={120}
+              value={perHour}
+              onChange={(e) => setPerHour(e.target.value)}
               className="mt-1 block w-28 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600">Capacity per slot</label>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              value={slotCapacity}
-              onChange={(e) => setSlotCapacity(e.target.value)}
-              className="mt-1 block w-28 rounded-2xl border border-slate-200 px-2 py-1.5 text-sm"
-            />
+            <label htmlFor="avail-slot" className="text-xs font-medium text-slate-600">
+              Slot length
+            </label>
+            <select
+              id="avail-slot"
+              value={slotMinutes}
+              onChange={(e) => setSlotMinutes(Number(e.target.value))}
+              className="mt-1 block rounded-2xl border border-slate-200 bg-white px-2 py-1.5 text-sm"
+            >
+              {SLOT_LENGTH_OPTIONS.map((m) => (
+                <option key={m} value={m}>
+                  {m} minutes
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {previewSlots.length > 0 && (
-          <p className="mt-2 text-xs text-slate-500">
-            → {previewSlots.length} bookable slot{previewSlots.length === 1 ? '' : 's'}/day,{' '}
-            {formatTimeLabel(previewSlots[0])} to {formatTimeLabel(previewSlots[previewSlots.length - 1])}, each
-            holding {slotCapacityNum > 0 ? slotCapacityNum : 1} patient{slotCapacityNum === 1 ? '' : 's'}
-          </p>
+        {plan && 'error' in plan && <p className="mt-2 text-xs font-semibold text-amber-700">{plan.error}</p>}
+
+        {plan && !('error' in plan) && previewSlots.length > 0 && (
+          <div className="mt-3 rounded-xl bg-brand-50 p-3 text-xs leading-relaxed text-slate-700">
+            <p>
+              <strong>{perHourNum} patients an hour</strong> = {formatMinutes(plan.minutesPerPatient)} per patient, so each{' '}
+              {slotMinutes}-minute slot takes <strong>{plan.perSlot} booking{plan.perSlot === 1 ? '' : 's'}</strong> and
+              is then shown as full.
+            </p>
+            <p className="mt-1">
+              {plan.slotCount} slot{plan.slotCount === 1 ? '' : 's'} from {formatTimeLabel(previewSlots[0])} to{' '}
+              {formatTimeLabel(previewSlots[previewSlots.length - 1])} · up to <strong>{plan.perDay} patients</strong> a
+              day.
+            </p>
+            {plan.effectivePerHour < perHourNum && (
+              <p className="mt-1 font-semibold text-amber-700">
+                That's {Number.isInteger(plan.effectivePerHour) ? plan.effectivePerHour : plan.effectivePerHour.toFixed(1)} an
+                hour, not {perHourNum}: a {slotMinutes}-minute slot fits{' '}
+                {((perHourNum * slotMinutes) / 60).toFixed(1).replace(/\.0$/, '')} patients and part-patients can't be
+                booked.
+                {exactFits.length > 0 &&
+                  ` For exactly ${perHourNum} an hour, use ${exactFits.join(', ')}-minute slots.`}
+              </p>
+            )}
+            {plan.leftoverMinutes > 0 && (
+              <p className="mt-1 text-slate-500">
+                The last {plan.leftoverMinutes} minutes before {formatTimeLabel(`${endTime}:00`)} are too short for a
+                slot and stay unbooked.
+              </p>
+            )}
+          </div>
         )}
 
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}

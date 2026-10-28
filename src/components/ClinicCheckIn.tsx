@@ -22,6 +22,8 @@ interface Props {
   doctorId: string;
   date: string;
   clinicId: string;
+  /** Migration 85: patients only carry a booking QR when the clinic uses one. */
+  patientQrEnabled?: boolean;
   /** Bumped after every successful check-in so the waiting list reloads. */
   onCheckedIn: () => void;
 }
@@ -65,7 +67,7 @@ interface Outcome {
 // select on `appointments`, so RLS already limits it to this clinic's own
 // rows, and the check-in function independently refuses an appointment the
 // caller's clinic doesn't own. A QR from another clinic simply won't match.
-export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }: Props) {
+export default function ClinicCheckIn({ doctorId, date, clinicId, patientQrEnabled = false, onCheckedIn }: Props) {
   const listRef = useStaggerIn();
   const [expected, setExpected] = useState<ExpectedRow[]>([]);
   const [noShows, setNoShows] = useState<ExpectedRow[]>([]);
@@ -394,17 +396,19 @@ export default function ClinicCheckIn({ doctorId, date, clinicId, onCheckedIn }:
         </div>
       )}
 
-      {/* 1. Scan */}
-      <div className="mt-4">
-        <Button full onClick={() => setScanning(true)} disabled={!isToday || busy}>
-          <QrCodeIcon size={18} /> Scan patient QR
-        </Button>
-        {!isToday && (
-          <p className="mt-1.5 text-center text-xs text-slate-400">
-            Check-in is only possible on the day of the appointment.
-          </p>
-        )}
-      </div>
+      {/* 1. Scan - only when this clinic gives patients a booking QR */}
+      {patientQrEnabled && (
+        <div className="mt-4">
+          <Button full onClick={() => setScanning(true)} disabled={!isToday || busy}>
+            <QrCodeIcon size={18} /> Scan patient QR
+          </Button>
+          {!isToday && (
+            <p className="mt-1.5 text-center text-xs text-slate-400">
+              Check-in is only possible on the day of the appointment.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 1b. Patient ID - the other half of "scan or type the patient ID" */}
       <div className="mt-2 flex items-center gap-2">
