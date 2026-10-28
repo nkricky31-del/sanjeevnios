@@ -1,6 +1,6 @@
 import { useStaggerIn } from '../lib/motionKit';
 import { ChevronRight, MapPin, SearchIcon, Stethoscope } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import RatingBadge from '../components/RatingBadge';
@@ -11,6 +11,9 @@ import { supabase } from '../lib/supabaseClient';
 import type { DoctorSearchResult } from '../lib/types';
 
 const QUICK_FILTERS = ['General Physician', 'Cardiologist', 'Dermatologist', 'Paediatrician', 'Orthopaedics'];
+// The database returns the best matches - nearest first once a location is
+// known (migration 87) - rather than every doctor on the platform.
+const RESULT_LIMIT = 100;
 
 interface MyLocation {
   lat: number;
@@ -26,15 +29,31 @@ export default function Search() {
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
+  const searchSeq = useRef(0);
+  // The list stopped at RESULT_LIMIT, so there are more matches than shown.
+  const [capped, setCapped] = useState(false);
   useEffect(() => {
     const timer = setTimeout(async () => {
+      const seq = ++searchSeq.current;
       setLoading(true);
-      const { data } = await supabase.rpc('search_doctors', { search_term: query });
-      setResults(data ?? []);
+      let { data, error } = await supabase.rpc('search_doctors', {
+        search_term: query,
+        p_lat: myLocation?.lat ?? null,
+        p_lng: myLocation?.lng ?? null,
+        p_limit: RESULT_LIMIT,
+      });
+      if (error) {
+        // Before migration 87 the search took only the term.
+        ({ data, error } = await supabase.rpc('search_doctors', { search_term: query }));
+      }
+      if (seq !== searchSeq.current) return; // a newer search is on its way
+      const rows = (data ?? []) as DoctorSearchResult[];
+      setResults(rows);
+      setCapped(rows.length === RESULT_LIMIT && rows.every((r) => 'distance_km' in r));
       setLoading(false);
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, myLocation]);
 
   const findNearby = () => {
     setLocationError(null);
@@ -58,7 +77,7 @@ export default function Search() {
 
   const distanceKm = (r: DoctorSearchResult): number | null => {
     if (!myLocation || r.clinic_lat == null || r.clinic_lng == null) return null;
-    return haversineKm(myLocation.lat, myLocation.lng, r.clinic_lat, r.clinic_lng);
+    return r.distance_km ?? haversineKm(myLocation.lat, myLocation.lng, r.clinic_lat, r.clinic_lng);
   };
 
   // With a location available, clinics with a known distance sort nearest
@@ -121,6 +140,12 @@ export default function Search() {
           {loading && <p className="text-sm text-slate-400 lg:col-span-2">Searching...</p>}
           {!loading && sortedResults.length === 0 && (
             <p className="text-sm text-slate-400 lg:col-span-2">No approved clinics found.</p>
+          )}
+          {!loading && capped && (
+            <p className="text-xs text-slate-500 lg:col-span-2">
+              Showing the top {RESULT_LIMIT}
+              {myLocation ? ' nearest to you' : ''}. Search by doctor, speciality, clinic or area to find others.
+            </p>
           )}
           {sortedResults.map((r) => {
             const dist = distanceKm(r);

@@ -390,15 +390,9 @@ export default function ClinicQueue() {
   const sendReminder = async (a: QueueAppointment) => {
     setActionError(null);
     const newCount = a.reminder_count + 1;
-    const { error: reminderError } = await supabase
-      .from('appointments')
-      .update({ reminder_count: newCount })
-      .eq('id', a.id);
-    if (reminderError) {
-      setActionError(reminderError.message);
-      return;
-    }
-
+    // The notice first, then the count: bumping the count is what tells the
+    // patient's open screen to look (migration 87), so the notice must
+    // already be there when it does.
     if (a.family_members?.account_id) {
       const holdsToken = a.token_number != null;
       await supabase.from('notifications').insert({
@@ -409,6 +403,14 @@ export default function ClinicQueue() {
           ? `Reminder from the clinic: token #${a.token_number} is coming up soon. Please be ready.`
           : `Reminder from the clinic: your ${formatTimeLabel(a.slot_time)} appointment is coming up. Please come to the desk to check in and collect your token.`,
       });
+    }
+    const { error: reminderError } = await supabase
+      .from('appointments')
+      .update({ reminder_count: newCount })
+      .eq('id', a.id);
+    if (reminderError) {
+      setActionError(reminderError.message);
+      return;
     }
 
     loadAppointments();

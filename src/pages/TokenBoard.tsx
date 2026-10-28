@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../lib/AuthContext';
 import { todayISO } from '../lib/date';
+import { useCoalescedRefresh, useVisibleInterval } from '../lib/livePolling';
 import { supabase } from '../lib/supabaseClient';
 import type { AppointmentStatus } from '../lib/types';
 
@@ -75,39 +76,47 @@ export default function TokenBoard() {
     load();
   }, [load]);
 
+  // The clock on screen (and the date rolling over at midnight) - local only.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 15000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Poll as a safety net on top of the realtime channels below - a board left
   // running all day on a TV must not quietly go stale if a socket drops.
-  useEffect(() => {
-    const timer = setInterval(() => {
-      load();
-      setNow(new Date());
-    }, 15000);
-    return () => clearInterval(timer);
-  }, [load]);
+  useVisibleInterval(load, 30_000);
 
-  // One channel per doctor working today: the queue broadcast is keyed by
-  // doctor+date (see broadcast_appointment_queue_change in schema.sql), so a
-  // clinic-wide board has to listen to each of them.
+  // Every doctor of the clinic, so the very first check-in of the day shows
+  // up live too (not only doctors who already have someone in the queue).
+  const [doctorKey, setDoctorKey] = useState('');
   useEffect(() => {
     if (!clinicId) return;
-    const doctorIds = [...new Set(rows.map((r) => r.doctor_id))];
-    if (doctorIds.length === 0) return;
+    supabase
+      .from('doctors')
+      .select('id')
+      .eq('clinic_id', clinicId)
+      .then(({ data }) => setDoctorKey(((data ?? []) as { id: string }[]).map((d) => d.id).sort().join(',')));
+  }, [clinicId]);
 
+  // One channel per doctor: the queue broadcast is keyed by doctor+date (see
+  // broadcast_appointment_queue_change in schema.sql), so a clinic-wide board
+  // listens to each of them. Keyed on the doctor list itself, so it joins
+  // once - not again whenever someone joins or leaves the queue.
+  const onQueueSignal = useCoalescedRefresh(load, 200, 600);
+  useEffect(() => {
+    if (!doctorKey) return;
     supabase.realtime.setAuth();
-    const channels = doctorIds.map((id) =>
+    const channels = doctorKey.split(',').map((id) =>
       supabase
         .channel(`queue:${id}:${today}`, { config: { private: true } })
-        .on('broadcast', { event: 'UPDATE' }, () => load())
-        .on('broadcast', { event: 'INSERT' }, () => load())
+        .on('broadcast', { event: 'UPDATE' }, onQueueSignal)
+        .on('broadcast', { event: 'INSERT' }, onQueueSignal)
         .subscribe()
     );
     return () => {
       channels.forEach((c) => supabase.removeChannel(c));
     };
-    // rows.length keeps the subscription set in step as new doctors appear
-    // without resubscribing on every single row change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clinicId, today, rows.length, load]);
+  }, [doctorKey, today, onQueueSignal]);
 
   const serving = rows.filter((r) => r.status === 'called' || r.status === 'in_consultation');
   const waiting = rows.filter((r) => r.status === 'checked_in');

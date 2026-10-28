@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { skipToBack } from '../lib/checkIn';
 import { getDoctorConsultationStats } from '../lib/consultation';
+import { useCoalescedRefresh } from '../lib/livePolling';
 import { patientContextLine } from '../lib/patientContact';
 import { bookingReference } from '../lib/queue';
 import { notifyPatient, visitCompletedMessage } from '../lib/notify';
@@ -115,19 +116,21 @@ export default function WaitingList({
 
   // Same broadcast channel the patient's own screen listens on, so the desk
   // sees a walk-in added on another till (or a doctor finishing) without
-  // anyone pressing refresh.
+  // anyone pressing refresh. A burst of changes (calling the next patient
+  // touches two bookings) becomes one reload.
+  const onQueueSignal = useCoalescedRefresh(load, 150, 350);
   useEffect(() => {
     if (!doctorId) return;
     supabase.realtime.setAuth();
     const channel = supabase
       .channel(`queue:${doctorId}:${date}`, { config: { private: true } })
-      .on('broadcast', { event: 'UPDATE' }, () => load())
-      .on('broadcast', { event: 'INSERT' }, () => load())
+      .on('broadcast', { event: 'UPDATE' }, onQueueSignal)
+      .on('broadcast', { event: 'INSERT' }, onQueueSignal)
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [doctorId, date, load]);
+  }, [doctorId, date, onQueueSignal]);
 
   const setStatus = async (id: string, status: AppointmentStatus) => {
     setError(null);
@@ -177,14 +180,9 @@ export default function WaitingList({
   const sendReminder = async (r: QueueRow) => {
     setError(null);
     const newCount = r.reminder_count + 1;
-    const { error: updateError } = await supabase
-      .from('appointments')
-      .update({ reminder_count: newCount })
-      .eq('id', r.id);
-    if (updateError) {
-      setError(updateError.message);
-      return;
-    }
+    // The notice first, then the count: bumping the count is what tells the
+    // patient's open screen to look (migration 87), so the notice must
+    // already be there when it does.
     if (r.account_id) {
       await supabase.from('notifications').insert({
         user_id: r.account_id,
@@ -192,6 +190,14 @@ export default function WaitingList({
         type: 'clinic_reminder',
         message: `Reminder from the clinic: token #${r.token_number} is being called. Please come to the consultation area.`,
       });
+    }
+    const { error: updateError } = await supabase
+      .from('appointments')
+      .update({ reminder_count: newCount })
+      .eq('id', r.id);
+    if (updateError) {
+      setError(updateError.message);
+      return;
     }
     setNote(`Reminder ${newCount}/${reminderLimit} sent to ${r.patient_name ?? 'the patient'}.`);
     await load();

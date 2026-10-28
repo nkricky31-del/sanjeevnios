@@ -547,6 +547,8 @@ export interface DoctorSearchResult {
   doctor_avg_rating: number | null;
   doctor_review_count: number;
   doctor_percent_positive: number | null;
+  // migration 87 - km from the location the search was given, if any.
+  distance_km?: number | null;
 }
 
 // One row per get_doctor_rating()/get_clinic_rating() call (migration 61) -

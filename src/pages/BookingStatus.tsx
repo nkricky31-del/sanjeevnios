@@ -38,6 +38,7 @@ import { getCheckInOptions, getCurrentCoords, isPrintedClinicQr, issueBookingQr,
 import QrCode from '../components/ui/QrCode';
 import QrScanner from '../components/QrScanner';
 import { getDoctorConsultationStats } from '../lib/consultation';
+import { currentUserId, useCoalescedRefresh, useVisibleInterval } from '../lib/livePolling';
 import { notifyPatient, reportingTimeReminderMessage, REPORTING_REMINDER_LEAD_MINUTES } from '../lib/notify';
 import { bookingReference, computeNowServing, countAhead } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
@@ -60,6 +61,8 @@ interface BookingDetail {
   slot_time: string;
   status: AppointmentStatus;
   token_number: number | null;
+  // How many times the clinic has pressed Remind (a change means a new notice).
+  reminder_count: number;
   checked_in_at: string | null;
   // The published running order (schema.sql section 34) - a PLAN, assigned
   // the night before to every booked patient. Separate from token_number,
@@ -96,16 +99,18 @@ interface BookingDetail {
   payments: { amount: number; net_amount: number | null }[] | null;
 }
 
-// Statuses where something can still change - a rejected/cancelled/no_show
-// booking is done, no point keeping a live channel open for it.
+// Statuses where the live queue can still change this booking - before the
+// visit is over. A completed visit's notes and files are re-read on their own
+// (below); a rejected/cancelled/no_show booking is done.
 const WATCHED_STATUSES: AppointmentStatus[] = [
   'booked',
   'accepted',
   'checked_in',
   'called',
   'in_consultation',
-  'completed',
 ];
+// Holding a live token: arrived, not finished.
+const IN_QUEUE_STATUSES: AppointmentStatus[] = ['checked_in', 'called', 'in_consultation'];
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
   booked: 'Booking received - waiting for the payment to be confirmed',
@@ -179,18 +184,6 @@ export default function BookingStatus() {
       .single();
     setBooking(data as BookingDetail | null);
     setLoading(false);
-
-    // Live-computed rather than read off a stored flag - see
-    // is_currently_verified() in schema.sql.
-    if (data) {
-      const detail = data as BookingDetail;
-      const [{ data: docVerified }, { data: clinicVerifiedData }] = await Promise.all([
-        supabase.rpc('is_currently_verified', { p_owner_type: 'doctor', p_owner_id: detail.doctor_id }),
-        supabase.rpc('is_currently_verified', { p_owner_type: 'clinic', p_owner_id: detail.clinic_id }),
-      ]);
-      setDoctorVerified(!!docVerified);
-      setClinicVerified(!!clinicVerifiedData);
-    }
   };
 
   const loadReview = async () => {
@@ -248,8 +241,7 @@ export default function BookingStatus() {
   const shownNotificationId = useRef<string | null>(null);
   const checkLatestNotification = async () => {
     if (!appointmentId) return;
-    const { data: userData } = await supabase.auth.getUser();
-    const uid = userData.user?.id;
+    const uid = await currentUserId();
     if (!uid) return;
     const { data } = await supabase
       .from('notifications')
@@ -328,32 +320,90 @@ export default function BookingStatus() {
     getDoctorConsultationStats(booking.doctor_id).then((stats) => setAvgConsultationMinutes(stats.avgMinutes));
   }, [booking?.doctor_id]);
 
+  // Verified badges are live-computed rather than read off a stored flag (see
+  // is_currently_verified() in schema.sql) - once per doctor and clinic, not
+  // again on every reload of the booking.
   useEffect(() => {
-    if (!booking || !WATCHED_STATUSES.includes(booking.status)) return;
+    if (!booking?.doctor_id || !booking?.clinic_id) return;
+    let live = true;
+    Promise.all([
+      supabase.rpc('is_currently_verified', { p_owner_type: 'doctor', p_owner_id: booking.doctor_id }),
+      supabase.rpc('is_currently_verified', { p_owner_type: 'clinic', p_owner_id: booking.clinic_id }),
+    ]).then(([{ data: docVerified }, { data: clinicVerifiedData }]) => {
+      if (!live) return;
+      setDoctorVerified(!!docVerified);
+      setClinicVerified(!!clinicVerifiedData);
+    });
+    return () => {
+      live = false;
+    };
+  }, [booking?.doctor_id, booking?.clinic_id]);
 
-    let cancelled = false;
-    loadQueue(booking.doctor_id, booking.date);
+  // The live queue only moves on the day itself (a day either side allows for
+  // a phone set to another time zone); a booking days away needs no channel -
+  // except one still waiting for its online payment to be confirmed, which
+  // must turn into "confirmed" on screen whenever that happens.
+  const today = todayISO();
+  const liveDay = !!booking && booking.date >= addDaysISO(today, -1) && booking.date <= addDaysISO(today, 1);
+  const watching =
+    !!booking && WATCHED_STATUSES.includes(booking.status) && (liveDay || booking.status === 'booked');
+  const inQueueNow = !!booking && IN_QUEUE_STATUSES.includes(booking.status);
+
+  // What a "the queue changed" signal means for THIS booking. The signal
+  // carries no data and fires for every booking with this doctor today, so
+  // first ask cheaply whether this one changed; only then reload it in full,
+  // with its notice and visit. The queue numbers are re-read only while this
+  // patient is actually in the queue.
+  const checkForChanges = async () => {
+    if (!booking) return;
+    const { data } = await supabase
+      .from('appointments')
+      .select('status, date, slot_time, payment_status, token_number, reminder_count')
+      .eq('id', booking.id)
+      .maybeSingle();
+    if (!data) return;
+    // reminder_count: the clinic pressed Remind - show their notice.
+    const changed =
+      data.status !== booking.status ||
+      data.date !== booking.date ||
+      data.slot_time !== booking.slot_time ||
+      data.payment_status !== booking.payment_status ||
+      data.token_number !== booking.token_number ||
+      data.reminder_count !== booking.reminder_count;
+    if (changed) {
+      loadBooking();
+      checkLatestNotification();
+      if (data.status === 'in_consultation' || data.status === 'completed') loadVisit();
+    }
+    if (IN_QUEUE_STATUSES.includes(data.status as AppointmentStatus)) {
+      loadQueue(booking.doctor_id, data.date);
+      getDoctorConsultationStats(booking.doctor_id).then((stats) => setAvgConsultationMinutes(stats.avgMinutes));
+    }
+  };
+  const onQueueSignal = useCoalescedRefresh(checkForChanges);
+
+  useEffect(() => {
+    if (!booking || !watching) return;
+    if (inQueueNow) loadQueue(booking.doctor_id, booking.date);
 
     supabase.realtime.setAuth();
     const channel = supabase
       .channel(`queue:${booking.doctor_id}:${booking.date}`, { config: { private: true } })
-      .on('broadcast', { event: 'UPDATE' }, () => {
-        if (!cancelled) {
-          loadQueue(booking.doctor_id, booking.date);
-          loadVisit();
-          loadBooking();
-          checkLatestNotification();
-          getDoctorConsultationStats(booking.doctor_id).then((stats) => setAvgConsultationMinutes(stats.avgMinutes));
-        }
-      })
+      .on('broadcast', { event: 'UPDATE' }, onQueueSignal)
+      .on('broadcast', { event: 'INSERT' }, onQueueSignal)
       .subscribe();
 
     return () => {
-      cancelled = true;
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booking?.status, booking?.doctor_id, booking?.date]);
+  }, [watching, inQueueNow, booking?.doctor_id, booking?.date, onQueueSignal]);
+
+  // A safety net under the live channel (a dropped connection, or a phone
+  // that paused it in the background, must not leave the screen stale): the
+  // same cheap check every 30s while on screen, and at once on coming back
+  // after longer than that.
+  useVisibleInterval(checkForChanges, 30_000, watching);
 
   // How many are genuinely in front of this patient, taken from the server's
   // ordering rather than by subtracting token numbers - under the fair-queue
@@ -371,7 +421,7 @@ export default function BookingStatus() {
     const raiseAlert = async (message: string) => {
       setAlertMessage(message);
       await supabase.from('notifications').insert({
-        user_id: (await supabase.auth.getUser()).data.user?.id,
+        user_id: await currentUserId(),
         type: 'queue_reminder',
         message,
         appointment_id: booking.id,
@@ -418,8 +468,7 @@ export default function BookingStatus() {
       // never suddenly reminds anyone of anything.
       if (minutesUntil <= REPORTING_REMINDER_LEAD_MINUTES && minutesUntil >= -180) {
         reportingTimeAlerted.current = true;
-        const { data: userData } = await supabase.auth.getUser();
-        const uid = userData.user?.id;
+        const uid = await currentUserId();
         if (!uid) return;
         await notifyPatient({
           userId: uid,
@@ -440,22 +489,21 @@ export default function BookingStatus() {
   const bookingId = booking?.id;
   const acceptedNow = booking?.status === 'accepted';
   // The patient's own QR exists only when the clinic uses it (migration 85).
+  // A fresh signed code every few minutes while it is on screen - and at once
+  // on coming back to it, if the one shown has gone stale meanwhile.
   const patientQrOn = !!booking?.clinics?.patient_qr_enabled;
+  const showQr = acceptedNow && patientQrOn && !!bookingId;
+  const [qrTick, setQrTick] = useState(0);
+  useVisibleInterval(() => setQrTick((n) => n + 1), 4 * 60 * 1000, showQr);
   useEffect(() => {
-    if (!acceptedNow || !bookingId) return;
+    if (!showQr || !bookingId) return;
     let live = true;
-    const mint = async () => {
-      if (!patientQrOn) return;
-      const result = await issueBookingQr(bookingId);
+    void issueBookingQr(bookingId).then((result) => {
       if (!live) return;
       if ('error' in result) { setQrError(result.error); setQr(null); } else { setQrError(null); setQr(result.code); }
-    };
-    void mint();
-    const refresh = window.setInterval(mint, 4 * 60 * 1000);
-    const watch = window.setInterval(() => loadBooking(), 8000);
-    return () => { live = false; window.clearInterval(refresh); window.clearInterval(watch); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acceptedNow, bookingId, patientQrOn]);
+    });
+    return () => { live = false; };
+  }, [showQr, bookingId, qrTick]);
 
   if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;

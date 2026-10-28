@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js';
-import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type PropsWithChildren } from 'react';
 
 import { clearActingMode, getStoredActingMode } from './actingMode';
 import { idleRoleFor, isIdleExpired, markActive, signOutForInactivity } from './idleTimeout';
@@ -19,10 +19,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  // Whose profile is on hand. Auth events for the SAME person - the hourly
+  // token refresh, coming back to the tab - don't need it fetched again.
+  const profileFor = useRef<string | null>(null);
+  // claim_walk_in_records runs once per person per app load, not per event.
+  const claimedFor = useRef<string | null>(null);
 
   const loadProfile = async (userId: string): Promise<Profile | null> => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     setProfile(data ?? null);
+    profileFor.current = data ? userId : null;
 
     // Best-effort, fire-and-forget: pulls any walk-in visit history filed
     // under this same (now-verified) phone number onto this account. Cheap
@@ -30,9 +36,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
     // silently, though - if this RPC errors (RLS, a DB-side exception), the
     // patient would otherwise see no visit history with zero indication why,
     // so at least log it somewhere a developer can find it.
-    if (data?.role === 'patient') {
+    if (data?.role === 'patient' && claimedFor.current !== userId) {
+      claimedFor.current = userId;
       supabase.rpc('claim_walk_in_records').then(({ error }) => {
-        if (error) console.error('claim_walk_in_records failed:', error.message);
+        if (error) {
+          claimedFor.current = null; // try again next time
+          console.error('claim_walk_in_records failed:', error.message);
+        }
       });
     }
     return (data as Profile | null) ?? null;
@@ -60,11 +70,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setLoading(false);
     });
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       if (newSession) {
-        loadProfile(newSession.user.id);
+        // INITIAL_SESSION is the startup load above. Otherwise fetch the
+        // profile for a new person (sign-in) or a changed one (USER_UPDATED).
+        const samePerson = profileFor.current === newSession.user.id;
+        if (event !== 'INITIAL_SESSION' && (event === 'USER_UPDATED' || !samePerson)) {
+          loadProfile(newSession.user.id);
+        }
       } else {
+        profileFor.current = null;
         setProfile(null);
         // Otherwise a stale 'clinic' (or 'patient') choice from whoever was
         // just signed in would silently misroute the NEXT sign-in on this

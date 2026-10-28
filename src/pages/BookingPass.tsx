@@ -19,6 +19,8 @@ import {
   selfCheckIn,
   type CheckInOptions,
 } from '../lib/checkIn';
+import { addDaysISO, todayISO } from '../lib/date';
+import { currentUserId, useCoalescedRefresh, useVisibleInterval } from '../lib/livePolling';
 import { bookingReference, computeNowServing, countAhead, findMyPosition } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { estimateSlotMinutes, formatTimeLabel } from '../lib/time';
@@ -129,57 +131,90 @@ export default function BookingPass() {
 
   const awaitingArrival = booking?.status === 'accepted';
   const patientQrOn = !!booking?.clinics?.patient_qr_enabled;
+  const showQr = awaitingArrival && patientQrOn;
 
+  // While the code is on screen: a fresh one now, every few minutes after,
+  // and at once on coming back to it if the one shown has gone stale.
   useEffect(() => {
-    if (!awaitingArrival || !patientQrOn) return;
-    refreshQr();
-    const timer = setInterval(refreshQr, QR_REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [awaitingArrival, patientQrOn, refreshQr]);
+    if (showQr) refreshQr();
+  }, [showQr, refreshQr]);
+  useVisibleInterval(refreshQr, QR_REFRESH_MS, showQr);
+
+  // Everything below keys off these plain values, not the booking object
+  // itself - that is a new object after every reload, and keying on it
+  // re-joined the live channel after every single poll.
+  const doctorId = booking?.doctor_id ?? null;
+  const bookingDate = booking?.date ?? null;
+  const myToken = booking?.token_number ?? null;
+  const inQueue = !!booking && LIVE_STATUSES.includes(booking.status);
+  // The queue only moves on the day itself (a day either side allows for a
+  // phone set to another time zone).
+  const today = todayISO();
+  const liveDay = !!bookingDate && bookingDate >= addDaysISO(today, -1) && bookingDate <= addDaysISO(today, 1);
+  // Before arrival too: the desk scanning this very screen's code turns it
+  // into the token view straight away.
+  const watching = liveDay && (awaitingArrival || inQueue);
 
   // Live queue numbers, once the patient is actually in the queue.
   const loadQueue = useCallback(async () => {
-    if (!booking) return;
+    if (!doctorId || !bookingDate) return;
     const { data } = await supabase.rpc('get_queue_status', {
-      p_doctor_id: booking.doctor_id,
-      p_date: booking.date,
+      p_doctor_id: doctorId,
+      p_date: bookingDate,
     });
     const rows = (data ?? []) as QueueStatusRow[];
     setNowServing(computeNowServing(rows));
     // Position and "ahead of you" both come from the server's ordering, not
     // from comparing token numbers - under the fair-queue rule a lower token
     // does not mean an earlier turn.
-    setAheadCount(countAhead(rows, booking.token_number));
-    setMyPosition(findMyPosition(rows, booking.token_number));
-  }, [booking]);
+    setAheadCount(countAhead(rows, myToken));
+    setMyPosition(findMyPosition(rows, myToken));
+  }, [doctorId, bookingDate, myToken]);
 
   useEffect(() => {
-    if (!booking || !LIVE_STATUSES.includes(booking.status)) return;
-    loadQueue();
+    if (inQueue) loadQueue();
+  }, [inQueue, loadQueue]);
 
+  // A "the queue changed" signal carries no data and fires for every booking
+  // with this doctor today: ask cheaply whether THIS booking changed, reload
+  // it only if so, and re-read the queue numbers while in the queue.
+  const checkForChanges = async () => {
+    if (!booking) return;
+    const { data } = await supabase
+      .from('appointments')
+      .select('status, date, slot_time, payment_status, token_number')
+      .eq('id', booking.id)
+      .maybeSingle();
+    if (!data) return;
+    if (
+      data.status !== booking.status ||
+      data.date !== booking.date ||
+      data.slot_time !== booking.slot_time ||
+      data.payment_status !== booking.payment_status ||
+      data.token_number !== booking.token_number
+    ) {
+      loadBooking();
+    }
+    if (LIVE_STATUSES.includes(data.status as AppointmentStatus)) loadQueue();
+  };
+  const onQueueSignal = useCoalescedRefresh(checkForChanges);
+
+  useEffect(() => {
+    if (!watching || !doctorId || !bookingDate) return;
     supabase.realtime.setAuth();
     const channel = supabase
-      .channel(`queue:${booking.doctor_id}:${booking.date}`, { config: { private: true } })
-      .on('broadcast', { event: 'UPDATE' }, () => {
-        loadQueue();
-        loadBooking();
-      })
+      .channel(`queue:${doctorId}:${bookingDate}`, { config: { private: true } })
+      .on('broadcast', { event: 'UPDATE' }, onQueueSignal)
+      .on('broadcast', { event: 'INSERT' }, onQueueSignal)
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [booking, loadQueue, loadBooking]);
+  }, [watching, doctorId, bookingDate, onQueueSignal]);
 
-  // The desk checking someone in doesn't touch this patient's own row in a
-  // way the broadcast always covers, so poll gently while waiting too.
-  useEffect(() => {
-    if (!booking || !['accepted', ...LIVE_STATUSES].includes(booking.status)) return;
-    const timer = setInterval(() => {
-      loadBooking();
-      if (LIVE_STATUSES.includes(booking.status)) loadQueue();
-    }, 15000);
-    return () => clearInterval(timer);
-  }, [booking, loadBooking, loadQueue]);
+  // A safety net under the live channel: the same cheap check every 30s
+  // while on screen, and at once on coming back after longer than that.
+  useVisibleInterval(checkForChanges, 30_000, watching);
 
   useEffect(() => {
     if (!booking) return;
@@ -201,10 +236,10 @@ export default function BookingPass() {
 
     const raiseAlert = async (message: string) => {
       setAlert(message);
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user?.id) return;
+      const uid = await currentUserId();
+      if (!uid) return;
       await supabase.from('notifications').insert({
-        user_id: userData.user.id,
+        user_id: uid,
         appointment_id: booking.id,
         type: 'queue_reminder',
         message,
@@ -260,7 +295,6 @@ export default function BookingPass() {
   if (loading) return <p className="p-6 text-slate-400"><Loading /></p>;
   if (!booking) return <p className="p-6 text-slate-400">Booking not found.</p>;
 
-  const inQueue = LIVE_STATUSES.includes(booking.status);
   const estimatedWait = aheadCount != null ? Math.round(aheadCount * slotMinutes) : null;
   const paidOnline = booking.payment_status === 'paid_online';
   const selfCheckInAvailable = awaitingArrival && !!options?.canSelfCheckIn;
