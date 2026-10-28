@@ -5,6 +5,8 @@ import {
   AuthDivider, AuthError, AuthHeading, AuthLink, AuthLinkButton, AuthSubmit, AuthTextButton, ClinicIdField, OtpField, PhoneField,
 } from '../components/auth/AuthFields';
 import AuthShell from '../components/auth/AuthShell';
+import IdleSignedOutNotice from '../components/auth/IdleSignedOutNotice';
+import { startActiveSession } from '../lib/idleTimeout';
 import { setActingMode } from '../lib/actingMode';
 import { clinicCodeFromNumber } from '../lib/clinicCode';
 import { CLINIC_SIGNUP_INTENT_KEY } from '../lib/clinicSignupIntent';
@@ -141,6 +143,9 @@ export default function ClinicLogin() {
       return;
     }
     setLoading(true);
+    // A fresh login starts a fresh inactivity clock - set BEFORE verifying,
+    // because the session (and the inactivity watcher) appears during it.
+    startActiveSession();
     const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
     logAuthEvent('otp.verify', verifyError ? 'failure' : 'success', phone);
     setLoading(false);
@@ -158,6 +163,7 @@ export default function ClinicLogin() {
     <AuthShell role="clinic">
       {stage === 'details' ? (
         <>
+          <IdleSignedOutNotice />
           <AuthHeading
             title={mode === 'register' ? 'Register your clinic' : 'Clinic login'}
             sub={

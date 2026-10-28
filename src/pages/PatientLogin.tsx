@@ -6,6 +6,8 @@ import {
   AuthDivider, AuthError, AuthHeading, AuthLink, AuthNotice, AuthSubmit, AuthTextButton, OtpField, PhoneField,
 } from '../components/auth/AuthFields';
 import AuthShell from '../components/auth/AuthShell';
+import IdleSignedOutNotice from '../components/auth/IdleSignedOutNotice';
+import { startActiveSession } from '../lib/idleTimeout';
 import { setActingMode } from '../lib/actingMode';
 import { safeNext } from '../lib/loginRedirect';
 import { logAuthEvent } from '../lib/audit';
@@ -72,6 +74,9 @@ export default function PatientLogin() {
       return;
     }
     setLoading(true);
+    // A fresh login starts a fresh inactivity clock - set BEFORE verifying,
+    // because the session (and the inactivity watcher) appears during it.
+    startActiveSession();
     const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
     logAuthEvent('otp.verify', verifyError ? 'failure' : 'success', phone);
     setLoading(false);
@@ -104,7 +109,9 @@ export default function PatientLogin() {
           {/* Only for a genuine private-page bounce (App.tsx's ?next=<path>
               redirect) - a clean "please log in" state instead of the visitor
               landing here with no idea why. */}
-          {cameFromPrivatePage && <AuthNotice icon={LogIn}>Please log in to continue to that page.</AuthNotice>}
+          <IdleSignedOutNotice
+            fallback={cameFromPrivatePage ? <AuthNotice icon={LogIn}>Please log in to continue to that page.</AuthNotice> : null}
+          />
           <AuthHeading title="Welcome back" sub="Sign in to continue to your account." />
 
           <form onSubmit={sendOtp} className="mt-6">

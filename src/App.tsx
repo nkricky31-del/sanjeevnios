@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import PatientDeclarationGate from './components/PatientDeclarationGate';
 import PatientOnboardingGate from './components/PatientOnboardingGate';
 import EncounterDetail from './components/EncounterDetail';
+import IdleGuard from './components/IdleGuard';
 import NotificationsList from './components/NotificationsList';
 import Button from './components/ui/Button';
 import { InstallBanner, OfflineBanner } from './components/InstallBanner';
@@ -13,6 +14,7 @@ import { isStandalone } from './lib/pwa';
 import { usePressFx } from './lib/pressFx';
 import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
+import { idleRoleFor, LOGIN_PATH, readIdleSignOut } from './lib/idleTimeout';
 import { supabase } from './lib/supabaseClient';
 import MarketingSite from './marketing/MarketingSite';
 import AdminConsole from './pages/AdminConsole';
@@ -68,6 +70,15 @@ function AppContent() {
   // still can't read another account's data.
   const PUBLIC_PATHS = ['/', '/about', '/for-clinics', '/for-patients', '/contact'];
   if (!session) {
+    // Just signed out for inactivity (lib/idleTimeout.ts): straight to that
+    // person's own login screen - clinic, admin or patient - which explains
+    // why, rather than the public website or the patient login.
+    const idleRole = readIdleSignOut();
+    if (idleRole && !Object.values(LOGIN_PATH).includes(location.pathname)) {
+      const here = location.pathname + location.search;
+      const next = location.pathname !== '/' ? `?next=${encodeURIComponent(here)}` : '';
+      return <Navigate to={LOGIN_PATH[idleRole] + next} replace />;
+    }
     // The installed app opens straight to sign-in; the marketing page is for browsers.
     if (location.pathname === '/' && isStandalone()) return <Navigate to="/login" replace />;
     if (PUBLIC_PATHS.includes(location.pathname)) return <MarketingSite />;
@@ -254,11 +265,14 @@ export default function App() {
       <InstallBanner />
     </>
   );
+  // Signs a session out after a period without use (lib/idleTimeout.ts).
+  const idleGuard = session && profile ? <IdleGuard role={idleRoleFor(profile.role, getStoredActingMode())} /> : null;
   if (!session || !profile || location.pathname === '/poster') {
     return (
       <>
         <AppContent />
         {banners}
+        {idleGuard}
       </>
     );
   }
@@ -267,6 +281,7 @@ export default function App() {
     <div className="app-scope min-h-screen" data-app-role={role}>
       <AppContent />
       {banners}
+      {idleGuard}
     </div>
   );
 }

@@ -6,6 +6,8 @@ import {
   AuthError, AuthHeading, AuthNotice, AuthSubmit, AuthTextButton, OtpField, PhoneField,
 } from '../components/auth/AuthFields';
 import AuthShell from '../components/auth/AuthShell';
+import IdleSignedOutNotice from '../components/auth/IdleSignedOutNotice';
+import { startActiveSession } from '../lib/idleTimeout';
 import { safeNext } from '../lib/loginRedirect';
 import { logAuthEvent } from '../lib/audit';
 import { supabase } from '../lib/supabaseClient';
@@ -69,6 +71,9 @@ export default function AdminLogin() {
       return;
     }
     setLoading(true);
+    // A fresh login starts a fresh inactivity clock - set BEFORE verifying,
+    // because the session (and the inactivity watcher) appears during it.
+    startActiveSession();
     const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
     logAuthEvent('otp.verify', verifyError ? 'failure' : 'success', phone);
     setLoading(false);
@@ -90,6 +95,7 @@ export default function AdminLogin() {
     >
       {stage === 'phone' ? (
         <>
+          <IdleSignedOutNotice />
           <AuthNotice icon={Lock}>Restricted access. Every action here is logged.</AuthNotice>
           <AuthHeading title="Admin login" sub={
               MFA_ON

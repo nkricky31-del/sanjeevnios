@@ -1,7 +1,8 @@
 import type { Session } from '@supabase/supabase-js';
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react';
 
-import { clearActingMode } from './actingMode';
+import { clearActingMode, getStoredActingMode } from './actingMode';
+import { idleRoleFor, isIdleExpired, markActive, signOutForInactivity } from './idleTimeout';
 import { supabase } from './supabaseClient';
 import type { Profile } from './types';
 
@@ -19,7 +20,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProfile = async (userId: string) => {
+  const loadProfile = async (userId: string): Promise<Profile | null> => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     setProfile(data ?? null);
 
@@ -34,12 +35,28 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (error) console.error('claim_walk_in_records failed:', error.message);
       });
     }
+    return (data as Profile | null) ?? null;
   };
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      if (data.session) await loadProfile(data.session.user.id);
+      let current = data.session;
+      if (current) {
+        const loaded = await loadProfile(current.user.id);
+        // Opening the app after too long without using it (lib/idleTimeout.ts):
+        // sign this device out BEFORE anything is shown - the splash screen
+        // is up until `loading` turns false below. Otherwise opening the app
+        // counts as activity.
+        const role = idleRoleFor(loaded?.role, getStoredActingMode());
+        if (isIdleExpired(role)) {
+          await signOutForInactivity(role);
+          current = null;
+          setProfile(null);
+        } else {
+          markActive();
+        }
+      }
+      setSession(current);
       setLoading(false);
     });
 
