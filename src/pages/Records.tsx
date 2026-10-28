@@ -9,6 +9,7 @@ import IconTile, { type IconTone } from '../components/ui/IconTile';
 import SectionTitle from '../components/ui/SectionTitle';
 import { openAppointmentFile } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
+import { useRefreshOnReturn } from '../lib/useRefreshOnReturn';
 import type { AppointmentFile, FamilyMember, Prescription, Visit } from '../lib/types';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
 
@@ -70,40 +71,45 @@ export default function Records() {
 
   const activeCategory = (searchParams.get('category') as CategoryKey | null) ?? null;
 
+  const loadRecords = async () => {
+    const { data: memberData } = await supabase.from('family_members').select('*');
+    const members = (memberData ?? []) as FamilyMember[];
+    const memberIds = members.map((m) => m.id);
+    const mrns = members.map((m) => m.mrn).filter(Boolean);
+
+    const [{ data: apptData }, { data: encounterData }] = await Promise.all([
+      memberIds.length > 0
+        ? supabase
+            .from('appointments')
+            // visits!visits_appointment_id_fkey: appointments also links to visits through
+            // follow_up_of (migration 46), so the embed has to name which link it means -
+            // a bare visits(...) is refused as ambiguous and the whole query fails.
+            .select(
+              'id, date, slot_time, doctors(name, specialty), clinics(name), visits!visits_appointment_id_fkey(id, appointment_id, notes:notes_plain, diagnosis:diagnosis_plain, follow_up_date, no_prescription, created_at, prescriptions(id, visit_id, items, file_url, signed_by, status, created_at)), files(id, member_id, appointment_id, type, storage_path, created_at)'
+            )
+            .in('member_id', memberIds)
+            .order('date', { ascending: false })
+        : Promise.resolve({ data: [] }),
+      mrns.length > 0
+        ? supabase
+            .from('encounters')
+            .select('id, encounter_no, visit_datetime, department, doctors(name), clinics(name)')
+            .in('mrn', mrns)
+            .order('visit_datetime', { ascending: false })
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    setAppointments((apptData ?? []) as unknown as TimelineAppointment[]);
+    setEncounters((encounterData ?? []) as unknown as EncounterRow[]);
+    setLoading(false);
+  };
+
   useEffect(() => {
-    (async () => {
-      const { data: memberData } = await supabase.from('family_members').select('*');
-      const members = (memberData ?? []) as FamilyMember[];
-      const memberIds = members.map((m) => m.id);
-      const mrns = members.map((m) => m.mrn).filter(Boolean);
-
-      const [{ data: apptData }, { data: encounterData }] = await Promise.all([
-        memberIds.length > 0
-          ? supabase
-              .from('appointments')
-              // visits!visits_appointment_id_fkey: appointments also links to visits through
-              // follow_up_of (migration 46), so the embed has to name which link it means -
-              // a bare visits(...) is refused as ambiguous and the whole query fails.
-              .select(
-                'id, date, slot_time, doctors(name, specialty), clinics(name), visits!visits_appointment_id_fkey(id, appointment_id, notes:notes_plain, diagnosis:diagnosis_plain, follow_up_date, no_prescription, created_at, prescriptions(id, visit_id, items, file_url, signed_by, status, created_at)), files(id, member_id, appointment_id, type, storage_path, created_at)'
-              )
-              .in('member_id', memberIds)
-              .order('date', { ascending: false })
-          : Promise.resolve({ data: [] }),
-        mrns.length > 0
-          ? supabase
-              .from('encounters')
-              .select('id, encounter_no, visit_datetime, department, doctors(name), clinics(name)')
-              .in('mrn', mrns)
-              .order('visit_datetime', { ascending: false })
-          : Promise.resolve({ data: [] }),
-      ]);
-
-      setAppointments((apptData ?? []) as unknown as TimelineAppointment[]);
-      setEncounters((encounterData ?? []) as unknown as EncounterRow[]);
-      setLoading(false);
-    })();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRecords();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useRefreshOnReturn(() => void loadRecords());
 
   const items = useMemo<RecordItem[]>(() => {
     const out: RecordItem[] = [];

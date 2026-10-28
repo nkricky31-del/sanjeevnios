@@ -2,8 +2,10 @@ import Loading from './ui/Loading';
 import { ArrowLeft, Clock, Printer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { notifyPatient, prescriptionReadyMessage, reportAddedMessage } from '../lib/notify';
 import { supabase } from '../lib/supabaseClient';
-import type { FollowUpInterval, PrescriptionDrug } from '../lib/types';
+import type { FileCategory, FollowUpInterval, PrescriptionDrug } from '../lib/types';
+import FileUpload from './FileUpload';
 import PrescriptionEditor from './rx/PrescriptionEditor';
 import PrescriptionItems, { RxLanguageToggle } from './rx/PrescriptionItems';
 import { useRxLanguage } from '../lib/useRxLanguage';
@@ -59,6 +61,11 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
   // the current login (e.g. a receptionist, or a doctor this patient isn't
   // seeing) - nothing clinical is loaded in that case.
   const [accessError, setAccessError] = useState<string | null>(null);
+  // Who this visit is for - used to file reports against the patient and to
+  // tell them (in their app) when a prescription or report is added.
+  const [patient, setPatient] = useState<{ memberId: string; accountId: string | null; date: string; doctorName: string | null } | null>(null);
+  // Bumped every 20s so files the patient uploads show up while this is open.
+  const [filesTick, setFilesTick] = useState(0);
 
   const [diagnosis, setDiagnosis] = useState('');
   const [notes, setNotes] = useState('');
@@ -119,6 +126,37 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { data: appt } = await supabase
+        .from('appointments')
+        .select('member_id, date, doctors(name)')
+        .eq('id', appointmentId)
+        .maybeSingle();
+      const a = appt as { member_id: string; date: string; doctors: { name: string } | null } | null;
+      if (!a || !live) return;
+      const { data: contacts } = await supabase.rpc('get_patient_contacts', { p_ids: [a.member_id] });
+      const accountId = ((contacts ?? []) as { account_id: string | null }[])[0]?.account_id ?? null;
+      if (live) setPatient({ memberId: a.member_id, accountId, date: a.date, doctorName: a.doctors?.name ?? null });
+    })();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') setFilesTick((n) => n + 1);
+    }, 20_000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [appointmentId]);
+
+  // The patient's app shows the visit on its own; this tells them it's there.
+  const tellPatient = (type: string, message: string) => {
+    if (!patient?.accountId) return;
+    void notifyPatient({ userId: patient.accountId, appointmentId, type, message });
+  };
+
+  const FILE_KIND: Record<FileCategory, string> = { lab_report: 'Lab report', prescription: 'Prescription', xray: 'X-ray', photo: 'Photo' };
 
   useEffect(() => {
     load();
@@ -198,6 +236,7 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
       setRxError(rxInsertError.message);
       return;
     }
+    if (patient) tellPatient('prescription_ready', prescriptionReadyMessage(patient.doctorName, patient.date));
     load();
   };
 
@@ -357,6 +396,24 @@ export default function VisitScreen({ appointmentId, doctorId, patientName, onCl
                 <PrescriptionEditor signing={signingRx} error={rxError} onSign={signAndAttach} />
               )}
             </Card>
+
+            {/* Reports & files: what the patient uploaded, plus anything the
+                clinic adds here - which shows up in the patient's app. */}
+            {patient && (
+              <FileUpload
+                appointmentId={appointmentId}
+                memberId={patient.memberId}
+                title="Reports & files"
+                refreshKey={filesTick}
+                onUploaded={(kind) => tellPatient('report_added', reportAddedMessage(FILE_KIND[kind], patient.date))}
+              />
+            )}
+            {patient && (
+              <p className="mt-1.5 text-xs text-slate-400">
+                Reports the patient uploads appear here. Anything you add shows up in the patient's app, and they're
+                notified.
+              </p>
+            )}
 
             {printing && attachedRx && (
               <PrescriptionSheet

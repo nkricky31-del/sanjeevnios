@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
+
+import { addDaysISO, todayISO } from '../lib/date';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
@@ -262,6 +264,38 @@ export default function BookingStatus() {
       setAlertMessage(data.message);
     }
   };
+
+  // Whatever the doctor adds - notes, prescription, reports, even after the
+  // visit is marked done - shows up here on its own: the visit and its files
+  // are re-read every 20s around the visit day, and whenever the patient
+  // comes back to the app.
+  const [filesTick, setFilesTick] = useState(0);
+  useEffect(() => {
+    if (!booking) return;
+    const refresh = () => {
+      loadVisit();
+      setFilesTick((n) => n + 1);
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      loadBooking();
+      refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const nearVisit = booking.date >= addDaysISO(todayISO(), -2) && booking.date <= todayISO();
+    const seen = ['checked_in', 'called', 'in_consultation', 'completed'].includes(booking.status);
+    const timer =
+      nearVisit && seen
+        ? window.setInterval(() => {
+            if (document.visibilityState === 'visible') refresh();
+          }, 20_000)
+        : null;
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      if (timer) window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking?.id, booking?.status, booking?.date]);
 
   useEffect(() => {
     if (!appointmentId) return;
@@ -997,7 +1031,7 @@ export default function BookingStatus() {
           </div>
         )}
 
-        <FileUpload appointmentId={booking.id} memberId={booking.member_id} />
+        <FileUpload appointmentId={booking.id} memberId={booking.member_id} refreshKey={filesTick} />
       </div>
     </div>
   );

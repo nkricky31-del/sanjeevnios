@@ -150,3 +150,29 @@ export function appointmentRejectedMessage(
     : "No open slots with this doctor in the next week - please search for another doctor or check back later.";
   return `Sorry, the clinic couldn't confirm this slot (${reason}). ${refundLine} ${nextLine}`;
 }
+
+// ----------------------------------------------------------------------------
+// After the visit: whatever the doctor writes reaches the patient's app on its
+// own (the notification opens the appointment, which shows it). Sent by the
+// clinic's screens - VisitScreen.tsx (prescription, files) and
+// WaitingList.tsx (visit completed).
+// ----------------------------------------------------------------------------
+
+const visitDay = (date: string) =>
+  new Date(date + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
+export function prescriptionReadyMessage(doctorName: string | null, date: string): string {
+  return `Your prescription${doctorName ? ` from ${doctorName}` : ''} for your visit on ${visitDay(
+    date
+  )} is ready. Tap to see your medicines and how to take them, in English and Hindi.`;
+}
+
+export function reportAddedMessage(kind: string, date: string): string {
+  return `The clinic added a ${kind.toLowerCase()} to your visit on ${visitDay(date)}. Tap to view or download it.`;
+}
+
+export function visitCompletedMessage(date: string): string {
+  return `Your visit on ${visitDay(
+    date
+  )} is complete. The doctor's notes and any prescription or reports are saved in your app - tap to view them anytime.`;
+}

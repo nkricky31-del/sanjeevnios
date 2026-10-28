@@ -14,7 +14,12 @@ interface Props {
   fixedCategory?: FileCategory;
   /** Hide the list of files already on this appointment. */
   hideList?: boolean;
-  onUploaded?: () => void;
+  /** Called after a successful upload, with the kind of file it was. */
+  onUploaded?: (category: FileCategory) => void;
+  /** Bump to re-read the list (e.g. to pick up files the other side added). */
+  refreshKey?: number;
+  /** Heading over the list (default "Files"). */
+  title?: string;
 }
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB - matches the bucket's server-side limit
@@ -27,7 +32,7 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
   photo: 'Photo',
 };
 
-export default function FileUpload({ appointmentId, memberId, fixedCategory, hideList, onUploaded }: Props) {
+export default function FileUpload({ appointmentId, memberId, fixedCategory, hideList, onUploaded, refreshKey = 0, title = 'Files' }: Props) {
   const [files, setFiles] = useState<AppointmentFile[]>([]);
   const [category, setCategory] = useState<FileCategory>(fixedCategory ?? 'lab_report');
   const [uploading, setUploading] = useState(false);
@@ -50,7 +55,7 @@ export default function FileUpload({ appointmentId, memberId, fixedCategory, hid
   useEffect(() => {
     loadFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appointmentId]);
+  }, [appointmentId, refreshKey]);
 
   const handlePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -109,7 +114,7 @@ export default function FileUpload({ appointmentId, memberId, fixedCategory, hid
       return;
     }
     setDone(true);
-    onUploaded?.();
+    onUploaded?.(category);
     window.setTimeout(() => setDone(false), 3500);
     loadFiles();
   };
@@ -129,7 +134,7 @@ export default function FileUpload({ appointmentId, memberId, fixedCategory, hid
 
   return (
     <div className="mt-4 rounded-2xl border border-slate-200 p-4">
-      {!hideList && <p className="text-sm font-semibold text-slate-900">Files</p>}
+      {!hideList && <p className="text-sm font-semibold text-slate-900">{title}</p>}
 
       <div className={`mt-2 space-y-2 ${hideList ? 'hidden' : ''}`}>
         {files.length === 0 && <p className="text-sm text-slate-400">No files uploaded yet.</p>}

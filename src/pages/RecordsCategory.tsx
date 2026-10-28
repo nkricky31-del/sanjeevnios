@@ -11,6 +11,7 @@ import Loading from '../components/ui/Loading';
 import { downloadPrescriptionText } from '../lib/encounterExport';
 import { downloadAppointmentFile, openAppointmentFile } from '../lib/storage';
 import { supabase } from '../lib/supabaseClient';
+import { useRefreshOnReturn } from '../lib/useRefreshOnReturn';
 import type { AppointmentFile, FamilyMember, FileCategory, Prescription } from '../lib/types';
 import { useRxLanguage } from '../lib/useRxLanguage';
 
@@ -108,6 +109,8 @@ export default function RecordsCategory() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+  // Anything the clinic added while the patient was away is there when they come back.
+  useRefreshOnReturn(() => void load());
 
   const meta = valid ? META[key] : META.encounters;
 

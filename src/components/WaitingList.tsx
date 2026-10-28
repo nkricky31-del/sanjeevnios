@@ -7,6 +7,7 @@ import { skipToBack } from '../lib/checkIn';
 import { getDoctorConsultationStats } from '../lib/consultation';
 import { patientContextLine } from '../lib/patientContact';
 import { bookingReference } from '../lib/queue';
+import { notifyPatient, visitCompletedMessage } from '../lib/notify';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
 import { PAYMENT_STATUS_LABEL, type AppointmentPaymentStatus, type AppointmentStatus } from '../lib/types';
@@ -234,7 +235,18 @@ export default function WaitingList({
       );
       return;
     }
+    const row = rows.find((r) => r.id === appointmentId);
     await setStatus(appointmentId, 'completed');
+    // The notes, prescription and reports are already in the patient's app;
+    // this tells them so (and opens the visit when tapped).
+    if (row?.account_id) {
+      void notifyPatient({
+        userId: row.account_id,
+        appointmentId,
+        type: 'visit_completed',
+        message: visitCompletedMessage(date),
+      });
+    }
   };
 
   return (
