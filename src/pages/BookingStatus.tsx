@@ -497,15 +497,9 @@ export default function BookingStatus() {
     loadBooking();
   };
 
-  const rescheduleBooking = async () => {
-    setActionError(null);
-    const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', booking.id);
-    if (error) {
-      setActionError(error.message);
-      return;
-    }
-    navigate(`/doctors/${booking.doctor_id}`);
-  };
+  // Moves this same booking (RescheduleBooking.tsx) - it used to cancel it
+  // and send the patient off to book again, losing the booking if they didn't.
+  const rescheduleBooking = () => navigate(`/bookings/${booking.id}/reschedule`);
 
   // Once the clinic has accepted, the check-in code lives right here. A fresh
   // signed code is minted every few minutes, and the page watches for the desk

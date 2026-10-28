@@ -176,3 +176,11 @@ export function visitCompletedMessage(date: string): string {
     date
   )} is complete. The doctor's notes and any prescription or reports are saved in your app - tap to view them anytime.`;
 }
+
+// The patient moved their own booking (RescheduleBooking.tsx).
+export function appointmentRescheduledMessage(doctorName: string | null, date: string, slotTime: string, bookingRef: string): string {
+  const day = new Date(date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return `Your appointment${doctorName ? ` with ${doctorName}` : ''} is moved to ${day} at ${formatTimeLabel(
+    slotTime
+  )}. Booking ref ${bookingRef} - your payment and details stay the same.`;
+}

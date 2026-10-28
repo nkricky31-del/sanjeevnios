@@ -36,6 +36,7 @@ import Profile from './pages/Profile';
 import ProfileSummary from './pages/ProfileSummary';
 import Records from './pages/Records';
 import RecordsCategory from './pages/RecordsCategory';
+import RescheduleBooking from './pages/RescheduleBooking';
 import Search from './pages/Search';
 import TokenBoard from './pages/TokenBoard';
 
@@ -230,6 +231,7 @@ function AppContent() {
             <Route path="/bookings" element={<MyBookings />} />
             <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
             <Route path="/bookings/:appointmentId/pass" element={<BookingPass />} />
+            <Route path="/bookings/:appointmentId/reschedule" element={<RescheduleBooking />} />
             <Route path="/records" element={<Records />} />
             <Route path="/records/:category" element={<RecordsCategory />} />
             <Route path="/payments" element={<Payments />} />

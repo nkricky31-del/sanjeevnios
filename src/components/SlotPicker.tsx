@@ -17,6 +17,9 @@ interface Props {
   // a follow-up's due date (DoctorPage.tsx, schema.sql section 46). Only
   // read once, on mount; falls back to selectedDate, then today.
   initialDate?: string | null;
+  // Rescheduling (RescheduleBooking.tsx): the booking's own current slot,
+  // shown as "Current" and not selectable.
+  current?: { date: string; slotTime: string } | null;
 }
 
 const DEFAULT_DAYS_TO_SHOW = 14;
@@ -26,7 +29,7 @@ const DEFAULT_DAYS_TO_SHOW = 14;
 // walk-in patient in the same flow) so both respect the same working hours,
 // taken slots, and clinic holidays instead of drifting apart. Read-only
 // picker - it doesn't create anything, just reports back what got clicked.
-export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DAYS_TO_SHOW, selectedDate, selectedSlot, onSelect, initialDate }: Props) {
+export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DAYS_TO_SHOW, selectedDate, selectedSlot, onSelect, initialDate, current }: Props) {
   const [availability, setAvailability] = useState<DoctorAvailability[]>([]);
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
   const [date, setDate] = useState(initialDate ?? selectedDate ?? todayISO());
@@ -194,16 +197,19 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
           clear there was a time there and that it's someone else's now. */}
       <div className="mt-2 grid grid-cols-2 gap-2">
         {allSlots.map((s) => {
-          const full = takenSlots.has(s);
-          const cutoff = !full && withinCutoff(s);
+          const isCurrent = !!current && current.date === date && current.slotTime === s;
+          const full = !isCurrent && takenSlots.has(s);
+          const cutoff = !isCurrent && !full && withinCutoff(s);
           return (
             <button
               key={s}
               type="button"
-              disabled={full || cutoff}
+              disabled={full || cutoff || isCurrent}
               onClick={() => onSelect(date, s)}
               className={`rounded-2xl border px-3 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300 ${
-                full || cutoff
+                isCurrent
+                  ? '!border-brand-300 !bg-brand-50 !text-brand-700'
+                  : full || cutoff
                   ? ''
                   : selectedDate === date && selectedSlot === s
                     ? 'border-brand-600 bg-brand-600 text-white'
@@ -213,7 +219,8 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
               {formatTimeLabel(s)}
               {full && <span className="ml-1 text-xs font-normal">· Full</span>}
               {cutoff && <span className="ml-1 text-xs font-normal">· Closed</span>}
-              {!full && !cutoff && capacityOf(s) > 1 && (
+              {isCurrent && <span className="ml-1 text-xs font-normal">· Current</span>}
+              {!full && !cutoff && !isCurrent && capacityOf(s) > 1 && (
                 <span
                   className={`block text-[11px] font-medium ${
                     selectedDate === date && selectedSlot === s ? 'text-white/80' : 'text-slate-400'

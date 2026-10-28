@@ -187,7 +187,7 @@ export default function Home() {
                 </p>
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <Button variant="outline" onClick={() => navigate('/search')}>
+                <Button variant="outline" onClick={() => navigate(`/bookings/${next.id}/reschedule`)}>
                   Reschedule
                 </Button>
                 <Button variant="outline" onClick={() => navigate(`/bookings/${next.id}`)}>
