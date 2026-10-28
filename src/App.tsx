@@ -1,11 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 
-import PatientDeclarationGate from './components/PatientDeclarationGate';
-import PatientOnboardingGate from './components/PatientOnboardingGate';
-import EncounterDetail from './components/EncounterDetail';
 import IdleGuard from './components/IdleGuard';
-import NotificationsList from './components/NotificationsList';
 import Button from './components/ui/Button';
 import { InstallBanner, OfflineBanner } from './components/InstallBanner';
 import SplashLoader from './components/ui/SplashLoader';
@@ -15,30 +11,25 @@ import { usePressFx } from './lib/pressFx';
 import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
 import { idleRoleFor, LOGIN_PATH, readIdleSignOut } from './lib/idleTimeout';
+import { lazyPage } from './lib/lazyPage';
 import { supabase } from './lib/supabaseClient';
-import MarketingSite from './marketing/MarketingSite';
-import AdminConsole from './pages/AdminConsole';
+
+// Each part of the app is downloaded only when it's used (lib/lazyPage.ts):
+// visitors get the website, patients the patient app, clinics their console.
+const MarketingSite = lazyPage(() => import('./marketing/MarketingSite'));
+const PatientLogin = lazyPage(() => import('./pages/PatientLogin'));
+const ClinicLogin = lazyPage(() => import('./pages/ClinicLogin'));
+const AdminLogin = lazyPage(() => import('./pages/AdminLogin'));
+const PatientApp = lazyPage(() => import('./PatientApp'));
+const ClinicQueue = lazyPage(() => import('./pages/ClinicQueue'));
+const ClinicSignup = lazyPage(() => import('./pages/ClinicSignup'));
+const ClinicPoster = lazyPage(() => import('./pages/ClinicPoster'));
+const TokenBoard = lazyPage(() => import('./pages/TokenBoard'));
+const AdminConsole = lazyPage(() => import('./pages/AdminConsole'));
+const EncounterDetail = lazyPage(() => import('./components/EncounterDetail'));
+const NotificationsList = lazyPage(() => import('./components/NotificationsList'));
 import AdminMfaGate from './components/AdminMfaGate';
 import PatientShell from './components/shell/PatientShell';
-import AdminLogin from './pages/AdminLogin';
-import BookingPass from './pages/BookingPass';
-import BookingStatus from './pages/BookingStatus';
-import ClinicLogin from './pages/ClinicLogin';
-import ClinicQueue from './pages/ClinicQueue';
-import ClinicPoster from './pages/ClinicPoster';
-import ClinicSignup from './pages/ClinicSignup';
-import DoctorPage from './pages/DoctorPage';
-import Home from './pages/Home';
-import MyBookings from './pages/MyBookings';
-import PatientLogin from './pages/PatientLogin';
-import Payments from './pages/Payments';
-import Profile from './pages/Profile';
-import ProfileSummary from './pages/ProfileSummary';
-import Records from './pages/Records';
-import RecordsCategory from './pages/RecordsCategory';
-import RescheduleBooking from './pages/RescheduleBooking';
-import Search from './pages/Search';
-import TokenBoard from './pages/TokenBoard';
 
 function AppContent() {
   const { session, profile, loading } = useAuth();
@@ -220,36 +211,7 @@ function AppContent() {
     );
   }
 
-  return (
-    <PatientOnboardingGate>
-      <PatientDeclarationGate>
-        <PatientShell>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/search" element={<Search />} />
-            <Route path="/doctors/:doctorId" element={<DoctorPage />} />
-            <Route path="/bookings" element={<MyBookings />} />
-            <Route path="/bookings/:appointmentId" element={<BookingStatus />} />
-            <Route path="/bookings/:appointmentId/pass" element={<BookingPass />} />
-            <Route path="/bookings/:appointmentId/reschedule" element={<RescheduleBooking />} />
-            <Route path="/records" element={<Records />} />
-            <Route path="/records/:category" element={<RecordsCategory />} />
-            <Route path="/payments" element={<Payments />} />
-            {/* Kept so old links/bookmarks to the timeline still land somewhere. */}
-            <Route path="/timeline" element={<Records />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/profile/summary" element={<ProfileSummary />} />
-            {/* Role-aware guard's other half: a patient account typing a
-                clinic/admin-only URL (/admin, /board, /poster, or anything
-                else that isn't one of this role's own routes above) lands
-                here instead of a blank content area, and is sent to their
-                own home - never a broken/empty page. */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </PatientShell>
-      </PatientDeclarationGate>
-    </PatientOnboardingGate>
-  );
+  return <PatientApp />;
 }
 
 // Everything after sign-in lives inside the app scope (index.css `.app-scope`),
@@ -272,7 +234,9 @@ export default function App() {
   if (!session || !profile || location.pathname === '/poster') {
     return (
       <>
-        <AppContent />
+        <Suspense fallback={<SplashLoader />}>
+          <AppContent />
+        </Suspense>
         {banners}
         {idleGuard}
       </>
@@ -281,7 +245,9 @@ export default function App() {
   const role = profile.role === 'admin' ? 'admin' : (getStoredActingMode() ?? (profile.role === 'clinic' ? 'clinic' : 'patient'));
   return (
     <div className="app-scope min-h-screen" data-app-role={role}>
-      <AppContent />
+      <Suspense fallback={<SplashLoader />}>
+        <AppContent />
+      </Suspense>
       {banners}
       {idleGuard}
     </div>

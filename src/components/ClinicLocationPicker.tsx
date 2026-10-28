@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { reverseGeocode, searchAddress, type AddressResult } from '../lib/geocoding';
 import { supabase } from '../lib/supabaseClient';
 import Button from './ui/Button';
-import LeafletMap from './LeafletMap';
+import LeafletMap from './LazyMap';
 
 interface Props {
   clinicId: string;

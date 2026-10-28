@@ -2,7 +2,7 @@ import { MapPin, Navigation } from 'lucide-react';
 
 import { directionsUrl } from '../lib/geocoding';
 import Card from './ui/Card';
-import LeafletMap from './LeafletMap';
+import LeafletMap from './LazyMap';
 
 interface Props {
   lat: number | null;
