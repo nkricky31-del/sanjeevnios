@@ -2,7 +2,7 @@ import Present from '../components/ui/Present';
 import { PatientHistory } from '../components/Insights';
 import Loading from '../components/ui/Loading';
 import {
-  CalendarClock, CheckCircle2, ChevronRight, ClipboardList, KeyRound, MapPin, Monitor, Pill, Receipt, ScanLine, Send,
+  CalendarClock, CheckCircle2, ChevronRight, ClipboardList, KeyRound, ListChecks, MapPin, Monitor, Pill, Receipt, ScanLine, Send,
   SlidersHorizontal, Stethoscope, UserRound, Users, Wallet,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -19,6 +19,7 @@ import ClinicAuditLog from '../components/ClinicAuditLog';
 import ClinicStaffAccess from '../components/ClinicStaffAccess';
 import CancelBookingForm from '../components/CancelBookingForm';
 import FullDayCancelForm from '../components/FullDayCancelForm';
+import PatientBoard from '../components/PatientBoard';
 import PatientLookup from '../components/PatientLookup';
 import PublishDaySchedule from '../components/PublishDaySchedule';
 import RejectAppointmentForm from '../components/RejectAppointmentForm';
@@ -138,9 +139,10 @@ interface OpenVisit {
 }
 
 const CLINIC_TABS: ConsoleTab<
-  'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'earnings' | 'access'
+  'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'earnings' | 'access'
 >[] = [
   { value: 'today', label: 'Today', icon: CalendarClock },
+  { value: 'board', label: 'Patient board', icon: ListChecks },
   { value: 'queue', label: 'Bookings', icon: ClipboardList },
   { value: 'publish', label: 'Publish day', icon: Send },
   { value: 'rx', label: 'Rx pending', icon: Pill },
@@ -178,7 +180,7 @@ export default function ClinicQueue() {
   // realtime broadcast is slow or the socket has dropped.
   const [queueVersion, setQueueVersion] = useState(0);
   const [view, setView] = useState<
-    'today' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'earnings' | 'access'
+    'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'earnings' | 'access'
   >('today');
 
   const loadClinicAndDoctors = async () => {
@@ -697,6 +699,12 @@ export default function ClinicQueue() {
               doctors={doctors}
               onClinicSaved={(patch) => setClinic((prev) => (prev ? { ...prev, ...patch } : prev))}
             />
+          </div>
+        )}
+
+        {view === 'board' && (
+          <div className="mt-4">
+            <PatientBoard clinicId={clinic.id} doctors={doctors} />
           </div>
         )}
 
