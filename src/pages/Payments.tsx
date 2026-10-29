@@ -1,15 +1,17 @@
 import Loading from '../components/ui/Loading';
 import { PaymentsCharts } from '../components/Insights';
-import { CheckCircle2, CreditCard, Headphones, Receipt, Wallet } from 'lucide-react';
+import { CheckCircle2, CreditCard, FileText, Headphones, Receipt, Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import BillDownloadButton from '../components/bills/BillDownloadButton';
 import AppHeader from '../components/ui/AppHeader';
 import Card from '../components/ui/Card';
 import IconTile from '../components/ui/IconTile';
 import InfoNote from '../components/ui/InfoNote';
 import SectionTitle from '../components/ui/SectionTitle';
 import StatusPill from '../components/ui/StatusPill';
+import { DOC_LABEL, PAYMENT_LABEL, rupees as billRupees, type BillRow } from '../lib/bills';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
@@ -52,6 +54,32 @@ export default function Payments() {
   const hasUnread = useUnreadNotifications();
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // The clinics' bills for completed visits (migration 89), newest first.
+  const [bills, setBills] = useState<BillRow[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      // Only this account's own family - someone who is also clinic staff
+      // can read their clinic's bills, which don't belong in here.
+      const { data: auth } = await supabase.auth.getSession();
+      const uid = auth.session?.user.id;
+      if (!uid) return;
+      const { data: members } = await supabase.from('family_members').select('id').eq('account_id', uid);
+      const ids = (members ?? []).map((m: { id: string }) => m.id);
+      if (ids.length === 0) return;
+      const { data } = await supabase
+        .from('patient_bills')
+        .select('*')
+        .in('member_id', ids)
+        .order('issued_at', { ascending: false })
+        .limit(100);
+      if (live) setBills((data ?? []) as BillRow[]);
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     supabase
@@ -102,6 +130,47 @@ export default function Payments() {
         </Card>
 
         <div className={`mt-4 ${loading ? 'min-h-[440px] sm:min-h-[230px]' : ''}`}><PaymentsCharts rows={rows} /></div>
+
+        {/* Bills from clinics, one per completed visit */}
+        {bills.length > 0 && (
+          <>
+            <SectionTitle className="mt-6">Your bills</SectionTitle>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Issued by the clinic after each visit. Download any of them as a PDF.
+            </p>
+            <Card className="mt-2 !p-0">
+              {bills.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex items-center gap-3 border-b border-slate-50 px-4 py-3.5 last:border-b-0"
+                >
+                  <IconTile icon={FileText} tone="emerald" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-slate-900">
+                      {b.clinic_legal_name || b.clinic_name}
+                    </span>
+                    <span className="block truncate text-xs text-slate-500">
+                      {DOC_LABEL[b.doc_type]} {b.bill_no} ·{' '}
+                      {new Date(b.visit_date + 'T00:00:00').toLocaleDateString(undefined, {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                      })}
+                    </span>
+                    <span className="block truncate text-xs text-slate-400">
+                      {b.patient_name}
+                      {b.doctor_name ? ` · ${b.doctor_name}` : ''} · {PAYMENT_LABEL[b.payment_status] ?? b.payment_status}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 flex-col items-end gap-1">
+                    <span className="text-sm font-bold text-slate-900">{billRupees(b.total_amount)}</span>
+                    <BillDownloadButton bill={b} compact />
+                  </span>
+                </div>
+              ))}
+            </Card>
+          </>
+        )}
 
         {/* History */}
         <SectionTitle className="mt-6">Payment History</SectionTitle>

@@ -3,6 +3,7 @@ import { CapacityChart } from './Insights';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { gstState, isValidGstin } from '../../supabase/functions/_shared/gst.ts';
 import { todayISO } from '../lib/date';
 import { type PatientContact, withPatientContacts } from '../lib/patientContact';
 import { supabase } from '../lib/supabaseClient';
@@ -78,6 +79,49 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
     onSaved(patch);
     setPayNote('Saved.');
   };
+  // Bills & GST (migration 89) - what the clinic's bills to patients show.
+  const [billName, setBillName] = useState(clinic.bill_legal_name ?? '');
+  const [billAddress, setBillAddress] = useState(clinic.bill_address ?? '');
+  const [gstin, setGstin] = useState(clinic.gstin ?? '');
+  const [gstRate, setGstRate] = useState<'0' | '5' | '18'>(String(clinic.consultation_gst_rate ?? 0) as '0' | '5' | '18');
+  const [billSaving, setBillSaving] = useState(false);
+  const [billError, setBillError] = useState<string | null>(null);
+  const [billNote, setBillNote] = useState<string | null>(null);
+  const gstinClean = gstin.trim().toUpperCase();
+  const billTitle = !gstinClean ? 'Invoice' : gstRate === '0' ? 'Bill of Supply' : 'Tax Invoice';
+
+  const saveBills = async () => {
+    setBillError(null);
+    setBillNote(null);
+    if (gstinClean && !isValidGstin(gstinClean)) {
+      setBillError("That GSTIN doesn't look right - check all 15 characters.");
+      return;
+    }
+    if (!gstinClean && gstRate !== '0') {
+      setBillError('GST can only be charged with a GSTIN. Add it, or keep consultations exempt.');
+      return;
+    }
+    if (billName.trim().length > 200 || billAddress.trim().length > 500) {
+      setBillError('The name or address is too long.');
+      return;
+    }
+    setBillSaving(true);
+    const patch = {
+      bill_legal_name: billName.trim() || null,
+      bill_address: billAddress.trim() || null,
+      gstin: gstinClean || null,
+      consultation_gst_rate: Number(gstRate),
+    };
+    const { error: saveError } = await supabase.from('clinics').update(patch).eq('id', clinic.id);
+    setBillSaving(false);
+    if (saveError) {
+      setBillError(saveError.message);
+      return;
+    }
+    onSaved(patch);
+    setBillNote('Saved. New bills will use these details; bills already issued stay as they were.');
+  };
+
   const [openBefore, setOpenBefore] = useState(String(clinic.checkin_open_before_minutes ?? 60));
   const [selfSaving, setSelfSaving] = useState(false);
   const [selfError, setSelfError] = useState<string | null>(null);
@@ -410,6 +454,89 @@ export default function ClinicBookingMode({ clinic, onSaved }: Props) {
         {payNote && !payError && <p className="mt-2 text-sm font-semibold text-emerald-600">{payNote}</p>}
         <Button onClick={savePayments} disabled={paySaving} className="mt-3">
           {paySaving ? 'Saving...' : 'Save payments'}
+        </Button>
+      </Card>
+
+      {/* Bills & GST (migration 89) */}
+      <SectionTitle className="mt-6">Bills &amp; GST</SectionTitle>
+      <p className="mt-0.5 text-xs text-slate-400">
+        Every completed visit gets a bill in your clinic's name - the patient gets it in the app (and on WhatsApp / email
+        when set up). These details go on new bills.
+      </p>
+      <Card className="mt-2">
+        <label htmlFor="bill-name" className="text-xs font-bold text-slate-700">
+          Name on bills
+        </label>
+        <input
+          id="bill-name"
+          type="text"
+          value={billName}
+          onChange={(e) => setBillName(e.target.value)}
+          placeholder={clinic.name}
+          maxLength={200}
+          className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        />
+        <p className="mt-1 text-xs text-slate-400">Your registered business name, if it differs from the clinic name.</p>
+
+        <label htmlFor="bill-address" className="mt-3 block text-xs font-bold text-slate-700">
+          Address on bills
+        </label>
+        <textarea
+          id="bill-address"
+          value={billAddress}
+          onChange={(e) => setBillAddress(e.target.value)}
+          placeholder={clinic.formatted_address ?? clinic.address ?? 'Clinic address'}
+          maxLength={500}
+          rows={2}
+          className="mt-1 block w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        />
+        <p className="mt-1 text-xs text-slate-400">Leave empty to use the clinic address.</p>
+
+        <label htmlFor="bill-gstin" className="mt-3 block text-xs font-bold text-slate-700">
+          GSTIN <span className="font-normal text-slate-400">(if registered)</span>
+        </label>
+        <input
+          id="bill-gstin"
+          type="text"
+          value={gstin}
+          onChange={(e) => setGstin(e.target.value.toUpperCase())}
+          placeholder="e.g. 22AAAAA0000A1ZC"
+          maxLength={15}
+          autoCapitalize="characters"
+          spellCheck={false}
+          className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        />
+        {gstinClean.length === 15 && (
+          <p className={`mt-1 text-xs ${isValidGstin(gstinClean) ? 'text-emerald-700' : 'text-red-600'}`}>
+            {isValidGstin(gstinClean) ? `Valid · ${gstState(gstinClean) ?? 'state code ' + gstinClean.slice(0, 2)}` : 'Check this GSTIN - the last character does not match.'}
+          </p>
+        )}
+
+        <p className="mt-3 text-xs font-bold text-slate-700">GST on consultation fees</p>
+        <div className="mt-1">
+          <Segmented
+            options={[
+              { value: '0', label: 'Exempt (no GST)' },
+              { value: '5', label: '5%' },
+              { value: '18', label: '18%' },
+            ]}
+            value={gstRate}
+            onChange={setGstRate}
+          />
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Health care services by a clinic or doctor are exempt from GST, so most clinics keep this on Exempt. If your
+          consultations are taxable, the fee patients pay stays the same and the bill shows the GST inside it.
+        </p>
+        <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Your bills will be titled <span className="font-bold text-slate-900">{billTitle}</span>
+          {gstinClean ? ` and show GSTIN ${gstinClean}` : ''}.
+        </p>
+
+        {billError && <p className="mt-2 text-sm text-red-600">{billError}</p>}
+        {billNote && !billError && <p className="mt-2 text-sm font-semibold text-emerald-600">{billNote}</p>}
+        <Button onClick={saveBills} disabled={billSaving} className="mt-3">
+          {billSaving ? 'Saving...' : 'Save bill details'}
         </Button>
       </Card>
 

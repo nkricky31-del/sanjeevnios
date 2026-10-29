@@ -2,6 +2,7 @@ import { Search } from 'lucide-react';
 import { PatientsOverview } from './Insights';
 import { useState, type FormEvent } from 'react';
 
+import PatientBillsSection from './PatientBillsSection';
 import PatientProfile from './PatientProfile';
 
 // Normalizes what someone might type - tolerates missing "MRN-" prefix,
@@ -47,6 +48,7 @@ export default function PatientLookup({ clinicId }: { clinicId?: string }) {
         <div className="mt-4">
           <button type="button" onClick={() => { setMrn(null); setInput(''); }} className="mb-2 text-sm font-semibold text-brand-600">← All patients</button>
           <PatientProfile mrn={mrn} />
+          {clinicId && <PatientBillsSection clinicId={clinicId} mrn={mrn} />}
         </div>
       )}
 

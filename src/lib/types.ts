@@ -211,6 +211,13 @@ export interface Clinic {
   // scan (off = patients scan the clinic QR, or the desk finds them by name).
   online_payments_enabled: boolean;
   patient_qr_enabled: boolean;
+  // Migration 89: what the clinic's bills to patients say about it. Empty =
+  // the clinic name / address; no GSTIN = a plain invoice with no GST; GST on
+  // consultations 0 (exempt health care - the default), 5 or 18.
+  bill_legal_name?: string | null;
+  bill_address?: string | null;
+  gstin?: string | null;
+  consultation_gst_rate?: number;
   reschedule_window_hours: number;
   reschedule_window_hours_paid_online: number;
   // Booking mode (section 33).

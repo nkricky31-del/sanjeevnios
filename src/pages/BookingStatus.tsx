@@ -24,6 +24,7 @@ import { addDaysISO, todayISO } from '../lib/date';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import ClinicLocationPreview from '../components/ClinicLocationPreview';
+import BillCard from '../components/bills/BillCard';
 import FileUpload from '../components/FileUpload';
 import ReviewForm from '../components/ReviewForm';
 import Button from '../components/ui/Button';
@@ -1011,6 +1012,12 @@ export default function BookingStatus() {
           doctorName={booking.doctors?.name}
           clinicName={booking.clinics?.name}
         />
+
+        {/* The clinic's bill (migration 89) - issued when the visit is
+            completed; re-read when the payment changes (paid at the desk). */}
+        {booking.status === 'completed' && (
+          <BillCard key={booking.payment_status} appointmentId={booking.id} />
+        )}
 
         {/* Follow-up scheduling (schema.sql section 46) - only once this visit
             actually has a due date, and only on the COMPLETED appointment,

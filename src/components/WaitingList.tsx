@@ -4,6 +4,7 @@ import { BellRing, PlayCircle, SkipForward, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { skipToBack } from '../lib/checkIn';
+import { sendPatientBill } from '../lib/bills';
 import { getDoctorConsultationStats } from '../lib/consultation';
 import { useCoalescedRefresh } from '../lib/livePolling';
 import { patientContextLine } from '../lib/patientContact';
@@ -132,15 +133,16 @@ export default function WaitingList({
     };
   }, [doctorId, date, onQueueSignal]);
 
-  const setStatus = async (id: string, status: AppointmentStatus) => {
+  const setStatus = async (id: string, status: AppointmentStatus): Promise<boolean> => {
     setError(null);
     const { error: updateError } = await supabase.from('appointments').update({ status }).eq('id', id);
     if (updateError) {
       setError(updateError.message);
-      return;
+      return false;
     }
     await load();
     onChanged?.();
+    return true;
   };
 
   const beingSeen = rows.find((r) => r.status === 'called' || r.status === 'in_consultation');
@@ -242,7 +244,7 @@ export default function WaitingList({
       return;
     }
     const row = rows.find((r) => r.id === appointmentId);
-    await setStatus(appointmentId, 'completed');
+    if (!(await setStatus(appointmentId, 'completed'))) return;
     // The notes, prescription and reports are already in the patient's app;
     // this tells them so (and opens the visit when tapped).
     if (row?.account_id) {
@@ -253,6 +255,10 @@ export default function WaitingList({
         message: visitCompletedMessage(date),
       });
     }
+    // Completing the visit issued the clinic's bill (migration 89); send it
+    // to the patient by WhatsApp / email where those are set up. It is in
+    // their app either way.
+    void sendPatientBill({ appointmentId });
   };
 
   return (

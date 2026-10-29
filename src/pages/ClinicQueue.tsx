@@ -2,13 +2,14 @@ import Present from '../components/ui/Present';
 import { PatientHistory } from '../components/Insights';
 import Loading from '../components/ui/Loading';
 import {
-  CalendarClock, CheckCircle2, ChevronRight, ClipboardList, KeyRound, ListChecks, MapPin, Monitor, Pill, Receipt, ScanLine, Send,
+  CalendarClock, CheckCircle2, ChevronRight, ClipboardList, FileText, KeyRound, ListChecks, MapPin, Monitor, Pill, Receipt, ScanLine, Send,
   SlidersHorizontal, Stethoscope, UserRound, Users, Wallet,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import ClinicBilling from '../components/ClinicBilling';
+import ClinicBills from '../components/ClinicBills';
 import ClinicBookingMode from '../components/ClinicBookingMode';
 import ClinicCheckIn from '../components/ClinicCheckIn';
 import ClinicEarnings from '../components/ClinicEarnings';
@@ -139,7 +140,7 @@ interface OpenVisit {
 }
 
 const CLINIC_TABS: ConsoleTab<
-  'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'earnings' | 'access'
+  'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'bills' | 'booking' | 'billing' | 'earnings' | 'access'
 >[] = [
   { value: 'today', label: 'Today', icon: CalendarClock },
   { value: 'board', label: 'Patient board', icon: ListChecks },
@@ -150,6 +151,7 @@ const CLINIC_TABS: ConsoleTab<
   { value: 'booking', label: 'Booking mode', icon: SlidersHorizontal },
   { value: 'billing', label: 'Billing', icon: Receipt },
   { value: 'earnings', label: 'Earnings', icon: Wallet },
+  { value: 'bills', label: 'Patient bills', icon: FileText },
   { value: 'location', label: 'Location', icon: MapPin },
   { value: 'patients', label: 'Patients', icon: Users },
   { value: 'access', label: 'Login & staff', icon: KeyRound },
@@ -180,7 +182,7 @@ export default function ClinicQueue() {
   // realtime broadcast is slow or the socket has dropped.
   const [queueVersion, setQueueVersion] = useState(0);
   const [view, setView] = useState<
-    'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'booking' | 'billing' | 'earnings' | 'access'
+    'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'bills' | 'booking' | 'billing' | 'earnings' | 'access'
   >('today');
 
   const loadClinicAndDoctors = async () => {
@@ -681,6 +683,12 @@ export default function ClinicQueue() {
         {view === 'earnings' && (
           <div className="mt-4">
             <ClinicEarnings clinic={clinic} />
+          </div>
+        )}
+
+        {view === 'bills' && (
+          <div className="mt-4">
+            <ClinicBills clinicId={clinic.id} />
           </div>
         )}
 

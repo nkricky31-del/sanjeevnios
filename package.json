@@ -11,16 +11,19 @@
     "scan:secrets": "bash scripts/scan-secrets.sh"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "@supabase/supabase-js": "^2.112.4",
     "@tailwindcss/vite": "^4.3.3",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.37.0",
     "motion": "^14.0.0",
+    "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3",
+    "regenerator-runtime": "^0.14.1",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
