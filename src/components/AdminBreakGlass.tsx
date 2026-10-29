@@ -1,6 +1,7 @@
 import Loading from './ui/Loading';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import Button from './ui/Button';
 import Card from './ui/Card';
@@ -71,11 +72,13 @@ export default function AdminBreakGlass() {
     setRequests((list ?? []) as BgRequest[]);
   }, []);
 
+  // New requests and approvals show up live (lib/adminLive.ts).
+  const live = useAdminLive(['breakglass']);
   useEffect(() => {
     load();
     const t = setInterval(() => setTick((n) => n + 1), 30000); // refresh the countdowns
     return () => clearInterval(t);
-  }, [load]);
+  }, [load, live]);
 
   const run = async (fn: () => PromiseLike<{ error: { message: string } | null }>) => {
     setBusy(true);

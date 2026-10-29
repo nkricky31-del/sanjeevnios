@@ -5,6 +5,7 @@ import { FileText, User, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { openIdDocument } from '../lib/storage';
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import type { NameChangeRequest } from '../lib/types';
 import AdminRejectForm from './AdminRejectForm';
@@ -67,9 +68,13 @@ export default function AdminNameChanges() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive(['name_changes']);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   const view = async (path: string) => {
     const url = await openIdDocument(path);

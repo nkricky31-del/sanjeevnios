@@ -3,6 +3,7 @@ import AdminDrill, { type DrillView } from './AdminDrill';
 import { AlertTriangle, CheckCircle2, IndianRupee, PauseCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import type { SettlementStatus } from '../lib/types';
 import AdminRejectForm from './AdminRejectForm';
@@ -144,9 +145,13 @@ export default function AdminSettlements() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive(['settlements', 'payments', 'clinics']);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   const eligible = rows.filter((r) => r.status === 'eligible');
   const onHold = rows.filter((r) => r.status === 'on_hold');

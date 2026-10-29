@@ -2,6 +2,7 @@ import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 
 import { docTypesFor } from '../lib/documentTypes';
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import type { OwnerType, VerificationRequirement } from '../lib/types';
 import StatusPill from './ui/StatusPill';
@@ -30,9 +31,13 @@ export default function AdminVerificationRequirements() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive([]);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   const toggle = async (r: VerificationRequirement) => {
     setError(null);

@@ -2,6 +2,7 @@ import Loading from './ui/Loading';
 import { AuditCharts } from './Insights';
 import { useEffect, useState } from 'react';
 
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import Card from './ui/Card';
 
@@ -32,9 +33,13 @@ export default function AdminAuditLog() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive([]);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   return (
     <div>

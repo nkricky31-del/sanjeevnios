@@ -3,6 +3,7 @@ import { ConditionCharts } from './Insights';
 import Toggle from './ui/Toggle';
 import { useEffect, useState } from 'react';
 
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import type { ConditionRef } from '../lib/types';
 import Button from './ui/Button';
@@ -24,9 +25,13 @@ export default function AdminConditions() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive([]);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   const addCondition = async () => {
     setError(null);

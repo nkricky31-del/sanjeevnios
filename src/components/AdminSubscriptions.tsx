@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import { TIER_ORDER, TIERS, usageStatus } from '../lib/subscription';
 import type { ClinicStatus, Subscription, SubscriptionTier } from '../lib/types';
@@ -58,9 +59,13 @@ export default function AdminSubscriptions() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive(['clinics', 'subscriptions']);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   const changeTier = async (clinic: ClinicRow, tier: SubscriptionTier) => {
     setActionError(null);

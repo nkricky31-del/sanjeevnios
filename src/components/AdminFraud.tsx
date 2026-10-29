@@ -3,6 +3,7 @@ import AdminDrill, { type DrillView } from './AdminDrill';
 import { useEffect, useState } from 'react';
 
 import { FRAUD_THRESHOLDS, isFlagged, type ClinicFraudStats } from '../lib/fraud';
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import Card from './ui/Card';
 import StatusPill from './ui/StatusPill';
@@ -70,9 +71,13 @@ export default function AdminFraud() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive(['payments']);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
 

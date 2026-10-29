@@ -3,6 +3,7 @@ import AdminDrill, { type DrillView } from './AdminDrill';
 import { useEffect, useState } from 'react';
 
 import { todayISO } from '../lib/date';
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import type { BillingStatus, Plan } from '../lib/types';
 import AdminPlans from './AdminPlans';
@@ -138,9 +139,13 @@ export default function AdminBilling() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive(['clinics', 'doctors', 'subscriptions']);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   // Assigns a plan directly - the correct way to do this (writes plan_id,
   // unlike AdminSubscriptions.tsx's older changeTier(), which only ever

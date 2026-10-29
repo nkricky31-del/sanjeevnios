@@ -8,7 +8,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useConsoleTab } from '../lib/useConsoleTab';
+import AdminLiveProvider from '../components/shell/AdminLiveProvider';
 import KeepTab from '../components/shell/KeepTab';
+import { ADMIN_AREAS, useAdminLive } from '../lib/adminLive';
 
 import AdminAuditLog from '../components/AdminAuditLog';
 import AdminBilling from '../components/AdminBilling';
@@ -96,10 +98,21 @@ const ADMIN_VIEWS = [
 ] as const;
 type AdminView = (typeof ADMIN_VIEWS)[number];
 
+// The console inside its live-update listener (migration 90): the screens
+// refresh themselves when something they show changes.
 export default function AdminConsole() {
+  return (
+    <AdminLiveProvider>
+      <AdminConsoleScreen />
+    </AdminLiveProvider>
+  );
+}
+
+function AdminConsoleScreen() {
   const { session } = useAuth();
   const navigate = useNavigate();
-  const hasUnread = useUnreadNotifications();
+  // The bell looks again whenever anything changes, and once a minute.
+  const hasUnread = useUnreadNotifications(useAdminLive(ADMIN_AREAS));
   // The open tab is kept in the address (lib/useConsoleTab.ts).
   const [view, setView] = useConsoleTab<AdminView>(ADMIN_VIEWS, 'dashboard');
   const [drill, setDrill] = useState<DrillView | null>(null);
@@ -128,7 +141,7 @@ export default function AdminConsole() {
   const [justApproved, setJustApproved] = useState<{ name: string; code: string } | null>(null);
 
   const loadPending = async () => {
-    setLoading(true);
+    // No loading flag on a refresh - the lists stay up until new data arrives.
 
     // Best-effort - closes the "no cron job" gap for a required document
     // whose expiry_date has simply passed with no other event to trigger a
@@ -190,9 +203,13 @@ export default function AdminConsole() {
     setLoading(false);
   };
 
+  // Clinics, doctors and documents waiting for verification - live, and
+  // refreshed every minute while that tab is the one on screen.
+  const verificationLive = useAdminLive(['clinics', 'doctors', 'documents'], view === 'verification');
   useEffect(() => {
     loadPending();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verificationLive]);
 
   const viewDoc = async (path: string) => {
     const url = await openVerificationDoc(path);

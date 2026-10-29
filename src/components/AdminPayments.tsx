@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import AdminRejectForm from './AdminRejectForm';
 import Button from './ui/Button';
@@ -65,9 +66,13 @@ export default function AdminPayments() {
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive(['payments']);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   const reversePayment = async (payment: PaymentRow, reason: string) => {
     setActionError(null);

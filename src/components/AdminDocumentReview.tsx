@@ -6,6 +6,7 @@ import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
 import { docTypesFor } from '../lib/documentTypes';
 import { openVerificationDoc } from '../lib/storage';
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import type { Consent, DocumentRow, OwnerType, VerificationRequirement } from '../lib/types';
 import { isRequired } from '../lib/verificationRequirements';
@@ -80,10 +81,12 @@ export default function AdminDocumentReview({ ownerType, ownerId, notifyUserId, 
     setLoading(false);
   };
 
+  // Reloads when documents change (lib/adminLive.ts).
+  const live = useAdminLive(['documents']);
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownerType, ownerId]);
+  }, [ownerType, ownerId, live]);
 
   const latestFor = (key: string) => documents.find((d) => d.doc_type === key);
 

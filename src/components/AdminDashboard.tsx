@@ -3,6 +3,7 @@ import { Building2, CalendarCheck, IndianRupee, Stethoscope, Users } from 'lucid
 import { useEffect, useState } from 'react';
 
 import { todayISO } from '../lib/date';
+import { useAdminLive } from '../lib/adminLive';
 import { supabase } from '../lib/supabaseClient';
 import type { ClinicStatus } from '../lib/types';
 import AdminDrill, { type DrillView } from './AdminDrill';
@@ -93,9 +94,13 @@ export default function AdminDashboard({ onNavigate }: { onNavigate?: (tab: 'pat
     setLoading(false);
   };
 
+  // Reloads when something it shows changes, and every minute while on
+  // screen (lib/adminLive.ts).
+  const live = useAdminLive(['clinics', 'doctors', 'payments', 'settlements', 'subscriptions']);
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
 
   if (drill) return <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />;
 

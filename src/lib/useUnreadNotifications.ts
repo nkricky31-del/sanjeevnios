@@ -8,7 +8,9 @@ import { supabase } from './supabaseClient';
 // identically for a patient, a clinic, or admin. Re-fetches on every mount,
 // which in practice means "fresh on every page navigation" since each page
 // renders its own <AppHeader>.
-export function useUnreadNotifications() {
+// refreshKey: change it to look again (the admin console passes its live
+// update counter - lib/adminLive.ts).
+export function useUnreadNotifications(refreshKey = 0) {
   const { session } = useAuth();
   const [hasUnread, setHasUnread] = useState(false);
 
@@ -21,7 +23,7 @@ export function useUnreadNotifications() {
       .eq('read', false)
       .then(({ count }) => setHasUnread((count ?? 0) > 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user.id]);
+  }, [session?.user.id, refreshKey]);
 
   return hasUnread;
 }
