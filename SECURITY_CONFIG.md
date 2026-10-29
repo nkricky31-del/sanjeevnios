@@ -77,7 +77,11 @@ Rotation (SQL editor only, none callable from the API):
 - Server secrets live in Supabase Edge Function secrets
   (`supabase secrets set ...`), per environment: `RAZORPAY_KEY_ID`,
   `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RESEND_API_KEY`,
-  `RESEND_FROM_EMAIL`. Vercel holds only `VITE_SUPABASE_URL` / `..._ANON_KEY`.
+  `RESEND_FROM_EMAIL`, `FIREBASE_SERVICE_ACCOUNT` (phone alerts; set only with
+  `scripts/set-firebase-key.sh`). Vercel holds only `VITE_SUPABASE_URL` / `..._ANON_KEY`.
+  The Android app's `android/app/google-services.json` only identifies the app
+  to Firebase and is not a secret; the Firebase *service key* is, and never goes
+  in the repository.
 - **Do now:** rotate the live Razorpay key that was pasted into a chat earlier
   (see RAZORPAY_SETUP_TODO.md), and rotate secrets on a schedule (90 days) and
   after any exposure.

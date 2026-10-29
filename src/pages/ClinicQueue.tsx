@@ -46,6 +46,7 @@ import { type PatientContact, patientContextLine, withPatientContacts } from '..
 import { appointmentConfirmedMessage, checkInHowFor, notifyPatient } from '../lib/notify';
 import { bookingReference } from '../lib/queue';
 import { captureRazorpayPayment } from '../lib/razorpay';
+import { signOut } from '../lib/signOut';
 import { supabase } from '../lib/supabaseClient';
 import { TIERS, usageStatus } from '../lib/subscription';
 import { formatTimeLabel } from '../lib/time';
@@ -449,7 +450,6 @@ export default function ClinicQueue() {
     loadAppointments();
   };
 
-  const signOut = () => supabase.auth.signOut();
 
   // One phone, two roles (schema.sql migration 58): this same account is
   // also a patient. Unlike Profile.tsx's "Switch to Clinic console" (only

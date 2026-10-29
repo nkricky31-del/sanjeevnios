@@ -15,6 +15,18 @@ const config: CapacitorConfig = {
     // The web content runs edge to edge; headers pad themselves with
     // env(safe-area-inset-top) (see lib/native.ts).
     contentInset: 'never',
+    // Every plugin except alerts (@capacitor-firebase/messaging): the iPhone
+    // app gets alerts in a later step, with Firebase's iPhone setup and
+    // Apple's push key (docs/superpowers/specs/2026-10-30-push-notifications-design.md).
+    // Until then lib/push.ts doesn't offer them there.
+    includePlugins: [
+      '@capacitor/app',
+      '@capacitor/browser',
+      '@capacitor/filesystem',
+      '@capacitor/geolocation',
+      '@capacitor/share',
+      '@capacitor/splash-screen',
+    ],
   },
   plugins: {
     SplashScreen: {

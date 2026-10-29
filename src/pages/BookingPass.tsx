@@ -21,6 +21,7 @@ import {
 } from '../lib/checkIn';
 import { addDaysISO, todayISO } from '../lib/date';
 import { currentUserId, useCoalescedRefresh, useVisibleInterval } from '../lib/livePolling';
+import { ALERT_EVENT } from '../lib/push';
 import { bookingReference, computeNowServing, countAhead, findMyPosition } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { estimateSlotMinutes, formatTimeLabel } from '../lib/time';
@@ -87,8 +88,7 @@ export default function BookingPass() {
   const [alert, setAlert] = useState<string | null>(null);
   const [options, setOptions] = useState<CheckInOptions | null>(null);
   const scanHandled = useRef(false);
-  // Each near-turn alert fires once, not on every queue tick.
-  const alerted = useRef({ thirty: false, next: false });
+  const shownAlertId = useRef<string | null>(null);
 
   const loadBooking = useCallback(async () => {
     if (!appointmentId) return;
@@ -175,6 +175,29 @@ export default function BookingPass() {
     if (inQueue) loadQueue();
   }, [inQueue, loadQueue]);
 
+  // "Your turn is near" alerts are written by the database as the queue moves
+  // (migration 93: "2 people ahead of you...", "You're next", "It's your
+  // turn"), which also sends them to the patient's phone. The newest one for
+  // this booking shows at the top here.
+  const showLatestAlert = async () => {
+    if (!appointmentId) return;
+    const uid = await currentUserId();
+    if (!uid) return;
+    const { data } = await supabase
+      .from('notifications')
+      .select('id, message')
+      .eq('appointment_id', appointmentId)
+      .eq('user_id', uid)
+      .in('type', ['checked_in', 'queue_almost', 'queue_next', 'token_called', 'clinic_reminder', 'queue_skip'])
+      .order('at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data && data.id !== shownAlertId.current) {
+      shownAlertId.current = data.id;
+      setAlert(data.message);
+    }
+  };
+
   // A "the queue changed" signal carries no data and fires for every booking
   // with this doctor today: ask cheaply whether THIS booking changed, reload
   // it only if so, and re-read the queue numbers while in the queue.
@@ -195,7 +218,10 @@ export default function BookingPass() {
     ) {
       loadBooking();
     }
-    if (LIVE_STATUSES.includes(data.status as AppointmentStatus)) loadQueue();
+    if (LIVE_STATUSES.includes(data.status as AppointmentStatus)) {
+      loadQueue();
+      showLatestAlert();
+    }
   };
   const onQueueSignal = useCoalescedRefresh(checkForChanges);
 
@@ -227,34 +253,23 @@ export default function BookingPass() {
       .then(({ data }) => setSlotMinutes(estimateSlotMinutes((data ?? []) as DoctorAvailability[])));
   }, [booking?.doctor_id, booking?.date]);
 
-  // "Your turn is near" alerts, fired once each as the queue moves toward
-  // this patient. Written to notifications as well as shown here, so the
-  // bell and the notifications page carry them like every other alert.
   useEffect(() => {
-    if (!booking || booking.token_number == null || aheadCount == null) return;
-    if (!LIVE_STATUSES.includes(booking.status)) return;
-
-    const raiseAlert = async (message: string) => {
-      setAlert(message);
-      const uid = await currentUserId();
-      if (!uid) return;
-      await supabase.from('notifications').insert({
-        user_id: uid,
-        appointment_id: booking.id,
-        type: 'queue_reminder',
-        message,
-      });
-    };
-
-    if (aheadCount === 0 && !alerted.current.next) {
-      alerted.current.next = true;
-      raiseAlert("You're next! Please head to the consultation area now.");
-    } else if (aheadCount > 0 && aheadCount * slotMinutes <= 30 && !alerted.current.thirty) {
-      alerted.current.thirty = true;
-      raiseAlert(`Your turn is about ${aheadCount * slotMinutes} minutes away — ${aheadCount} ahead of you.`);
-    }
+    if (inQueue) showLatestAlert();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aheadCount, booking?.token_number, booking?.status, slotMinutes]);
+  }, [inQueue, appointmentId]);
+
+  // An alert arriving while this screen is open (lib/push.ts): look now.
+  useEffect(() => {
+    if (!appointmentId) return;
+    const onAlert = (e: Event) => {
+      if ((e as CustomEvent<{ appointmentId: string | null }>).detail?.appointmentId !== appointmentId) return;
+      loadBooking();
+      showLatestAlert();
+    };
+    window.addEventListener(ALERT_EVENT, onAlert);
+    return () => window.removeEventListener(ALERT_EVENT, onAlert);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointmentId]);
 
   // Patient scanning the clinic's code - the printed one at the counter, or
   // the rotating one on a reception screen.

@@ -6,7 +6,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import BrandMark from '../ui/BrandMark';
 import Wordmark from '../ui/Wordmark';
 import { useAuth } from '../../lib/AuthContext';
-import { supabase } from '../../lib/supabaseClient';
+import { signOut } from '../../lib/signOut';
 
 export interface NavItem {
   key: string;
@@ -147,7 +147,7 @@ export default function Sidebar({ tag, items, onHome, mobile = false }: { tag: s
         <p className="min-w-0 flex-1 truncate text-sm text-white/85">{who}</p>
         <motion.button
           type="button"
-          onClick={() => supabase.auth.signOut()}
+          onClick={() => void signOut()}
           aria-label="Sign out"
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.92 }}

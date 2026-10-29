@@ -8,8 +8,9 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        // The app's own plugin (PrinterPlugin.java) - registered before the bridge starts.
+        // The app's own plugins (PrinterPlugin.java, AppSetupPlugin.java) - registered before the bridge starts.
         registerPlugin(PrinterPlugin.class);
+        registerPlugin(AppSetupPlugin.class);
         super.onCreate(savedInstanceState);
         // Draw behind the status and navigation bars on every Android version
         // (Android 15+ does it anyway). The web app pads its headers with

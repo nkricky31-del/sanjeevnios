@@ -5,6 +5,7 @@ import IdleGuard from './components/IdleGuard';
 import Button from './components/ui/Button';
 import { InstallBanner, OfflineBanner } from './components/InstallBanner';
 import SplashLoader from './components/ui/SplashLoader';
+import PushBanner from './components/PushBanner';
 import StatusBarBackdrop from './components/StatusBarBackdrop';
 import { getStoredActingMode } from './lib/actingMode';
 import { isStandalone } from './lib/pwa';
@@ -13,11 +14,12 @@ import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
 import { idleRoleFor, LOGIN_PATH, readIdleSignOut } from './lib/idleTimeout';
 import { lazyPage } from './lib/lazyPage';
+import { isNativeApp } from './lib/native';
 import {
   loadAdminConsole, loadAdminLogin, loadClinicLogin, loadClinicPoster, loadClinicQueue, loadClinicSignup, loadEncounterDetail,
   loadMarketingSite, loadNotificationsList, loadPatientApp, loadPatientLogin, loadTokenBoard, prefetchFor,
 } from './lib/sections';
-import { supabase } from './lib/supabaseClient';
+import { signOut } from './lib/signOut';
 
 // Each part of the app is downloaded only when it's used (lib/lazyPage.ts):
 // visitors get the website, patients the patient app, clinics their console.
@@ -120,7 +122,7 @@ function AppContent() {
             Your account has been suspended by an admin. You can't make new bookings while suspended. Contact
             support if you think this is a mistake.
           </p>
-          <Button variant="ghost" onClick={() => supabase.auth.signOut()} className="mt-4">
+          <Button variant="ghost" onClick={() => void signOut()} className="mt-4">
             Sign out
           </Button>
         </div>
@@ -253,6 +255,8 @@ export default function App() {
     <>
       <OfflineBanner />
       <InstallBanner />
+      {/* Alerts arriving while the app is open (the phone apps only). */}
+      {isNativeApp && <PushBanner />}
     </>
   );
   // Signs a session out after a period without use (lib/idleTimeout.ts).

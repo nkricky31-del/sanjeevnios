@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Deploy every edge function, then re-apply the two that must stay PUBLIC
-# (no Supabase JWT check; they verify their own signatures instead):
-#   razorpay-webhook   - Razorpay calls it
-#   send-whatsapp-otp  - Supabase Auth's Send-SMS hook calls it
+# Deploy every edge function, then re-apply the three that must stay PUBLIC
+# (no Supabase JWT check; each checks its callers itself instead):
+#   razorpay-webhook   - Razorpay calls it (signed)
+#   send-whatsapp-otp  - Supabase Auth's Send-SMS hook calls it (signed)
+#   send-push          - the database calls it with alert ids only, and it
+#                        sends only real, unsent patient alerts (migration 93)
 #
 #   ./scripts/deploy-functions.sh
 #
@@ -23,4 +25,5 @@ REF="${PROJECT_REF:-maqnfncrqtdbjqrsibyq}"
 npx supabase functions deploy --project-ref "$REF" --use-api
 npx supabase functions deploy razorpay-webhook --no-verify-jwt --project-ref "$REF" --use-api
 npx supabase functions deploy send-whatsapp-otp --no-verify-jwt --project-ref "$REF" --use-api
+npx supabase functions deploy send-push --no-verify-jwt --project-ref "$REF" --use-api
 echo "Done: every function is deployed."

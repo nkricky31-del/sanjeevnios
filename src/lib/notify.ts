@@ -2,11 +2,6 @@ import { supabase } from './supabaseClient';
 import { formatTimeLabel, reportingTimeFor } from './time';
 import type { AppointmentPaymentStatus, NotificationChannel } from './types';
 
-// How close to the reporting time (not the slot time) the one-shot "please
-// head over" nudge fires - see BookingStatus.tsx's reminder effect and
-// migration_40_reporting_time.sql's dedup widening.
-export const REPORTING_REMINDER_LEAD_MINUTES = 60;
-
 interface NotifyArgs {
   userId: string;
   appointmentId: string;
@@ -112,14 +107,9 @@ export function appointmentConfirmedMessage(
   return `Confirmed! Your appointment${who}${when} at ${formatTimeLabel(slotTime)} is booked. Please reach the clinic by ${reportBy} (your reporting time). ${CHECK_IN_LINE[checkInHow]} Booking ref ${bookingRef}. ${paymentNote}`;
 }
 
-// The single "reporting time is approaching" nudge (see BookingStatus.tsx) -
-// reportingTime here is already the clamped value from get_checkin_options(),
-// not recomputed.
-export function reportingTimeReminderMessage(reportingTime: string, slotTime: string): string {
-  return `Reminder: please aim to reach the clinic by ${formatTimeLabel(reportingTime)} (your reporting time) for your ${formatTimeLabel(
-    slotTime
-  )} slot.`;
-}
+// The "time to set off" reminder before a visit is written by the database
+// now (sweep_reporting_reminders, migration 93), so it reaches the patient's
+// phone even with the app closed.
 
 // Sent when the clinic cancels a confirmed booking (doctor unavailable, etc.).
 export function appointmentCancelledByClinicMessage(

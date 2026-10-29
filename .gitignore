@@ -34,4 +34,8 @@ supabase/.temp/
 *.p12
 *.pfx
 *api_keys*.csv
+# Firebase service keys (scripts/set-firebase-key.sh reads them from wherever they were downloaded)
+*firebase-adminsdk*.json
+*service-account*.json
+*serviceAccount*.json
 UI/*.csv

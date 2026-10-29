@@ -24,6 +24,27 @@
 
         </activity>
 
+        <!-- Alerts (Firebase Cloud Messaging, src/lib/push.ts). The icon, colour and
+             channel for an alert that arrives without its own; the alerts we send
+             name theirs (supabase/functions/_shared/fcm.ts). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_sanjeevnios" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_accent" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="general" />
+        <!-- No Firebase address for this phone until the patient turns alerts on,
+             and no Firebase analytics at all. -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="firebase_analytics_collection_enabled"
+            android:value="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -38,6 +59,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Alerts when your turn is near (Android 13 and later ask first) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Scanning a clinic's or a patient's QR code, and photos of reports -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Clinics near you, and confirming you're at the clinic when you check in -->

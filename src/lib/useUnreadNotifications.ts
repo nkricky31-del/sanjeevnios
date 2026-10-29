@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { useAuth } from './AuthContext';
+import { ALERT_EVENT } from './push';
 import { supabase } from './supabaseClient';
 
 // Powers the bell-dot indicator on every AppHeader across all three roles -
@@ -13,6 +14,13 @@ import { supabase } from './supabaseClient';
 export function useUnreadNotifications(refreshKey = 0) {
   const { session } = useAuth();
   const [hasUnread, setHasUnread] = useState(false);
+  // An alert arriving while the app is open (lib/push.ts) is news for the bell too.
+  const [arrived, setArrived] = useState(0);
+  useEffect(() => {
+    const bump = () => setArrived((n) => n + 1);
+    window.addEventListener(ALERT_EVENT, bump);
+    return () => window.removeEventListener(ALERT_EVENT, bump);
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -23,7 +31,7 @@ export function useUnreadNotifications(refreshKey = 0) {
       .eq('read', false)
       .then(({ count }) => setHasUnread((count ?? 0) > 0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user.id, refreshKey]);
+  }, [session?.user.id, refreshKey, arrived]);
 
   return hasUnread;
 }

@@ -2,4 +2,6 @@
 <resources>
     <!-- The app's canvas colour (index.css, color-canvas). -->
     <color name="canvas">#FAFBFC</color>
+    <!-- Alerts: the leaf icon's tint in the notification shade (the brand indigo). -->
+    <color name="notification_accent">#3B5BDB</color>
 </resources>

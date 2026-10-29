@@ -39,8 +39,9 @@ import { getCheckInOptions, getCurrentCoords, isPrintedClinicQr, issueBookingQr,
 import QrCode from '../components/ui/QrCode';
 import QrScanner from '../components/QrScanner';
 import { getDoctorConsultationStats } from '../lib/consultation';
+import { ALERT_EVENT } from '../lib/push';
+import PushPrompt from '../components/PushPrompt';
 import { currentUserId, useCoalescedRefresh, useVisibleInterval } from '../lib/livePolling';
-import { notifyPatient, reportingTimeReminderMessage, REPORTING_REMINDER_LEAD_MINUTES } from '../lib/notify';
 import { bookingReference, computeNowServing, countAhead } from '../lib/queue';
 import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
@@ -178,7 +179,6 @@ export default function BookingStatus() {
   // this is also what gates whether ReviewForm shows at all).
   const [myReview, setMyReview] = useState<Review | null | undefined>(undefined);
   const [showReviewForm, setShowReviewForm] = useState(false);
-  const alerted = useRef({ thirty: false, next: false });
 
   const loadBooking = async () => {
     const { data } = await supabase
@@ -380,9 +380,12 @@ export default function BookingStatus() {
       data.reminder_count !== booking.reminder_count;
     if (changed) {
       loadBooking();
-      checkLatestNotification();
       if (data.status === 'in_consultation' || data.status === 'completed') loadVisit();
     }
+    // The database writes the queue alerts ("2 people ahead of you...",
+    // "You're next", "It's your turn") and the arrival reminder (migration
+    // 93): whatever is newest for this booking shows at the top.
+    checkLatestNotification();
     if (IN_QUEUE_STATUSES.includes(data.status as AppointmentStatus)) {
       loadQueue(booking.doctor_id, data.date);
       getDoctorConsultationStats(booking.doctor_id).then((stats) => setAvgConsultationMinutes(stats.avgMinutes));
@@ -422,77 +425,19 @@ export default function BookingStatus() {
   // section 54) - otherwise the slot-width guess is all there is to go on.
   const perPersonMinutes = avgConsultationMinutes ?? slotMinutes;
 
-  // Fire the two in-app reminders once each, when their condition is first met.
+  // An alert arriving while this screen is open (lib/push.ts): look again now
+  // rather than at the next check.
   useEffect(() => {
-    if (!booking || aheadOfMe == null) return;
-
-    const raiseAlert = async (message: string) => {
-      setAlertMessage(message);
-      await supabase.from('notifications').insert({
-        user_id: await currentUserId(),
-        type: 'queue_reminder',
-        message,
-        appointment_id: booking.id,
-      });
+    if (!appointmentId) return;
+    const onAlert = (e: Event) => {
+      if ((e as CustomEvent<{ appointmentId: string | null }>).detail?.appointmentId !== appointmentId) return;
+      loadBooking();
+      checkLatestNotification();
     };
-
-    if (aheadOfMe === 0 && !alerted.current.next) {
-      alerted.current.next = true;
-      raiseAlert("You're next! Please head to the clinic now.");
-    } else if (aheadOfMe > 0 && aheadOfMe * perPersonMinutes <= 30 && !alerted.current.thirty) {
-      alerted.current.thirty = true;
-      raiseAlert('Your turn is about 30 minutes away.');
-    }
+    window.addEventListener(ALERT_EVENT, onAlert);
+    return () => window.removeEventListener(ALERT_EVENT, onAlert);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aheadOfMe, booking?.id, perPersonMinutes]);
-
-  // The one-shot "reporting time is approaching" nudge (section 40). Unlike
-  // the queue reminders above, this fires from a plain clock, not a change in
-  // someone else's queue position, so it needs its own timer rather than
-  // riding the realtime broadcast - there's nothing else that would wake this
-  // effect up as the minutes tick down. reportingTimeAlertedRef stops it from
-  // re-firing every tick within this one page view; log_notification()'s
-  // dedup index (migration 40) is what actually guarantees it's sent at most
-  // once ever, across reloads and tabs too.
-  const reportingTimeAlerted = useRef(false);
-  // Resets the guard when the route lands on a DIFFERENT booking without a
-  // full remount (React Router keeps the component instance across a param
-  // change) - otherwise having already alerted for one appointment would
-  // silently suppress the check for the next one viewed in the same tab.
-  useEffect(() => {
-    reportingTimeAlerted.current = false;
-  }, [booking?.id]);
-  useEffect(() => {
-    if (!booking || booking.status !== 'accepted' || !options?.reportingTime) return;
-
-    const check = async () => {
-      if (reportingTimeAlerted.current) return;
-      const minutesUntil =
-        (new Date(`${booking.date}T${options.reportingTime}`).getTime() - Date.now()) / 60000;
-      // Fires once the reporting time is within REPORTING_REMINDER_LEAD_MINUTES
-      // out, and stays willing to fire for a while after it's passed too (a
-      // late page load shouldn't just silently skip the one nudge this
-      // appointment ever gets) - but not forever, so a booking from days ago
-      // never suddenly reminds anyone of anything.
-      if (minutesUntil <= REPORTING_REMINDER_LEAD_MINUTES && minutesUntil >= -180) {
-        reportingTimeAlerted.current = true;
-        const uid = await currentUserId();
-        if (!uid) return;
-        await notifyPatient({
-          userId: uid,
-          appointmentId: booking.id,
-          type: 'reporting_time_reminder',
-          message: reportingTimeReminderMessage(options.reportingTime, booking.slot_time),
-        });
-        checkLatestNotification();
-      }
-    };
-
-    check();
-    const id = setInterval(check, 60000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booking?.status, booking?.date, booking?.id, booking?.slot_time, options?.reportingTime]);
+  }, [appointmentId]);
 
   const bookingId = booking?.id;
   const acceptedNow = booking?.status === 'accepted';
@@ -660,6 +605,11 @@ export default function BookingStatus() {
             </div>
           </div>
         </Card>
+
+        {/* Alerts on this phone (the app only), once there's a visit to wait for. */}
+        {['booked', 'accepted', 'checked_in', 'called'].includes(booking.status) && booking.date >= todayISO() && (
+          <PushPrompt className="mt-3" />
+        )}
 
         {/* Booking facts */}
         <Card className="mt-3 !p-0">

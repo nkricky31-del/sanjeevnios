@@ -27,6 +27,7 @@ import FamilyMemberForm from '../components/FamilyMemberForm';
 import FamilyMemberPhoto from '../components/FamilyMemberPhoto';
 import KnownConditionsForm from '../components/KnownConditionsForm';
 import NameChangeRequestForm from '../components/NameChangeRequestForm';
+import PhoneAlertsRow from '../components/PhoneAlertsRow';
 import PatientProfile from '../components/PatientProfile';
 import AppHeader from '../components/ui/AppHeader';
 import Button from '../components/ui/Button';
@@ -38,6 +39,7 @@ import { setActingMode } from '../lib/actingMode';
 import { useAuth } from '../lib/AuthContext';
 import { livePhoneDigits, normalizePhone } from '../lib/phone';
 import { screenCache } from '../lib/screenCache';
+import { signOut } from '../lib/signOut';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember, Gender } from '../lib/types';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
@@ -210,7 +212,6 @@ export default function Profile() {
     loadMembers();
   };
 
-  const signOut = () => supabase.auth.signOut();
   const togglePanel = (p: Panel) => setPanel((prev) => (prev === p ? null : p));
 
   // One phone, two roles (schema.sql migration 58): this same account also
@@ -557,6 +558,7 @@ export default function Profile() {
             {hasUnread && <span className="h-2 w-2 rounded-full bg-coral-500" />}
             <ChevronRight size={18} className="shrink-0 text-slate-300" />
           </button>
+          <PhoneAlertsRow className="border-t border-slate-100" />
 
           <button
             onClick={() => togglePanel('privacy')}

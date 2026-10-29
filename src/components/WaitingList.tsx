@@ -168,18 +168,10 @@ export default function WaitingList({
       setError(callError.message);
       return;
     }
-    const called = ((data ?? []) as { id: string; token_number: number; patient_name: string; account_id: string }[])[0];
-    if (called) {
-      setNote(`Now calling #${called.token_number} — ${called.patient_name}.`);
-      if (called.account_id) {
-        await supabase.from('notifications').insert({
-          user_id: called.account_id,
-          appointment_id: called.id,
-          type: 'token_called',
-          message: `Token #${called.token_number} is being called now — please go in.`,
-        });
-      }
-    }
+    const called = ((data ?? []) as { id: string; token_number: number; patient_name: string }[])[0];
+    // The patient's "It's your turn" alert is written by the database the
+    // moment the status becomes "called" (migration 93), whichever button did it.
+    if (called) setNote(`Now calling #${called.token_number} — ${called.patient_name}.`);
     await load();
     onChanged?.();
   };

@@ -38,6 +38,7 @@ import StatusPill from '../components/ui/StatusPill';
 import { recordAdminDecision } from '../lib/audit';
 import { useAuth } from '../lib/AuthContext';
 import { openVerificationDoc } from '../lib/storage';
+import { signOut } from '../lib/signOut';
 import { supabase } from '../lib/supabaseClient';
 import type { DocumentRow, VerificationRequirement } from '../lib/types';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
@@ -318,7 +319,6 @@ function AdminConsoleScreen() {
     loadPending();
   };
 
-  const signOut = () => supabase.auth.signOut();
 
   const TABS: ConsoleTab<typeof view>[] = [
     { value: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
