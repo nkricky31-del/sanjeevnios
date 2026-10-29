@@ -80,7 +80,8 @@ export default function ClinicEarnings({ clinic }: Props) {
 
   const load = async () => {
     const seq = ++loadSeq.current;
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const [{ data }, sums] = await Promise.all([
       fetchPage(0, PAGE - 1),
       supabase.rpc('clinic_earnings_totals', { p_clinic_id: clinic.id, p_from: dateFrom || null, p_to: dateTo || null }),

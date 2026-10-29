@@ -8,6 +8,10 @@ import {
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { screenCache } from '../lib/screenCache';
+import { useConsoleTab } from '../lib/useConsoleTab';
+import KeepTab from '../components/shell/KeepTab';
+
 import ClinicBilling from '../components/ClinicBilling';
 import ClinicBills from '../components/ClinicBills';
 import ClinicBookingMode from '../components/ClinicBookingMode';
@@ -139,9 +143,10 @@ interface OpenVisit {
   patientName: string;
 }
 
-const CLINIC_TABS: ConsoleTab<
-  'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'bills' | 'booking' | 'billing' | 'earnings' | 'access'
->[] = [
+type ClinicView =
+  'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'bills' | 'booking' | 'billing' | 'earnings' | 'access';
+
+const CLINIC_TABS: ConsoleTab<ClinicView>[] = [
   { value: 'today', label: 'Today', icon: CalendarClock },
   { value: 'board', label: 'Patient board', icon: ListChecks },
   { value: 'queue', label: 'Bookings', icon: ClipboardList },
@@ -157,19 +162,35 @@ const CLINIC_TABS: ConsoleTab<
   { value: 'access', label: 'Login & staff', icon: KeyRound },
 ];
 
+const CLINIC_VIEWS = CLINIC_TABS.map((t) => t.value);
+
+interface ConsoleCache {
+  clinic: Clinic | null;
+  doctors: DoctorRow[];
+  subscription: Subscription | null;
+  doctorId: string;
+}
+
 export default function ClinicQueue() {
   const { session } = useAuth();
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
-  const [clinic, setClinic] = useState<Clinic | null>(null);
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [doctors, setDoctors] = useState<DoctorRow[]>([]);
-  const [doctorId, setDoctorId] = useState('');
+  // The console opens at once from the last visit (lib/screenCache.ts) -
+  // after a detail screen, notifications, or a reload of this tab - and
+  // refreshes behind it.
+  const consoleCache = screenCache.get<ConsoleCache>('clinic-console');
+  const [clinic, setClinic] = useState<Clinic | null>(consoleCache?.clinic ?? null);
+  const [subscription, setSubscription] = useState<Subscription | null>(consoleCache?.subscription ?? null);
+  const [doctors, setDoctors] = useState<DoctorRow[]>(consoleCache?.doctors ?? []);
+  const [doctorId, setDoctorId] = useState(consoleCache?.doctorId ?? '');
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [queueDate, setQueueDate] = useState(todayISO);
-  const [pending, setPending] = useState<QueueAppointment[]>([]);
-  const [dayRows, setDayRows] = useState<QueueAppointment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const dayCache = screenCache.get<{ pending: QueueAppointment[]; dayRows: QueueAppointment[] }>(
+    `clinic-day:${consoleCache?.doctorId ?? ''}:${todayISO()}`
+  );
+  const [pending, setPending] = useState<QueueAppointment[]>(dayCache?.pending ?? []);
+  const [dayRows, setDayRows] = useState<QueueAppointment[]>(dayCache?.dayRows ?? []);
+  const [loading, setLoading] = useState(!consoleCache?.clinic);
   const [openVisit, setOpenVisit] = useState<OpenVisit | null>(null);
   const [rejectOpenFor, setRejectOpenFor] = useState<string | null>(null);
   const [cancelOpenFor, setCancelOpenFor] = useState<string | null>(null);
@@ -181,9 +202,8 @@ export default function ClinicQueue() {
   // Bumped after a check-in so the waiting list reloads even when the
   // realtime broadcast is slow or the socket has dropped.
   const [queueVersion, setQueueVersion] = useState(0);
-  const [view, setView] = useState<
-    'today' | 'board' | 'queue' | 'publish' | 'doctors' | 'rx' | 'location' | 'patients' | 'bills' | 'booking' | 'billing' | 'earnings' | 'access'
-  >('today');
+  // The open tab is kept in the address (lib/useConsoleTab.ts).
+  const [view, setView] = useConsoleTab<ClinicView>(CLINIC_VIEWS, 'today');
 
   const loadClinicAndDoctors = async () => {
     if (!session) return;
@@ -199,6 +219,7 @@ export default function ClinicQueue() {
     setClinic(clinicData);
     if (!clinicData) {
       setLoading(false);
+      screenCache.patch<ConsoleCache>('clinic-console', { clinic: null });
       return;
     }
     const { data: doctorData } = await supabase
@@ -206,7 +227,8 @@ export default function ClinicQueue() {
       .select('id, name, consultation_fee')
       .eq('clinic_id', clinicData.id);
     setDoctors(doctorData ?? []);
-    setDoctorId((prev) => prev || doctorData?.[0]?.id || '');
+    const firstDoctor = doctorData?.[0]?.id || '';
+    setDoctorId((prev) => prev || firstDoctor);
 
     // No row yet just means this clinic hasn't had a booking attempt since
     // enforce_clinic_booking_limit() started tracking usage - treated as
@@ -219,6 +241,12 @@ export default function ClinicQueue() {
     setSubscription(subData);
 
     setLoading(false);
+    screenCache.patch<ConsoleCache>('clinic-console', {
+      clinic: clinicData,
+      doctors: (doctorData ?? []) as DoctorRow[],
+      subscription: subData,
+      doctorId: screenCache.get<ConsoleCache>('clinic-console')?.doctorId || firstDoctor,
+    });
   };
 
   const loadAppointments = async () => {
@@ -257,6 +285,7 @@ export default function ClinicQueue() {
     ]);
     setPending(pendingRows);
     setDayRows(dayRowsWithPatients);
+    screenCache.set(`clinic-day:${doctorId}:${queueDate}`, { pending: pendingRows, dayRows: dayRowsWithPatients });
   };
 
   useEffect(() => {
@@ -265,6 +294,8 @@ export default function ClinicQueue() {
   }, [session]);
 
   useEffect(() => {
+    // Remember which doctor was being looked at, for coming back.
+    if (doctorId) screenCache.patch<ConsoleCache>('clinic-console', { doctorId });
     loadAppointments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doctorId, queueDate]);
@@ -520,7 +551,13 @@ export default function ClinicQueue() {
       tag="Clinic"
       title={clinic.name}
       subtitle={clinic.clinic_code ? `Clinic ID: ${clinic.clinic_code}` : 'Clinic dashboard'}
-      pill={<StatusPill label={CLINIC_STATUS_LABEL[clinic.status]} tone={CLINIC_STATUS_TONE[clinic.status]} />}
+      pill={
+        // On a phone an approved clinic doesn't need the badge - its name
+        // gets the room; a clinic still waiting keeps it everywhere.
+        <span className={clinic.status === 'approved' ? 'hidden sm:inline-flex' : 'inline-flex'}>
+          <StatusPill label={CLINIC_STATUS_LABEL[clinic.status]} tone={CLINIC_STATUS_TONE[clinic.status]} />
+        </span>
+      }
       tabs={CLINIC_TABS}
       value={view}
       onChange={setView}
@@ -573,7 +610,7 @@ export default function ClinicQueue() {
 
 
         {/* The arrivals desk: scan or mark arrived, then work the waiting list. */}
-        {view === 'today' && (
+        <KeepTab active={view === 'today'}>
           <>
             {doctors.length === 0 && (
               <p className="mt-4 text-sm text-slate-500">
@@ -663,36 +700,36 @@ export default function ClinicQueue() {
               </>
             )}
           </>
-        )}
+        </KeepTab>
 
-        {view === 'booking' && (
+        <KeepTab active={view === 'booking'}>
           <div className="mt-4">
             <ClinicBookingMode
               clinic={clinic}
               onSaved={(patch) => setClinic((prev) => (prev ? { ...prev, ...patch } : prev))}
             />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'billing' && (
+        <KeepTab active={view === 'billing'}>
           <div className="mt-4">
             <ClinicBilling clinicId={clinic.id} />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'earnings' && (
+        <KeepTab active={view === 'earnings'}>
           <div className="mt-4">
             <ClinicEarnings clinic={clinic} />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'bills' && (
+        <KeepTab active={view === 'bills'}>
           <div className="mt-4">
             <ClinicBills clinicId={clinic.id} />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'access' && (
+        <KeepTab active={view === 'access'}>
           <div className="mt-4">
             <ClinicStaffAccess
               clinic={clinic}
@@ -700,9 +737,9 @@ export default function ClinicQueue() {
             />
             <ClinicAuditLog clinic={clinic} />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'publish' && (
+        <KeepTab active={view === 'publish'}>
           <div className="mt-4">
             <PublishDaySchedule
               clinic={clinic}
@@ -710,30 +747,30 @@ export default function ClinicQueue() {
               onClinicSaved={(patch) => setClinic((prev) => (prev ? { ...prev, ...patch } : prev))}
             />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'board' && (
+        <KeepTab active={view === 'board'}>
           <div className="mt-4">
             <PatientBoard clinicId={clinic.id} doctors={doctors} />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'patients' && (
+        <KeepTab active={view === 'patients'}>
           <div className="mt-4">
             <PatientLookup clinicId={clinic.id} />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'doctors' && (
+        <KeepTab active={view === 'doctors'}>
           <div className="mt-4">
             <ClinicDoctors
               clinic={clinic}
               onClinicSaved={(patch) => setClinic((prev) => (prev ? { ...prev, ...patch } : prev))}
             />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'location' && (
+        <KeepTab active={view === 'location'}>
           <div className="mt-4">
             <h2 className="mb-2 text-base font-bold text-slate-900">Clinic location</h2>
             <ClinicLocationPicker
@@ -760,18 +797,18 @@ export default function ClinicQueue() {
               </>
             )}
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'rx' && doctorId && (
+        <KeepTab active={view === 'rx'}>{doctorId && (
           <div className="mt-4">
             <RxPendingWorklist
               doctorId={doctorId}
               onOpen={(appointmentId, patientName) => setOpenVisit({ appointmentId, patientName })}
             />
           </div>
-        )}
+        )}</KeepTab>
 
-        {view === 'queue' && (
+        <KeepTab active={view === 'queue'}>
           <>
             {doctors.length === 0 && (
               <p className="mt-4 text-sm text-slate-500">
@@ -1020,7 +1057,7 @@ export default function ClinicQueue() {
               </>
             )}
           </>
-        )}
+        </KeepTab>
 
         <Button variant="ghost" onClick={switchToPatient} className="mt-6">
           Switch to Patient app

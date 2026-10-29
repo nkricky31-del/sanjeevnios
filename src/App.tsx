@@ -12,22 +12,26 @@ import { useAuth } from './lib/AuthContext';
 import { CLINIC_SIGNUP_INTENT_KEY } from './lib/clinicSignupIntent';
 import { idleRoleFor, LOGIN_PATH, readIdleSignOut } from './lib/idleTimeout';
 import { lazyPage } from './lib/lazyPage';
+import {
+  loadAdminConsole, loadAdminLogin, loadClinicLogin, loadClinicPoster, loadClinicQueue, loadClinicSignup, loadEncounterDetail,
+  loadMarketingSite, loadNotificationsList, loadPatientApp, loadPatientLogin, loadTokenBoard, prefetchFor,
+} from './lib/sections';
 import { supabase } from './lib/supabaseClient';
 
 // Each part of the app is downloaded only when it's used (lib/lazyPage.ts):
 // visitors get the website, patients the patient app, clinics their console.
-const MarketingSite = lazyPage(() => import('./marketing/MarketingSite'));
-const PatientLogin = lazyPage(() => import('./pages/PatientLogin'));
-const ClinicLogin = lazyPage(() => import('./pages/ClinicLogin'));
-const AdminLogin = lazyPage(() => import('./pages/AdminLogin'));
-const PatientApp = lazyPage(() => import('./PatientApp'));
-const ClinicQueue = lazyPage(() => import('./pages/ClinicQueue'));
-const ClinicSignup = lazyPage(() => import('./pages/ClinicSignup'));
-const ClinicPoster = lazyPage(() => import('./pages/ClinicPoster'));
-const TokenBoard = lazyPage(() => import('./pages/TokenBoard'));
-const AdminConsole = lazyPage(() => import('./pages/AdminConsole'));
-const EncounterDetail = lazyPage(() => import('./components/EncounterDetail'));
-const NotificationsList = lazyPage(() => import('./components/NotificationsList'));
+const MarketingSite = lazyPage(loadMarketingSite);
+const PatientLogin = lazyPage(loadPatientLogin);
+const ClinicLogin = lazyPage(loadClinicLogin);
+const AdminLogin = lazyPage(loadAdminLogin);
+const PatientApp = lazyPage(loadPatientApp);
+const ClinicQueue = lazyPage(loadClinicQueue);
+const ClinicSignup = lazyPage(loadClinicSignup);
+const ClinicPoster = lazyPage(loadClinicPoster);
+const TokenBoard = lazyPage(loadTokenBoard);
+const AdminConsole = lazyPage(loadAdminConsole);
+const EncounterDetail = lazyPage(loadEncounterDetail);
+const NotificationsList = lazyPage(loadNotificationsList);
 import AdminMfaGate from './components/AdminMfaGate';
 import PatientShell from './components/shell/PatientShell';
 
@@ -49,6 +53,15 @@ function AppContent() {
     sessionStorage.removeItem(CLINIC_SIGNUP_INTENT_KEY);
     setSignupIntent(false);
   };
+
+  // Once we know who this is, quietly download the parts of the app they can
+  // open (lib/sections.ts), so moving around doesn't wait on downloads.
+  const role = profile?.role;
+  useEffect(() => {
+    if (!role) return;
+    const mode = role === 'admin' ? 'admin' : (getStoredActingMode() ?? (role === 'clinic' ? 'clinic' : 'patient'));
+    prefetchFor(mode === 'admin' ? 'admin' : mode === 'clinic' ? 'clinic' : 'patient');
+  }, [role]);
 
   if (loading) return <SplashLoader />;
 

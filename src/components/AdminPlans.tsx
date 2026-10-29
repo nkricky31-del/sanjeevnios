@@ -69,7 +69,8 @@ export default function AdminPlans({ onSaved }: { onSaved?: () => void }) {
   const [saved, setSaved] = useState(false);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const { data, error: loadError } = await supabase.from('plans').select('*').eq('active', true).order('min_doctors');
     if (loadError) setError(`Couldn't load plans: ${loadError.message}`);
     const rows = (data ?? []) as Plan[];

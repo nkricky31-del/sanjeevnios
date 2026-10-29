@@ -1,9 +1,10 @@
 import Loading from './ui/Loading';
-import { Bell } from 'lucide-react';
+import { Bell, CheckCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../lib/AuthContext';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import type { Notification } from '../lib/types';
 import ScreenHeader from './ui/ScreenHeader';
@@ -16,12 +17,14 @@ import ScreenHeader from './ui/ScreenHeader';
 export default function NotificationsList() {
   const { session, profile } = useAuth();
   const navigate = useNavigate();
-  const [rows, setRows] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Shown at once from the last visit (lib/screenCache.ts), refreshed below.
+  const cachedRows = screenCache.get<Notification[]>('notifications');
+  const [rows, setRows] = useState<Notification[]>(cachedRows ?? []);
+  const [loading, setLoading] = useState(!cachedRows);
 
   const load = async () => {
     if (!session) return;
-    setLoading(true);
+    if (rows.length === 0) setLoading(true);
     // A lifecycle notice that also went out over WhatsApp/SMS logs a second
     // row for that channel (see notify.ts) purely as a delivery record - this
     // screen only ever shows the in-app copy, so the same message never
@@ -31,9 +34,12 @@ export default function NotificationsList() {
       .select('*')
       .eq('user_id', session.user.id)
       .eq('channel', 'in_app')
-      .order('at', { ascending: false });
-    setRows((data ?? []) as Notification[]);
+      .order('at', { ascending: false })
+      .limit(200);
+    const fresh = (data ?? []) as Notification[];
+    setRows(fresh);
     setLoading(false);
+    screenCache.set('notifications', fresh);
   };
 
   useEffect(() => {
@@ -44,7 +50,9 @@ export default function NotificationsList() {
   const markRead = async (n: Notification) => {
     if (!n.read) {
       await supabase.from('notifications').update({ read: true }).eq('id', n.id);
-      setRows((prev) => prev.map((r) => (r.id === n.id ? { ...r, read: true } : r)));
+      const next = rows.map((r) => (r.id === n.id ? { ...r, read: true } : r));
+      setRows(next);
+      screenCache.set('notifications', next);
     }
     if (profile?.role === 'patient' && n.appointment_id) {
       navigate(`/bookings/${n.appointment_id}`);
@@ -56,7 +64,9 @@ export default function NotificationsList() {
     const unreadIds = rows.filter((r) => !r.read).map((r) => r.id);
     if (unreadIds.length === 0) return;
     await supabase.from('notifications').update({ read: true }).in('id', unreadIds);
-    setRows((prev) => prev.map((r) => ({ ...r, read: true })));
+    const next = rows.map((r) => ({ ...r, read: true }));
+    setRows(next);
+    screenCache.set('notifications', next);
   };
 
   const unreadCount = rows.filter((r) => !r.read).length;
@@ -65,11 +75,11 @@ export default function NotificationsList() {
     <div>
       <ScreenHeader
         title="Notifications"
-        onBack={() => window.history.back()}
+        back={-1}
         action={
           unreadCount > 0 ? (
-            <button onClick={markAllRead} className="whitespace-nowrap text-xs font-bold text-brand-600">
-              Mark all read
+            <button type="button" onClick={markAllRead} aria-label="Mark all read" title="Mark all read" className="cursor-pointer rounded-full bg-white/15 p-1.5 text-white ring-1 ring-white/25 outline-none transition hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white">
+              <CheckCheck size={20} aria-hidden />
             </button>
           ) : undefined
         }

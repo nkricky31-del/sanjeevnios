@@ -1,4 +1,5 @@
 import { useStaggerIn } from '../lib/motionKit';
+import Loading from '../components/ui/Loading';
 import { ChevronRight, MapPin, SearchIcon, Stethoscope } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -137,7 +138,7 @@ export default function Search() {
         {locationError && <p className="mt-1.5 text-xs text-red-600">{locationError}</p>}
 
         <div ref={listRef} className="mt-5 grid gap-2.5 lg:grid-cols-2">
-          {loading && <p className="text-sm text-slate-400 lg:col-span-2">Searching...</p>}
+          {loading && <p className="text-sm text-slate-400 lg:col-span-2"><Loading label="Searching" /></p>}
           {!loading && sortedResults.length === 0 && (
             <p className="text-sm text-slate-400 lg:col-span-2">No approved clinics found.</p>
           )}

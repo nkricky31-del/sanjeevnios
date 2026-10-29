@@ -1,4 +1,5 @@
 import { ChevronDown, ExternalLink, Info } from 'lucide-react';
+import Loading from './ui/Loading';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -138,7 +139,7 @@ export default function PatientProfile({ mrn }: Props) {
       });
   }, [mrn]);
 
-  if (loading) return <p className="text-sm text-slate-400">Loading patient...</p>;
+  if (loading) return <p className="text-sm text-slate-400"><Loading /></p>;
 
   const profile = mergeProfile(rows);
 
@@ -300,7 +301,7 @@ export default function PatientProfile({ mrn }: Props) {
                       </Link>
                     </>
                   ) : (
-                    <p className="text-sm text-slate-400">Loading visit details...</p>
+                    <p className="text-sm text-slate-400"><Loading size="sm" /></p>
                   )}
                 </div>
               )}

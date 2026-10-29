@@ -1,6 +1,7 @@
 import { Search } from 'lucide-react';
 import { PatientsOverview } from './Insights';
 import { useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import PatientBillsSection from './PatientBillsSection';
 import PatientProfile from './PatientProfile';
@@ -14,8 +15,18 @@ function normalizeMrn(input: string): string {
 }
 
 export default function PatientLookup({ clinicId }: { clinicId?: string }) {
-  const [input, setInput] = useState('');
-  const [mrn, setMrn] = useState<string | null>(null);
+  // The open patient is kept in the address (&mrn=...), so coming back from
+  // one of their encounters reopens this patient instead of the list.
+  const [params, setParams] = useSearchParams();
+  const mrn = params.get('mrn');
+  const setMrn = (value: string | null) =>
+    setParams((prev) => {
+      const p = new URLSearchParams(prev);
+      if (value) p.set('mrn', value);
+      else p.delete('mrn');
+      return p;
+    });
+  const [input, setInput] = useState(mrn ?? '');
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

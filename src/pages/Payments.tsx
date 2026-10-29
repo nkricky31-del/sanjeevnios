@@ -12,6 +12,7 @@ import InfoNote from '../components/ui/InfoNote';
 import SectionTitle from '../components/ui/SectionTitle';
 import StatusPill from '../components/ui/StatusPill';
 import { DOC_LABEL, PAYMENT_LABEL, rupees as billRupees, type BillRow } from '../lib/bills';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
@@ -52,10 +53,12 @@ const rupees = (n: number) =>
 export default function Payments() {
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
-  const [rows, setRows] = useState<PaymentRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Shown at once from the last visit (lib/screenCache.ts), refreshed below.
+  const cached = screenCache.get<{ rows?: PaymentRow[]; bills?: BillRow[] }>('payments');
+  const [rows, setRows] = useState<PaymentRow[]>(cached?.rows ?? []);
+  const [loading, setLoading] = useState(!cached?.rows);
   // The clinics' bills for completed visits (migration 89), newest first.
-  const [bills, setBills] = useState<BillRow[]>([]);
+  const [bills, setBills] = useState<BillRow[]>(cached?.bills ?? []);
 
   useEffect(() => {
     let live = true;
@@ -74,7 +77,9 @@ export default function Payments() {
         .in('member_id', ids)
         .order('issued_at', { ascending: false })
         .limit(100);
-      if (live) setBills((data ?? []) as BillRow[]);
+      const fresh = (data ?? []) as BillRow[];
+      screenCache.patch<{ bills: BillRow[] }>('payments', { bills: fresh });
+      if (live) setBills(fresh);
     })();
     return () => {
       live = false;
@@ -89,8 +94,10 @@ export default function Payments() {
       )
       .order('created_at', { ascending: false })
       .then(({ data }) => {
-        setRows((data ?? []) as unknown as PaymentRow[]);
+        const fresh = (data ?? []) as unknown as PaymentRow[];
+        setRows(fresh);
         setLoading(false);
+        screenCache.patch<{ rows: PaymentRow[] }>('payments', { rows: fresh });
       });
   }, []);
 

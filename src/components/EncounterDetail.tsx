@@ -1,9 +1,11 @@
 import { Download } from 'lucide-react';
+import Loading from './ui/Loading';
 import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
 
 import { useAuth } from '../lib/AuthContext';
 import { downloadEncounterSummary } from '../lib/encounterExport';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import type { AppointmentFile, Prescription, Visit } from '../lib/types';
 import EncounterFullDetail, { type EncounterSummary, type LinkedAppointment } from './EncounterFullDetail';
@@ -29,7 +31,11 @@ interface Props {
 // itself never returns the row.
 export default function EncounterDetail({ encounterId }: Props) {
   const { profile } = useAuth();
-  const [encounter, setEncounter] = useState<FullEncounter | null | undefined>(undefined); // undefined = loading
+  // Shown at once when reopened (lib/screenCache.ts); the audited open and
+  // the read below still run every time.
+  const [encounter, setEncounter] = useState<FullEncounter | null | undefined>(
+    screenCache.get<FullEncounter>(`encounter:${encounterId}`) ?? undefined
+  ); // undefined = loading
   const [exportData, setExportData] = useState<{
     visit: Visit | null;
     prescription: Prescription | null;
@@ -52,7 +58,9 @@ export default function EncounterDetail({ encounterId }: Props) {
           .limit(1)
       )
       .then(({ data }) => {
-        setEncounter(((data ?? [])[0] as unknown as FullEncounter | undefined) ?? null);
+        const found = ((data ?? [])[0] as unknown as FullEncounter | undefined) ?? null;
+        setEncounter(found);
+        if (found) screenCache.set(`encounter:${encounterId}`, found);
       });
   }, [encounterId]);
 
@@ -92,22 +100,25 @@ export default function EncounterDetail({ encounterId }: Props) {
     <div>
       <ScreenHeader
         title="Encounter / Visit Details"
-        onBack={() => window.history.back()}
+        back={-1}
+        fallback={profile?.role === 'patient' ? '/records' : '/'}
         action={
           canExport && encounter ? (
             <button
+              type="button"
               onClick={handleExport}
               aria-label="Export encounter"
-              className="rounded-full p-2 text-brand-600 hover:bg-brand-50"
+              title="Download a summary"
+              className="cursor-pointer rounded-full bg-white/15 p-1.5 text-white ring-1 ring-white/25 outline-none transition hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white"
             >
-              <Download size={19} />
+              <Download size={20} aria-hidden />
             </button>
           ) : undefined
         }
       />
 
       <div className="mx-auto max-w-3xl px-4 py-4">
-        {encounter === undefined && <p className="text-sm text-slate-400">Loading encounter...</p>}
+        {encounter === undefined && <p className="text-sm text-slate-400"><Loading /></p>}
         {encounter === null && (
           <p className="text-sm text-slate-400">This encounter doesn't exist, or you don't have access to view it.</p>
         )}

@@ -1,5 +1,5 @@
 import { LogIn } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
@@ -11,6 +11,7 @@ import { startActiveSession } from '../lib/idleTimeout';
 import { setActingMode } from '../lib/actingMode';
 import { safeNext } from '../lib/loginRedirect';
 import { logAuthEvent } from '../lib/audit';
+import { loadPatientApp, prefetch } from '../lib/sections';
 import { supabase } from '../lib/supabaseClient';
 import { CAPTCHA_ENABLED } from '../lib/captcha';
 import TurnstileWidget from '../components/TurnstileWidget';
@@ -22,6 +23,10 @@ import TurnstileWidget from '../components/TurnstileWidget';
 // (ClinicLogin.tsx / AdminLogin.tsx) reachable from the links at the
 // bottom of this one - see App.tsx for how each role is routed here.
 export default function PatientLogin() {
+  // While they type, fetch the part of the app they're signing in to.
+  useEffect(() => {
+    prefetch([loadPatientApp]);
+  }, []);
   const [stage, setStage] = useState<'phone' | 'otp'>('phone');
   const [digits, setDigits] = useState('');
   const [otp, setOtp] = useState('');

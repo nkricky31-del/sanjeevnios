@@ -305,6 +305,7 @@ export default function BookingPass() {
       <ScreenHeader
         title={inQueue ? 'Your token' : selfCheckInAvailable || !patientQrOn ? 'Check in' : 'Show this at reception'}
         back={-1}
+        fallback={`/bookings/${booking.id}`}
       />
 
       {scanning && (

@@ -10,6 +10,7 @@ import { useCoalescedRefresh } from '../lib/livePolling';
 import { patientContextLine } from '../lib/patientContact';
 import { bookingReference } from '../lib/queue';
 import { notifyPatient, visitCompletedMessage } from '../lib/notify';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
 import { PAYMENT_STATUS_LABEL, type AppointmentPaymentStatus, type AppointmentStatus } from '../lib/types';
@@ -83,8 +84,10 @@ export default function WaitingList({
   reminderLimit = 3,
 }: Props) {
   const listRef = useStaggerIn();
-  const [rows, setRows] = useState<QueueRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Shown at once from the last look at this doctor's day (lib/screenCache.ts).
+  const cachedRows = screenCache.get<QueueRow[]>(`waiting:${doctorId}:${date}`);
+  const [rows, setRows] = useState<QueueRow[]>(cachedRows ?? []);
+  const [loading, setLoading] = useState(!cachedRows);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // schema.sql section 54 - refetched alongside the queue itself, so it's
@@ -105,7 +108,9 @@ export default function WaitingList({
       getDoctorConsultationStats(doctorId),
     ]);
     if (loadError) setError(loadError.message);
-    setRows((data ?? []) as QueueRow[]);
+    const fresh = (data ?? []) as QueueRow[];
+    setRows(fresh);
+    if (!loadError) screenCache.set(`waiting:${doctorId}:${date}`, fresh);
     setAvgMinutes(stats.avgMinutes);
     setAvgSampleSize(stats.sampleSize);
     setLoading(false);

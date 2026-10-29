@@ -72,7 +72,8 @@ export default function AdminDashboard({ onNavigate }: { onNavigate?: (tab: 'pat
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     // Added up in the database (migration 88), so the figures stay right
     // however many clinics and payments there are.
     const { data, error } = await supabase.rpc('admin_platform_totals', { p_today: todayISO() });

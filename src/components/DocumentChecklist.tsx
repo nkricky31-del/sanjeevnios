@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Loading from './ui/Loading';
 
 import { uploadableDocTypesFor, type DocumentTypeConfig } from '../lib/documentTypes';
 import { uploadVerificationDocument } from '../lib/documents';
@@ -131,7 +132,7 @@ export default function DocumentChecklist({ ownerType, ownerId, onChanged }: Pro
     await openVerificationDoc(path);
   };
 
-  if (loading) return <p className="text-sm text-slate-400">Loading documents...</p>;
+  if (loading) return <p className="text-sm text-slate-400"><Loading label="Loading documents" /></p>;
 
   return (
     <div className="space-y-3">

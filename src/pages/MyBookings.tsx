@@ -10,6 +10,7 @@ import Card from '../components/ui/Card';
 import Segmented from '../components/ui/Segmented';
 import StatusPill from '../components/ui/StatusPill';
 import { todayISO } from '../lib/date';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
 import type { AppointmentStatus } from '../lib/types';
@@ -66,10 +67,12 @@ export default function MyBookings() {
   const listRef = useStaggerIn();
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
-  const [rows, setRows] = useState<Row[]>([]);
+  // Shown at once from the last visit (lib/screenCache.ts), refreshed below.
+  const cachedRows = screenCache.get<Row[]>('bookings');
+  const [rows, setRows] = useState<Row[]>(cachedRows ?? []);
   const [params] = useSearchParams();
   const [tab, setTab] = useState<Tab>(['upcoming', 'completed', 'cancelled'].includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'upcoming');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedRows);
 
   useEffect(() => {
     supabase
@@ -80,8 +83,10 @@ export default function MyBookings() {
       .order('date', { ascending: false })
       .order('slot_time', { ascending: false })
       .then(({ data }) => {
-        setRows((data ?? []) as unknown as Row[]);
+        const fresh = (data ?? []) as unknown as Row[];
+        setRows(fresh);
         setLoading(false);
+        screenCache.set('bookings', fresh);
       });
 
     // Best-effort fallback for the day-before follow-up reminder (schema.sql

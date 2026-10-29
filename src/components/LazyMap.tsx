@@ -1,9 +1,10 @@
 import { Suspense } from 'react';
 
 import { lazyPage } from '../lib/lazyPage';
+import { loadLeafletMap } from '../lib/sections';
 
 // The map library (Leaflet) is only downloaded when a map is actually shown.
-const LeafletMap = lazyPage(() => import('./LeafletMap'));
+const LeafletMap = lazyPage(loadLeafletMap);
 
 type Props = {
   lat: number;

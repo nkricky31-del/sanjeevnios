@@ -37,6 +37,7 @@ import SectionTitle from '../components/ui/SectionTitle';
 import { setActingMode } from '../lib/actingMode';
 import { useAuth } from '../lib/AuthContext';
 import { livePhoneDigits, normalizePhone } from '../lib/phone';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import type { FamilyMember, Gender } from '../lib/types';
 import { useUnreadNotifications } from '../lib/useUnreadNotifications';
@@ -55,12 +56,20 @@ const RELATION_LABEL: Record<string, string> = {
 
 type Panel = 'personal' | 'family' | 'medical' | 'privacy' | 'about' | null;
 
+interface ProfileCache {
+  members: FamilyMember[];
+  stats: { appointments: number; records: number; labReports: number; spent: number };
+  clinicId: string | null;
+}
+
 export default function Profile() {
   const { session, profile } = useAuth();
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
-  const [members, setMembers] = useState<FamilyMember[]>([]);
-  const [loadingMembers, setLoadingMembers] = useState(true);
+  // Shown at once from the last visit (lib/screenCache.ts), refreshed below.
+  const cached = screenCache.get<ProfileCache>('profile');
+  const [members, setMembers] = useState<FamilyMember[]>(cached?.members ?? []);
+  const [loadingMembers, setLoadingMembers] = useState(!cached?.members);
   const [showForm, setShowForm] = useState(false);
   const [viewingMrn, setViewingMrn] = useState<string | null>(null);
   const [conditionsFor, setConditionsFor] = useState<string | null>(null);
@@ -68,13 +77,13 @@ export default function Profile() {
   // schema.sql section 53. Mirrors conditionsFor's toggle pattern below.
   const [nameChangeFor, setNameChangeFor] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
-  const [stats, setStats] = useState({ appointments: 0, records: 0, labReports: 0, spent: 0 });
+  const [stats, setStats] = useState(cached?.stats ?? { appointments: 0, records: 0, labReports: 0, spent: 0 });
   // "Switch to Clinic console" only shows up for a phone that's actually the
   // owner or a registered staff phone of some clinic (migration 57's
   // my_clinic_id()) - checked once here rather than on every app load
   // (App.tsx doesn't need this at all, only this one button does), so a
   // plain patient never pays for a query whose answer is always "no".
-  const [clinicId, setClinicId] = useState<string | null>(null);
+  const [clinicId, setClinicId] = useState<string | null>(cached?.clinicId ?? null);
 
   // Section 44 - the fields collected at onboarding, editable here afterward.
   // Seeded from the 'self' family member once it loads (see the effect
@@ -92,18 +101,32 @@ export default function Profile() {
   const [detailsSaved, setDetailsSaved] = useState(false);
 
   const loadMembers = async () => {
-    setLoadingMembers(true);
-    const { data } = await supabase.from('family_members').select('*').order('created_at', { ascending: true });
-    setMembers(data ?? []);
+    const uid = session?.user.id;
+    if (!uid) return;
+    if (members.length === 0) setLoadingMembers(true);
+    // This account's own family only - someone who is also clinic staff can
+    // read patients they have treated, who don't belong in here.
+    const { data } = await supabase
+      .from('family_members')
+      .select('*')
+      .eq('account_id', uid)
+      .order('created_at', { ascending: true });
+    const fresh = (data ?? []) as FamilyMember[];
+    setMembers(fresh);
     setLoadingMembers(false);
+    screenCache.patch<ProfileCache>('profile', { members: fresh });
   };
 
   useEffect(() => {
     loadMembers();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user.id]);
 
   useEffect(() => {
-    supabase.rpc('my_clinic_id').then(({ data }) => setClinicId(data ?? null));
+    supabase.rpc('my_clinic_id').then(({ data }) => {
+      setClinicId(data ?? null);
+      screenCache.patch<ProfileCache>('profile', { clinicId: data ?? null });
+    });
   }, []);
 
   // The four counters across the top of the profile card, each a plain
@@ -120,12 +143,14 @@ export default function Profile() {
       const spent = ((payments ?? []) as { amount: number; status: string }[])
         .filter((p) => p.status === 'captured')
         .reduce((sum, p) => sum + Number(p.amount), 0);
-      setStats({
+      const fresh = {
         appointments: appointments ?? 0,
         records: records ?? 0,
         labReports: labReports ?? 0,
         spent,
-      });
+      };
+      setStats(fresh);
+      screenCache.patch<ProfileCache>('profile', { stats: fresh });
     })();
   }, []);
 

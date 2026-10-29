@@ -67,7 +67,8 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
   const [copied, setCopied] = useState(false);
 
   const loadStaff = useCallback(async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const [{ data }, { data: doctorData }] = await Promise.all([
       supabase
         .from('clinic_staff_phones')

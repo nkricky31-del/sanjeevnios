@@ -100,7 +100,8 @@ export default function AdminPayoutAccounts() {
   const [checkingId, setCheckingId] = useState<string | null>(null);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const { data } = await supabase
       .from('clinics')
       .select('id, name, contact_email, contact_phone, razorpay_fund_account_id, razorpay_account_status, razorpay_account_note')

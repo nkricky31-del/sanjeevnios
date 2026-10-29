@@ -42,6 +42,7 @@ import { getDoctorConsultationStats } from '../lib/consultation';
 import { currentUserId, useCoalescedRefresh, useVisibleInterval } from '../lib/livePolling';
 import { notifyPatient, reportingTimeReminderMessage, REPORTING_REMINDER_LEAD_MINUTES } from '../lib/notify';
 import { bookingReference, computeNowServing, countAhead } from '../lib/queue';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import { estimateSlotMinutes, formatTimeLabel } from '../lib/time';
 import {
@@ -144,15 +145,19 @@ const DEFAULT_CANCEL_WINDOW_HOURS = 2;
 export default function BookingStatus() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
-  const [booking, setBooking] = useState<BookingDetail | null>(null);
+  // Shown at once from the last visit to this appointment (lib/screenCache.ts),
+  // refreshed by the loads below.
+  const cacheKey = `booking:${appointmentId}`;
+  const cached = screenCache.get<{ booking?: BookingDetail | null; visit?: (Visit & { prescriptions: Prescription[] }) | null }>(cacheKey);
+  const [booking, setBooking] = useState<BookingDetail | null>(cached?.booking ?? null);
   const [queueRows, setQueueRows] = useState<QueueStatusRow[]>([]);
   const [slotMinutes, setSlotMinutes] = useState(15);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
-  const [visit, setVisit] = useState<(Visit & { prescriptions: Prescription[] }) | null>(null);
+  const [visit, setVisit] = useState<(Visit & { prescriptions: Prescription[] }) | null>(cached?.visit ?? null);
   // undefined = not checked yet, null = none booked, string = the linked
   // follow-up's own appointment id (see follow_up_of, schema.sql section 46).
   const [followUpBookingId, setFollowUpBookingId] = useState<string | null | undefined>(undefined);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cached?.booking);
   // schema.sql section 54 - once this doctor has any completed-visit
   // history, replaces the cruder slot-width guess below for "how long until
   // I'm seen" - null until then, so slotMinutes stays the fallback.
@@ -184,6 +189,7 @@ export default function BookingStatus() {
       .eq('id', appointmentId)
       .single();
     setBooking(data as BookingDetail | null);
+    screenCache.patch(`booking:${appointmentId}`, { booking: data as BookingDetail | null });
     setLoading(false);
   };
 
@@ -211,6 +217,7 @@ export default function BookingStatus() {
       | undefined;
     const v = raw ? { ...raw, notes: raw.notes_plain ?? null, diagnosis: raw.diagnosis_plain ?? null } : null;
     setVisit(v);
+    screenCache.patch(`booking:${appointmentId}`, { visit: v });
 
     if (v?.follow_up_due_date) {
       const { data: existing } = await supabase
@@ -582,7 +589,7 @@ export default function BookingStatus() {
 
   return (
     <div>
-      <ScreenHeader title="Appointment Details" back={-1} />
+      <ScreenHeader title="Appointment Details" back={-1} fallback="/bookings" />
       {scanning && (
         <QrScanner onScan={handleSelfScan} onClose={() => setScanning(false)} hint="Point the camera at the clinic's check-in QR at reception." />
       )}

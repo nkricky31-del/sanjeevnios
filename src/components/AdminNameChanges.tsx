@@ -39,7 +39,8 @@ export default function AdminNameChanges() {
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const select = '*, account:account_id(name, phone), member:member_id(name, mrn)';
     const [{ data: pendingData }, { data: recentData }] = await Promise.all([
       supabase

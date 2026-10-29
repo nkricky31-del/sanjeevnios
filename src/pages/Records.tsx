@@ -8,6 +8,8 @@ import Card from '../components/ui/Card';
 import IconTile, { type IconTone } from '../components/ui/IconTile';
 import SectionTitle from '../components/ui/SectionTitle';
 import { openAppointmentFile } from '../lib/storage';
+import { useAuth } from '../lib/AuthContext';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import { useRefreshOnReturn } from '../lib/useRefreshOnReturn';
 import type { AppointmentFile, FamilyMember, Prescription, Visit } from '../lib/types';
@@ -64,15 +66,22 @@ export default function Records() {
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [appointments, setAppointments] = useState<TimelineAppointment[]>([]);
-  const [encounters, setEncounters] = useState<EncounterRow[]>([]);
+  const { session } = useAuth();
+  // Shown at once from the last visit (lib/screenCache.ts), refreshed below.
+  const cached = screenCache.get<{ appointments: TimelineAppointment[]; encounters: EncounterRow[] }>('records');
+  const [appointments, setAppointments] = useState<TimelineAppointment[]>(cached?.appointments ?? []);
+  const [encounters, setEncounters] = useState<EncounterRow[]>(cached?.encounters ?? []);
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cached);
 
   const activeCategory = (searchParams.get('category') as CategoryKey | null) ?? null;
 
   const loadRecords = async () => {
-    const { data: memberData } = await supabase.from('family_members').select('*');
+    const uid = session?.user.id;
+    if (!uid) return;
+    // This account's own family only - someone who is also clinic staff can
+    // read patients they have treated, who don't belong in here.
+    const { data: memberData } = await supabase.from('family_members').select('*').eq('account_id', uid);
     const members = (memberData ?? []) as FamilyMember[];
     const memberIds = members.map((m) => m.id);
     const mrns = members.map((m) => m.mrn).filter(Boolean);
@@ -99,9 +108,12 @@ export default function Records() {
         : Promise.resolve({ data: [] }),
     ]);
 
-    setAppointments((apptData ?? []) as unknown as TimelineAppointment[]);
-    setEncounters((encounterData ?? []) as unknown as EncounterRow[]);
+    const appts = (apptData ?? []) as unknown as TimelineAppointment[];
+    const encs = (encounterData ?? []) as unknown as EncounterRow[];
+    setAppointments(appts);
+    setEncounters(encs);
     setLoading(false);
+    screenCache.set('records', { appointments: appts, encounters: encs });
   };
 
   useEffect(() => {

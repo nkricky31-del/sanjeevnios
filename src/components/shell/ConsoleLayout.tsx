@@ -1,4 +1,4 @@
-import { Bell, Menu } from 'lucide-react';
+import { Bell, Home, Menu } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState, type ReactNode } from 'react';
 
@@ -29,10 +29,9 @@ export default function ConsoleLayout<T extends string>({
   children: ReactNode;
 }) {
   const active = tabs.find((t) => t.value === value);
-  const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const navItems = tabs.map((t) => ({ key: t.value, label: t.label, icon: t.icon, onSelect: () => onChange(t.value), active: t.value === value }));
-  const goHome = () => { onChange(tabs[0].value); setTick((n) => n + 1); };
+  const goHome = () => onChange(tabs[0].value);
   return (
     <div className="min-h-screen bg-canvas lg:pl-64">
       <Sidebar tag={tag} onHome={goHome} items={navItems} />
@@ -60,6 +59,17 @@ export default function ConsoleLayout<T extends string>({
             </motion.div>
             <div className="flex shrink-0 items-center gap-2">
               {pill}
+              <motion.button
+                type="button"
+                onClick={goHome}
+                aria-label="Go to home"
+                title="Home"
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.92 }}
+                className="relative cursor-pointer rounded-full bg-white/15 p-2.5 text-white ring-1 ring-white/25 backdrop-blur outline-none transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white"
+              >
+                <Home size={20} aria-hidden />
+              </motion.button>
               {onBell && (
                 <motion.button
                   type="button"
@@ -90,15 +100,9 @@ export default function ConsoleLayout<T extends string>({
 
         <div className="px-4">
           {active && <p className="mt-5 text-[10.5px] font-medium uppercase tracking-[0.14em] text-slate-500 lg:mt-6">{active.label}</p>}
-          <motion.div
-            key={`${value}-${tick}`}
-            className="min-h-[60vh]"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          >
-            {children}
-          </motion.div>
+          {/* Not re-created on every tab switch: each tab stays alive once
+              opened (KeepTab), so going back to one is instant. */}
+          <div className="min-h-[60vh]">{children}</div>
         </div>
       </main>
     </div>

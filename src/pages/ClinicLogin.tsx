@@ -13,6 +13,7 @@ import { CLINIC_SIGNUP_INTENT_KEY } from '../lib/clinicSignupIntent';
 import { safeNext } from '../lib/loginRedirect';
 import { normalizePhone } from '../lib/phone';
 import { logAuthEvent } from '../lib/audit';
+import { loadClinicQueue, prefetch } from '../lib/sections';
 import { supabase } from '../lib/supabaseClient';
 import { CAPTCHA_ENABLED } from '../lib/captcha';
 import TurnstileWidget from '../components/TurnstileWidget';
@@ -34,6 +35,10 @@ import TurnstileWidget from '../components/TurnstileWidget';
 // RLS still runs off auth.uid() from the OTP-verified session, same as
 // before this existed.
 export default function ClinicLogin() {
+  // While they type, fetch the part of the app they're signing in to.
+  useEffect(() => {
+    prefetch([loadClinicQueue]);
+  }, []);
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [stage, setStage] = useState<'details' | 'otp'>('details');
   // Only the NUMBER part of the Clinic ID - the fixed letters part

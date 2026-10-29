@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Loading from './ui/Loading';
 
 import { bookableRange, getBookingPolicy, getDayAvailability, DEFAULT_POLICY, type BookingPolicy, type DayAvailability } from '../lib/bookingPolicy';
 import { addDaysISO, todayISO, WEEKDAY_LABELS } from '../lib/date';
@@ -123,7 +124,7 @@ export default function SlotPicker({ doctorId, clinicId, daysToShow = DEFAULT_DA
   // left never appears here, regardless of how many patients it can hold.
   const openSlots = allSlots.filter((s) => !takenSlots.has(s) && !withinCutoff(s));
 
-  if (loading) return <p className="mt-2 text-sm text-slate-400">Loading availability...</p>;
+  if (loading) return <p className="mt-2 text-sm text-slate-400"><Loading size="sm" label="Loading availability" /></p>;
 
   return (
     <div>

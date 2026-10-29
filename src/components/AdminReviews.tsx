@@ -41,7 +41,8 @@ export default function AdminReviews() {
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const select = '*, doctors(name), clinics(name), reviewer:profiles!reviews_account_id_fkey(name)';
     const [{ data: visibleData }, { data: hiddenData }] = await Promise.all([
       supabase.from('reviews').select(select).eq('status', 'visible').order('created_at', { ascending: false }).limit(FETCH_LIMIT),

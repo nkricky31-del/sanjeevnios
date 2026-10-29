@@ -1,4 +1,5 @@
 import { motion } from 'motion/react';
+import { useId } from 'react';
 
 interface Props {
   size?: number;
@@ -20,7 +21,11 @@ const CROSS = 'M28.4 17.6h7.2v7.2h7.2v7.2h-7.2v7.2h-7.2v-7.2h-7.2v-7.2h7.2v-7.2Z
 // hover it jumps. Inline SVG so it scales cleanly and picks up the accent.
 export default function BrandMark({ size = 64, className = '', tone = 'brand', animated = true }: Props) {
   const light = tone === 'light';
-  const heartFill = light ? '#ffffff' : 'url(#sanjeevni-heart)';
+  // A gradient id of its own: with one shared id, a copy of the mark inside
+  // something hidden (the desktop sidebar on a phone) left every other copy
+  // without its fill - browsers don't paint gradients defined in hidden parts.
+  const gradientId = `sanjeevni-heart-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const heartFill = light ? '#ffffff' : `url(#${gradientId})`;
   const crossFill = light ? 'var(--accent, #3b5bdb)' : '#ffffff';
 
   return (
@@ -51,7 +56,7 @@ export default function BrandMark({ size = 64, className = '', tone = 'brand', a
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut', times: [0, 0.1, 0.22, 0.32, 0.46, 1] }}
       >
         <defs>
-          <linearGradient id="sanjeevni-heart" x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+          <linearGradient id={gradientId} x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse">
             <stop style={{ stopColor: 'var(--accent, #3b5bdb)' }} />
             <stop offset="1" style={{ stopColor: 'color-mix(in srgb, var(--accent, #3b5bdb) 78%, #111827)' }} />
           </linearGradient>

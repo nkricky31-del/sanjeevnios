@@ -7,6 +7,9 @@ import {
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { useConsoleTab } from '../lib/useConsoleTab';
+import KeepTab from '../components/shell/KeepTab';
+
 import AdminAuditLog from '../components/AdminAuditLog';
 import AdminBilling from '../components/AdminBilling';
 import AdminConditions from '../components/AdminConditions';
@@ -87,27 +90,18 @@ function blockersByOwner(
   return result;
 }
 
+const ADMIN_VIEWS = [
+  'dashboard', 'verification', 'subscriptions', 'payments', 'settlements', 'payoutAccounts', 'coupons',
+  'billing', 'fraud', 'audit', 'patients', 'conditions', 'requirements', 'names', 'reviews',
+] as const;
+type AdminView = (typeof ADMIN_VIEWS)[number];
+
 export default function AdminConsole() {
   const { session } = useAuth();
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
-  const [view, setView] = useState<
-    | 'dashboard'
-    | 'verification'
-    | 'subscriptions'
-    | 'payments'
-    | 'settlements'
-    | 'payoutAccounts'
-    | 'coupons'
-    | 'billing'
-    | 'fraud'
-    | 'audit'
-    | 'patients'
-    | 'conditions'
-    | 'requirements'
-    | 'names'
-    | 'reviews'
-  >('dashboard');
+  // The open tab is kept in the address (lib/useConsoleTab.ts).
+  const [view, setView] = useConsoleTab<AdminView>(ADMIN_VIEWS, 'dashboard');
   const [drill, setDrill] = useState<DrillView | null>(null);
   const [clinics, setClinics] = useState<PendingClinic[]>([]);
   const [doctors, setDoctors] = useState<PendingDoctor[]>([]);
@@ -340,93 +334,93 @@ export default function AdminConsole() {
     >
       <div className="pb-6">
 
-        {view === 'dashboard' && (
+        <KeepTab active={view === 'dashboard'}>
           <div className="mt-4">
             <AdminDashboard onNavigate={(t) => setView(t)} />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'subscriptions' && (
+        <KeepTab active={view === 'subscriptions'}>
           <div className="mt-4">
             <AdminSubscriptions />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'payments' && (
+        <KeepTab active={view === 'payments'}>
           <div className="mt-4">
             <AdminPayments />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'settlements' && (
+        <KeepTab active={view === 'settlements'}>
           <div className="mt-4">
             <AdminSettlements />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'payoutAccounts' && (
+        <KeepTab active={view === 'payoutAccounts'}>
           <div className="mt-4">
             <AdminPayoutAccounts />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'coupons' && (
+        <KeepTab active={view === 'coupons'}>
           <div className="mt-4">
             <AdminCoupons />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'billing' && (
+        <KeepTab active={view === 'billing'}>
           <div className="mt-4">
             <AdminBilling />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'fraud' && (
+        <KeepTab active={view === 'fraud'}>
           <div className="mt-4">
             <AdminFraud />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'audit' && (
+        <KeepTab active={view === 'audit'}>
           <div className="mt-4">
             <AdminAuditLog />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'patients' && (
+        <KeepTab active={view === 'patients'}>
           <div className="mt-4">
             <AdminBreakGlass />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'conditions' && (
+        <KeepTab active={view === 'conditions'}>
           <div className="mt-4">
             <AdminConditions />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'requirements' && (
+        <KeepTab active={view === 'requirements'}>
           <div className="mt-4">
             <AdminVerificationRequirements />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'names' && (
+        <KeepTab active={view === 'names'}>
           <div className="mt-4">
             <AdminNameChanges />
           </div>
-        )}
+        </KeepTab>
 
-        {view === 'reviews' && (
+        <KeepTab active={view === 'reviews'}>
           <div className="mt-4">
             <AdminReviews />
           </div>
-        )}
+        </KeepTab>
 
         {view === 'verification' && drill && <AdminDrill view={drill} onChange={setDrill} onClose={() => setDrill(null)} />}
 
-        {view === 'verification' && !drill && (
+        <KeepTab active={view === 'verification'}>{!drill && (
           <>
             {actionError && <p className="mb-3 mt-4 text-sm text-red-600">{actionError}</p>}
 
@@ -666,7 +660,7 @@ export default function AdminConsole() {
               ))}
             </div>
           </>
-        )}
+        )}</KeepTab>
 
         <Button variant="ghost" onClick={signOut} className="mt-6 lg:hidden">
           Sign out

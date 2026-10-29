@@ -25,6 +25,7 @@ import IconTile, { type IconTone } from '../components/ui/IconTile';
 import SectionTitle from '../components/ui/SectionTitle';
 import StatusPill from '../components/ui/StatusPill';
 import { todayISO } from '../lib/date';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
 import type { AppointmentStatus, FamilyMember } from '../lib/types';
@@ -77,46 +78,63 @@ const STATUS_LABEL: Partial<Record<AppointmentStatus, string>> = {
 
 const AVATAR_TONES: IconTone[] = ['brand', 'emerald', 'amber', 'pink'];
 
+interface HomeCache {
+  members: FamilyMember[];
+  next: NextAppointment | null;
+  encounters: RecentEncounter[];
+  acts: { date: string; status: string }[];
+}
+
 export default function Home() {
   const actionsRef = useStaggerIn();
-  const { profile } = useAuth();
+  const { profile, session } = useAuth();
   const navigate = useNavigate();
   const hasUnread = useUnreadNotifications();
-  const [members, setMembers] = useState<FamilyMember[]>([]);
-  const [next, setNext] = useState<NextAppointment | null>(null);
-  const [encounters, setEncounters] = useState<RecentEncounter[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [acts, setActs] = useState<{ date: string; status: string }[]>([]);
-  const [actsLoaded, setActsLoaded] = useState(false);
+  // Shown at once from the last visit (lib/screenCache.ts), refreshed below.
+  const cached = screenCache.get<HomeCache>('home');
+  const [members, setMembers] = useState<FamilyMember[]>(cached?.members ?? []);
+  const [next, setNext] = useState<NextAppointment | null>(cached?.next ?? null);
+  const [encounters, setEncounters] = useState<RecentEncounter[]>(cached?.encounters ?? []);
+  const [loading, setLoading] = useState(!cached?.members);
+  const [acts, setActs] = useState<{ date: string; status: string }[]>(cached?.acts ?? []);
+  const [actsLoaded, setActsLoaded] = useState(!!cached?.acts);
 
   useEffect(() => {
-    supabase.from('appointments').select('date, status').limit(1000).then(({ data }) => { setActs((data ?? []) as { date: string; status: string }[]); setActsLoaded(true); });
+    supabase.from('appointments').select('date, status').limit(1000).then(({ data }) => {
+      const rows = (data ?? []) as { date: string; status: string }[];
+      setActs(rows);
+      setActsLoaded(true);
+      screenCache.patch<HomeCache>('home', { acts: rows });
+    });
   }, []);
 
   useEffect(() => {
     (async () => {
-      const { data: memberData } = await supabase
-        .from('family_members')
-        .select('*')
-        .order('created_at', { ascending: true });
+      // Family and the next appointment don't depend on each other - ask
+      // for both at once.
+      const [{ data: memberData }, { data: apptData }] = await Promise.all([
+        // This account's own family only (not patients a clinic-staff login has treated).
+        supabase.from('family_members').select('*').eq('account_id', session?.user.id ?? '').order('created_at', { ascending: true }),
+        // Soonest booking that hasn't happened yet, ACROSS EVERY FAMILY MEMBER
+        // on this account - purely informational (schema.sql section 47:
+        // booking is per member, so this is never the only booking that can
+        // exist, just the one worth surfacing first). family_members(name) so
+        // the card can say whose appointment this actually is.
+        supabase
+          .from('appointments')
+          .select('id, date, slot_time, status, doctors(name, specialty), clinics(name, address), family_members(name)')
+          .gte('date', todayISO())
+          .in('status', ['booked', 'accepted', 'checked_in', 'called', 'in_consultation'])
+          .order('date', { ascending: true })
+          .order('slot_time', { ascending: true })
+          .limit(1),
+      ]);
       const memberRows = (memberData ?? []) as FamilyMember[];
+      const nextAppt = ((apptData ?? []) as unknown as NextAppointment[])[0] ?? null;
       setMembers(memberRows);
+      setNext(nextAppt);
 
-      // Soonest booking that hasn't happened yet, ACROSS EVERY FAMILY MEMBER
-      // on this account - purely informational (schema.sql section 47:
-      // booking is per member, so this is never the only booking that can
-      // exist, just the one worth surfacing first). family_members(name) so
-      // the card can say whose appointment this actually is.
-      const { data: apptData } = await supabase
-        .from('appointments')
-        .select('id, date, slot_time, status, doctors(name, specialty), clinics(name, address), family_members(name)')
-        .gte('date', todayISO())
-        .in('status', ['booked', 'accepted', 'checked_in', 'called', 'in_consultation'])
-        .order('date', { ascending: true })
-        .order('slot_time', { ascending: true })
-        .limit(1);
-      setNext(((apptData ?? []) as unknown as NextAppointment[])[0] ?? null);
-
+      let recent: RecentEncounter[] = [];
       const mrns = memberRows.map((m) => m.mrn).filter(Boolean);
       if (mrns.length > 0) {
         const { data: encounterData } = await supabase
@@ -125,12 +143,13 @@ export default function Home() {
           .in('mrn', mrns)
           .order('visit_datetime', { ascending: false })
           .limit(3);
-        setEncounters((encounterData ?? []) as unknown as RecentEncounter[]);
+        recent = (encounterData ?? []) as unknown as RecentEncounter[];
       }
-
+      setEncounters(recent);
       setLoading(false);
+      screenCache.patch<HomeCache>('home', { members: memberRows, next: nextAppt, encounters: recent });
     })();
-  }, []);
+  }, [session?.user.id]);
 
   const self = members.find((m) => m.relation === 'self') ?? members[0];
   const firstName = (profile?.name ?? self?.name ?? '').split(' ')[0];

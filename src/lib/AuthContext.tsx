@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState, type PropsWithC
 
 import { clearActingMode, getStoredActingMode } from './actingMode';
 import { idleRoleFor, isIdleExpired, markActive, signOutForInactivity } from './idleTimeout';
+import { screenCache } from './screenCache';
 import { supabase } from './supabaseClient';
 import type { Profile } from './types';
 
@@ -27,6 +28,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const loadProfile = async (userId: string): Promise<Profile | null> => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    // A different person on this device: drop whatever screens the last one saw.
+    if (profileFor.current && profileFor.current !== userId) screenCache.clear();
     setProfile(data ?? null);
     profileFor.current = data ? userId : null;
 
@@ -81,6 +84,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
       } else {
         profileFor.current = null;
+        screenCache.clear();
         setProfile(null);
         // Otherwise a stale 'clinic' (or 'patient') choice from whoever was
         // just signed in would silently misroute the NEXT sign-in on this

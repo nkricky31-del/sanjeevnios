@@ -36,7 +36,8 @@ export default function RxPendingWorklist({ doctorId, onOpen }: Props) {
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     // The server already returns only visits still missing a prescription,
     // for the caller's own clinic.
     const { data } = await supabase.rpc('clinic_rx_worklist', { p_since: '2000-01-01' });

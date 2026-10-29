@@ -1,5 +1,5 @@
 import { ArrowLeft, Lock } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
@@ -10,6 +10,7 @@ import IdleSignedOutNotice from '../components/auth/IdleSignedOutNotice';
 import { startActiveSession } from '../lib/idleTimeout';
 import { safeNext } from '../lib/loginRedirect';
 import { logAuthEvent } from '../lib/audit';
+import { loadAdminConsole, prefetch } from '../lib/sections';
 import { supabase } from '../lib/supabaseClient';
 import { CAPTCHA_ENABLED } from '../lib/captcha';
 import TurnstileWidget from '../components/TurnstileWidget';
@@ -26,6 +27,10 @@ import TurnstileWidget from '../components/TurnstileWidget';
 const MFA_ON = import.meta.env.VITE_REQUIRE_ADMIN_MFA === 'true';
 
 export default function AdminLogin() {
+  // While they type, fetch the part of the app they're signing in to.
+  useEffect(() => {
+    prefetch([loadAdminConsole]);
+  }, []);
   const [stage, setStage] = useState<'phone' | 'otp'>('phone');
   const [digits, setDigits] = useState('');
   const [otp, setOtp] = useState('');

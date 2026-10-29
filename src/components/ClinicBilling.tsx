@@ -28,7 +28,8 @@ export default function ClinicBilling({ clinicId }: Props) {
   const [note, setNote] = useState<string | null>(null);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const [{ data: planData }, { data: subData }, { data: invoiceData }, { data: usageRows }] = await Promise.all([
       supabase.from('plans').select('*').eq('active', true).order('monthly_price', { ascending: true }),
       supabase.from('subscriptions').select('*').eq('clinic_id', clinicId).maybeSingle(),

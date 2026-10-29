@@ -102,7 +102,8 @@ export default function AdminCoupons() {
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const [{ data: couponData }, { data: redemptionData }, { data: clinicData }] = await Promise.all([
       supabase.from('coupons').select('*').order('created_at', { ascending: false }),
       supabase

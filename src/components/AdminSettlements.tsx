@@ -123,7 +123,8 @@ export default function AdminSettlements() {
   const [actionNote, setActionNote] = useState<string | null>(null);
 
   const load = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     const statuses = ['eligible', 'on_hold', 'released', 'settled'] as const;
     const [lists, sums] = await Promise.all([
       Promise.all(

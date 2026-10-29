@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Loading from './ui/Loading';
 
 import { AGREEMENT_TEXT, AGREEMENT_VERSION, getClientIp } from '../lib/consent';
 import { openVerificationDoc, VERIFICATION_DOCS_BUCKET } from '../lib/storage';
@@ -104,7 +105,7 @@ export default function AgreementConsentForm({ doctorId, onSigned }: Props) {
     onSigned?.();
   };
 
-  if (consent === undefined) return <p className="text-sm text-slate-400">Loading agreement...</p>;
+  if (consent === undefined) return <p className="text-sm text-slate-400"><Loading /></p>;
 
   const upToDate = consent?.agreement_version === AGREEMENT_VERSION;
 

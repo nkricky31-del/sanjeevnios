@@ -86,7 +86,8 @@ export default function ClinicBills({ clinicId }: { clinicId: string }) {
 
   const load = useCallback(async () => {
     const mine = ++seq.current;
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     setError(null);
     const [list, sums, missing] = await Promise.all([
       page(0, PAGE - 1),

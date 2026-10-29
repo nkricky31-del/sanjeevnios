@@ -1,4 +1,5 @@
 import { CheckCircle2, Phone, X, XCircle } from 'lucide-react';
+import Loading from './ui/Loading';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -242,7 +243,7 @@ export default function PatientBoardDetail({ row, clinicId, onClose }: Props) {
 
           <section className="mt-5">
             <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">Earlier visits at this clinic</h3>
-            {earlier === null && <p className="mt-2 text-sm text-slate-400">Loading…</p>}
+            {earlier === null && <p className="mt-2 text-sm text-slate-400"><Loading size="sm" /></p>}
             {earlier !== null && earlier.length === 0 && <p className="mt-2 text-sm text-slate-500">First visit here.</p>}
             {earlier !== null && earlier.length > 0 && (
               <ul className="mt-1 divide-y divide-slate-100">

@@ -5,6 +5,7 @@ import { addDaysISO, todayISO } from '../lib/date';
 import { withPatientContacts } from '../lib/patientContact';
 import { BOARD_COLUMNS, BOARD_STATUS, isCancelled, isCheckedIn, timeOf, type BoardRow } from '../lib/patientBoard';
 import { bookingReference } from '../lib/queue';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
 import PatientBoardDetail from './PatientBoardDetail';
@@ -25,8 +26,10 @@ interface Props {
 // details in a slide-over (PatientBoardDetail).
 export default function PatientBoard({ clinicId, doctors }: Props) {
   const [date, setDate] = useState(todayISO);
-  const [rows, setRows] = useState<BoardRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Shown at once from the last look at today's board (lib/screenCache.ts).
+  const cachedRows = screenCache.get<BoardRow[]>(`board:${clinicId}:${todayISO()}`);
+  const [rows, setRows] = useState<BoardRow[]>(cachedRows ?? []);
+  const [loading, setLoading] = useState(!cachedRows);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -52,8 +55,10 @@ export default function PatientBoard({ clinicId, doctors }: Props) {
       setLoading(false);
       return;
     }
-    setRows(await withPatientContacts((data ?? []) as unknown as Omit<BoardRow, 'family_members'>[]));
+    const fresh = await withPatientContacts((data ?? []) as unknown as Omit<BoardRow, 'family_members'>[]);
+    setRows(fresh);
     setLoading(false);
+    screenCache.set(`board:${clinicId}:${date}`, fresh);
   }, [clinicId, date]);
 
   useEffect(() => {

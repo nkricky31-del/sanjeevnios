@@ -56,7 +56,8 @@ export default function ClinicDoctors({ clinic, onClinicSaved }: Props) {
   const [togglingActiveFor, setTogglingActiveFor] = useState<string | null>(null);
 
   const loadDoctors = async () => {
-    setLoading(true);
+    // No loading flag on a refresh: what's shown stays up until the new data
+    // arrives, so reopening this tab (KeepTab) or pressing Refresh never blanks it.
     // The clinic owner sees ALL of its own doctors regardless of status
     // (RLS: is_own_clinic) - only the public/patient branch of doctors_select
     // is restricted to status = 'approved'.

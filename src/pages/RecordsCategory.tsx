@@ -10,6 +10,8 @@ import HeroBand from '../components/ui/HeroBand';
 import Loading from '../components/ui/Loading';
 import { downloadPrescriptionText } from '../lib/encounterExport';
 import { downloadAppointmentFile, openAppointmentFile } from '../lib/storage';
+import { useAuth } from '../lib/AuthContext';
+import { screenCache } from '../lib/screenCache';
 import { supabase } from '../lib/supabaseClient';
 import { useRefreshOnReturn } from '../lib/useRefreshOnReturn';
 import type { AppointmentFile, FamilyMember, FileCategory, Prescription } from '../lib/types';
@@ -60,10 +62,15 @@ export default function RecordsCategory() {
   const key = category as CategoryKey;
   const valid = KEYS.includes(key);
 
-  const [appts, setAppts] = useState<Appt[]>([]);
-  const [encs, setEncs] = useState<Enc[]>([]);
-  const [members, setMembers] = useState<FamilyMember[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { session } = useAuth();
+  const uid = session?.user.id;
+  // Shown at once from the last visit (lib/screenCache.ts), refreshed below.
+  // The same data serves every category.
+  const cached = screenCache.get<{ appts: Appt[]; encs: Enc[]; members: FamilyMember[] }>('records-category');
+  const [appts, setAppts] = useState<Appt[]>(cached?.appts ?? []);
+  const [encs, setEncs] = useState<Enc[]>(cached?.encs ?? []);
+  const [members, setMembers] = useState<FamilyMember[]>(cached?.members ?? []);
+  const [loading, setLoading] = useState(!cached);
   const [showUpload, setShowUpload] = useState(false);
   const [uploadFor, setUploadFor] = useState('');
   const [open, setOpen] = useState<string | null>(null);
@@ -72,7 +79,10 @@ export default function RecordsCategory() {
   const [printing, setPrinting] = useState<{ p: Prescription; a: Appt; diagnosis: string | null; followUp: string | null } | null>(null);
 
   const load = useCallback(async () => {
-    const { data: m } = await supabase.from('family_members').select('*');
+    if (!uid) return;
+    // This account's own family only - someone who is also clinic staff can
+    // read patients they have treated, who don't belong in here.
+    const { data: m } = await supabase.from('family_members').select('*').eq('account_id', uid);
     const mem = (m ?? []) as FamilyMember[];
     setMembers(mem);
     const ids = mem.map((x) => x.id);
@@ -99,11 +109,13 @@ export default function RecordsCategory() {
         : Promise.resolve({ data: [] }),
     ]);
     const list = (a.data ?? []) as unknown as Appt[];
+    const encList = (e.data ?? []) as unknown as Enc[];
     setAppts(list);
-    setEncs((e.data ?? []) as unknown as Enc[]);
+    setEncs(encList);
     setUploadFor((cur) => cur || list[0]?.id || '');
     setLoading(false);
-  }, []);
+    screenCache.set('records-category', { appts: list, encs: encList, members: mem });
+  }, [uid]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

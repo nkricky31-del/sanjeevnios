@@ -438,3 +438,8 @@ body {
     margin: 14mm;
   }
 }
+
+/* The loading mark (components/ui/Loading.tsx) waits a moment before it fades
+   in, so screens that load quickly never flash it. */
+@keyframes sn-loading-in { from { opacity: 0; } to { opacity: 1; } }
+.sn-loading { animation: sn-loading-in 0.25s ease 0.3s both; }
