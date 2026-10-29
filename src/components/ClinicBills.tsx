@@ -145,7 +145,7 @@ export default function ClinicBills({ clinicId }: { clinicId: string }) {
     try {
       const all = await fetchAllBills((start, end) => page(start, end));
       if (all.length === 0) throw new Error('There are no bills in these dates.');
-      if (kind === 'csv') downloadBillsCsv(all, `${fileBase}.csv`);
+      if (kind === 'csv') await downloadBillsCsv(all, `${fileBase}.csv`);
       else
         await downloadBillListPdf({
           title: 'Bills register',

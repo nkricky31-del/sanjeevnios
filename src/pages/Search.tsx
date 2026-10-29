@@ -8,6 +8,7 @@ import RatingBadge from '../components/RatingBadge';
 import ScreenHeader from '../components/ui/ScreenHeader';
 import VerifiedBadge from '../components/VerifiedBadge';
 import { formatDistanceKm, haversineKm } from '../lib/distance';
+import { canGetPosition, getCurrentPosition, isNativeApp } from '../lib/native';
 import { supabase } from '../lib/supabaseClient';
 import type { DoctorSearchResult } from '../lib/types';
 
@@ -58,18 +59,22 @@ export default function Search() {
 
   const findNearby = () => {
     setLocationError(null);
-    if (!navigator.geolocation) {
+    if (!canGetPosition()) {
       setLocationError('Your browser does not support location.');
       return;
     }
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
+    getCurrentPosition(
       (pos) => {
         setMyLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         setLocating(false);
       },
       () => {
-        setLocationError('Could not get your location - check your browser permission.');
+        setLocationError(
+          isNativeApp
+            ? "Could not get your location - allow location for SanjeevniOS in your phone's settings."
+            : 'Could not get your location - check your browser permission.',
+        );
         setLocating(false);
       },
       { enableHighAccuracy: true, timeout: 10000 }

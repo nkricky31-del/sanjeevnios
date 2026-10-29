@@ -27,7 +27,7 @@ export default function MarketingNav() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-hairline bg-ground/70 backdrop-blur-[14px]">
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-hairline bg-ground/70 pt-[env(safe-area-inset-top)] backdrop-blur-[14px]">
       <div className="mx-auto flex h-[58px] max-w-6xl items-center justify-between px-5">
         <Link
           to="/"

@@ -106,7 +106,7 @@ export default function QrScanner({ onScan, onClose, hint }: Props) {
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="flex items-center justify-between px-4 py-4 text-white">
+      <div className="flex items-center justify-between px-4 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] text-white">
         <p className="text-base font-bold">Scan patient QR</p>
         <button onClick={onClose} aria-label="Close scanner" className="rounded-full p-2 hover:bg-white/10">
           <X size={22} />

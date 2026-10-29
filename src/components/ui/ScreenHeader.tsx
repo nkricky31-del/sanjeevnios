@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { canGoBack } from '../../lib/history';
+import { useHeaderStatusBar, usePinnedHeader } from '../../lib/native';
 
 interface Props {
   title: string;
@@ -27,9 +28,12 @@ const BUTTON =
 
 // The detail-screen header from the mockups: back arrow left, centred title,
 // actions and a home button right. Distinct from AppHeader, which is the
-// greeting-style header used on the tab roots.
+// greeting-style header used on the tab roots. In the phone apps it runs up
+// behind the status bar (the env() inset; 0 on the website).
 export default function ScreenHeader({ title, back, fallback = '/', onBack, action, wide, home = true }: Props) {
   const navigate = useNavigate();
+  useHeaderStatusBar();
+  usePinnedHeader();
   const showBack = back !== undefined || !!onBack;
 
   const handleBack = () => {
@@ -42,7 +46,7 @@ export default function ScreenHeader({ title, back, fallback = '/', onBack, acti
   };
 
   return (
-    <div className="sticky top-0 z-10 text-white shadow-lg shadow-slate-900/10" style={{ background: 'var(--band-bg)' }}>
+    <div className="sticky top-0 z-10 pt-[env(safe-area-inset-top)] text-white lg:top-[env(safe-area-inset-top)] lg:pt-0 shadow-lg shadow-slate-900/10" style={{ background: 'var(--band-bg)' }}>
       <div className={`mx-auto flex h-14 items-center gap-2 px-4 ${wide ? '' : 'max-w-3xl'}`}>
         <div className="flex w-[4.75rem] shrink-0 justify-start">
           {showBack && (

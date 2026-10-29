@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import QrCode from '../components/ui/QrCode';
 import Segmented from '../components/ui/Segmented';
 import { useAuth } from '../lib/AuthContext';
+import { printPage } from '../lib/native';
 import { issueClinicCheckinCode, issueClinicStaticCode, rotateClinicStaticCode } from '../lib/checkIn';
 import { supabase } from '../lib/supabaseClient';
 
@@ -225,7 +226,7 @@ export default function ClinicPoster() {
 
             {mode === 'print' && code && (
               <div className="mt-6 flex w-full max-w-md flex-col items-center gap-3 print:hidden">
-                <Button onClick={() => window.print()}>
+                <Button onClick={() => void printPage('Clinic QR')}>
                   <Printer size={16} /> Print QR
                 </Button>
                 {replaced && (

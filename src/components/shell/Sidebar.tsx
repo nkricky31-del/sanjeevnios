@@ -101,7 +101,7 @@ export default function Sidebar({ tag, items, onHome, mobile = false }: { tag: s
         transition={{ duration: 15, repeat: Infinity, ease: 'easeInOut' }}
       />
 
-      <div className="relative px-6 pb-2 pt-8">
+      <div className="relative px-6 pb-2 pt-[calc(2rem+env(safe-area-inset-top))]">
         <Link to="/" onClick={onHome ? (e) => { e.preventDefault(); onHome(); navigate('/'); window.scrollTo({ top: 0, behavior: 'smooth' }); } : undefined} className="flex items-center gap-2.5 font-display text-lg font-bold tracking-[-0.02em] text-white outline-none focus-visible:underline">
           <BrandMark size={32} tone="light" />
           <Wordmark dotClassName="text-[var(--sidebar-light)]" />
@@ -137,7 +137,7 @@ export default function Sidebar({ tag, items, onHome, mobile = false }: { tag: s
         ))}
       </motion.nav>
 
-      <div className="relative flex items-center gap-3 border-t border-white/10 px-6 py-4">
+      <div className="relative flex items-center gap-3 border-t border-white/10 px-6 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <span
           aria-hidden
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 font-display text-sm font-bold text-white ring-1 ring-white/25"

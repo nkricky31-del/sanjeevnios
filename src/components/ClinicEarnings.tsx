@@ -4,6 +4,7 @@ import Loading from './ui/Loading';
 import { Clock3, Download, IndianRupee, Printer, Wallet } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
+import { printPage, saveFile } from '../lib/native';
 import { bookingReference } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import type { Clinic, SettlementStatus } from '../lib/types';
@@ -165,23 +166,14 @@ export default function ClinicEarnings({ clinic }: Props) {
     const csv = [headers.join(','), ...data.map((row) => headers.map((h) => escape(row[h as keyof typeof row])).join(','))].join(
       '\n'
     );
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
     const range = dateFrom || dateTo ? `_${dateFrom || 'start'}_to_${dateTo || 'now'}` : '';
-    a.href = url;
-    a.download = `${clinic.name.replace(/\s+/g, '-')}-statement${range}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    await saveFile(csv, `${clinic.name.replace(/\s+/g, '-')}-statement${range}.csv`, 'text/csv;charset=utf-8');
   };
 
-  // No PDF library in this project yet - the browser's own "Print -> Save as
-  // PDF" is a zero-dependency way to get the same result, and print:hidden
-  // below keeps the filter/action controls out of it so what prints is just
-  // the statement itself.
-  const printStatement = () => window.print();
+  // The browser's own "Print -> Save as PDF" (the phone's print sheet in the
+  // app); print:hidden below keeps the filter/action controls out of it so
+  // what prints is just the statement itself.
+  const printStatement = () => void printPage('Statement');
 
   const table = (list: EarningsRow[], emptyLabel: string, showPayout: boolean) => (
     <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-100">

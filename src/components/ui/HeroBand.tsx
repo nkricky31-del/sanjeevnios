@@ -1,6 +1,8 @@
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 
+import { useHeaderStatusBar } from '../../lib/native';
+
 // Deterministic "random" so particles sit in the same places on every render.
 const PARTICLES = Array.from({ length: 16 }, (_, i) => ({
   left: (i * 53 + 7) % 100,
@@ -14,11 +16,14 @@ const PARTICLES = Array.from({ length: 16 }, (_, i) => ({
 // takes the role's colour (indigo / emerald / slate) and carries the same
 // moving ingredients as the sign-in panel: drifting colour, sonar waves, rising
 // particles. Edge-to-edge with a rounded foot on a phone, a rounded card on a
-// laptop. All motion transforms, so reduced-motion holds it still.
+// laptop. All motion transforms, so reduced-motion holds it still. In the
+// phone apps it runs up behind the status bar (the env() inset; 0 on the
+// website), which then draws its text in white.
 export default function HeroBand({ children, className = '' }: { children: ReactNode; className?: string }) {
+  useHeaderStatusBar();
   return (
     <div
-      className={`relative isolate mb-4 overflow-hidden rounded-b-[2rem] px-4 pb-7 pt-7 text-white sm:px-6 lg:mx-4 lg:mt-4 lg:rounded-3xl lg:px-8 lg:pb-9 lg:pt-9 ${className}`}
+      className={`relative isolate mb-4 overflow-hidden rounded-b-[2rem] px-4 pb-7 pt-[calc(1.75rem+env(safe-area-inset-top))] text-white sm:px-6 lg:mx-4 lg:mt-[calc(1rem+env(safe-area-inset-top))] lg:rounded-3xl lg:px-8 lg:pb-9 lg:pt-9 ${className}`}
       style={{ background: 'var(--band-bg)' }}
     >
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">

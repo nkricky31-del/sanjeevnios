@@ -109,7 +109,7 @@ export default function IdleGuard({ role }: { role: IdleRole }) {
   const ss = String(secondsLeft % 60).padStart(2, '0');
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[110] flex justify-center px-4">
+    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[110] flex justify-center px-4">
       <div
         role="alertdialog"
         aria-labelledby="idle-title"

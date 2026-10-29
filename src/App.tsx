@@ -5,6 +5,7 @@ import IdleGuard from './components/IdleGuard';
 import Button from './components/ui/Button';
 import { InstallBanner, OfflineBanner } from './components/InstallBanner';
 import SplashLoader from './components/ui/SplashLoader';
+import StatusBarBackdrop from './components/StatusBarBackdrop';
 import { getStoredActingMode } from './lib/actingMode';
 import { isStandalone } from './lib/pwa';
 import { usePressFx } from './lib/pressFx';
@@ -32,6 +33,8 @@ const TokenBoard = lazyPage(loadTokenBoard);
 const AdminConsole = lazyPage(loadAdminConsole);
 const EncounterDetail = lazyPage(loadEncounterDetail);
 const NotificationsList = lazyPage(loadNotificationsList);
+const DeleteAccount = lazyPage(() => import('./pages/DeleteAccount'));
+const DeleteAccountInfo = lazyPage(() => import('./pages/DeleteAccountInfo'));
 import AdminMfaGate from './components/AdminMfaGate';
 import PatientShell from './components/shell/PatientShell';
 
@@ -87,6 +90,9 @@ function AppContent() {
     // The installed app opens straight to sign-in; the marketing page is for browsers.
     if (location.pathname === '/' && isStandalone()) return <Navigate to="/login" replace />;
     if (PUBLIC_PATHS.includes(location.pathname)) return <MarketingSite />;
+    // How to delete an account - the page Google Play links to; signing in
+    // from it comes straight back to the Delete account screen.
+    if (location.pathname === '/delete-account') return <DeleteAccountInfo />;
     // Three separate, role-aware login screens - each its own URL and its
     // own look (PatientLogin.tsx / ClinicLogin.tsx / AdminLogin.tsx) - so
     // none of them are itself a redirect target. Every OTHER private path
@@ -149,6 +155,13 @@ function AppContent() {
   // of which role-specific screen they're currently on.
   if (location.pathname === '/notifications') {
     return framed(<NotificationsList />);
+  }
+
+  // Delete account (migration 91): patients delete theirs, clinics and staff
+  // send a request. Every role reaches it here (Profile, the clinic console's
+  // Login & staff tab, or the /delete-account link).
+  if (location.pathname === '/delete-account') {
+    return framed(<DeleteAccount />);
   }
 
   // Admin is checked first, unconditionally, and never joins the mode
@@ -261,6 +274,7 @@ export default function App() {
       <Suspense fallback={<SplashLoader />}>
         <AppContent />
       </Suspense>
+      <StatusBarBackdrop />
       {banners}
       {idleGuard}
     </div>

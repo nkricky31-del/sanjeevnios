@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launch screen on Android 11 and older: the leaf centred on the canvas colour (never stretched). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/canvas" />
+    <item android:drawable="@drawable/splash_icon" android:gravity="center" android:width="288dp" android:height="288dp" />
+</layer-list>

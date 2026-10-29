@@ -1,6 +1,7 @@
 import Loading from './ui/Loading';
 import { Copy, ShieldCheck, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { livePhoneDigits } from '../lib/phone';
 import { supabase } from '../lib/supabaseClient';
@@ -52,6 +53,7 @@ function formatPhone(phone: string): string {
 // rather than folded into ClinicBookingMode.tsx or similar, since none of
 // this is a booking setting - it's who's allowed to sign in at all.
 export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
+  const navigate = useNavigate();
   const [staff, setStaff] = useState<StaffPhoneRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [newDigits, setNewDigits] = useState('');
@@ -319,6 +321,17 @@ export default function ClinicStaffAccess({ clinic, onClinicSaved }: Props) {
         )}
         <Button variant="secondary" onClick={saveEmail} disabled={emailSaving} className="mt-3">
           {emailSaving ? 'Saving...' : 'Save email'}
+        </Button>
+      </Card>
+
+      <SectionTitle className="mt-5">Close this clinic's account</SectionTitle>
+      <Card className="mt-2">
+        <p className="text-sm leading-relaxed text-slate-600">
+          Send a request and the SanjeevniOS team will call you to confirm, then close the account. Patient records
+          your clinic created are kept for as long as the law requires.
+        </p>
+        <Button variant="danger" onClick={() => navigate('/delete-account')} className="mt-3">
+          Close account
         </Button>
       </Card>
     </div>

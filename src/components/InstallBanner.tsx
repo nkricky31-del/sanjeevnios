@@ -111,7 +111,7 @@ export function OfflineBanner() {
   return (
     <div
       role="status"
-      className="fixed inset-x-0 top-0 z-[60] flex items-center justify-center gap-2 bg-slate-900 px-3 py-1.5 text-xs font-medium text-white"
+      className="fixed inset-x-0 top-0 z-[60] flex items-center justify-center gap-2 bg-slate-900 px-3 pb-1.5 pt-[calc(0.375rem+env(safe-area-inset-top))] text-xs font-medium text-white"
     >
       <WifiOff size={13} /> You're offline. Booking and live updates need a connection.
     </div>

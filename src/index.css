@@ -110,6 +110,8 @@ body {
 /* Clinics get the warmer Nunito Sans for body text. */
 .app-scope[data-app-role='clinic'] {
   --accent: var(--color-leaf-text);
+  /* The logo's leaf turns green here (it follows --accent): a lighter stem keeps it visible. */
+  --mark-stem: #34d399;
   --font-ui: "Nunito Sans", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
 }
 .app-scope[data-app-role='admin'] {
@@ -443,3 +445,52 @@ body {
    in, so screens that load quickly never flash it. */
 @keyframes sn-loading-in { from { opacity: 0; } to { opacity: 1; } }
 .sn-loading { animation: sn-loading-in 0.25s ease 0.3s both; }
+
+/* ===========================================================================
+   The Android / iPhone app (html.native-app, lib/native.ts). On a phone the
+   coloured headers run up behind the status bar (each pads itself with
+   env(safe-area-inset-top), which is 0 on the website). In the wide layout
+   (a tablet) the status bar sits over a plain strip of the page's colour.
+   =========================================================================== */
+@media (min-width: 1024px) {
+  html.native-app body::before {
+    content: '';
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: env(safe-area-inset-top, 0px);
+    background: var(--color-canvas);
+    z-index: 1000;
+    pointer-events: none;
+  }
+}
+
+/* Behind the status bar once a page has scrolled (components/StatusBarBackdrop.tsx). */
+.native-status-backdrop {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  background: color-mix(in srgb, var(--status-strip, #16258a) 88%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  backdrop-filter: saturate(180%) blur(14px);
+}
+.native-status-backdrop.is-on {
+  opacity: 1;
+}
+@media (min-width: 1024px) {
+  .native-status-backdrop {
+    display: none;
+  }
+}
+.app-scope {
+  --status-strip: #16258a;
+}
+.app-scope[data-app-role='clinic'] {
+  --status-strip: #065f46;
+}
+.app-scope[data-app-role='admin'] {
+  --status-strip: #0b1220;
+}

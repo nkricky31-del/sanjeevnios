@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 
 import BrandMark from '../ui/BrandMark';
 import Wordmark from '../ui/Wordmark';
+import { useHeaderStatusBar } from '../../lib/native';
 import { useDarkBackdrop } from '../../lib/useDarkBackdrop';
 import { AUTH_THEMES, type AuthRole, type AuthTheme } from './authThemes';
 
@@ -185,12 +186,13 @@ function Stage({ theme }: { theme: AuthTheme }) {
 // the top of the screen, with the word and tagline over it.
 function MobileBand({ theme }: { theme: AuthTheme }) {
   const { stage } = theme;
+  useHeaderStatusBar();
   return (
-    <div className="relative h-[17.5rem] shrink-0 overflow-hidden lg:hidden" style={{ background: stage.bg }}>
+    <div className="relative h-[calc(17.5rem+env(safe-area-inset-top))] shrink-0 overflow-hidden lg:hidden" style={{ background: stage.bg }}>
       <div aria-hidden className="absolute left-[66%] top-1/2 -ml-[350px] -mt-[350px] h-[700px] w-[700px] scale-[0.5] sm:left-[60%] sm:scale-[0.6]">
         <StageArt theme={theme} />
       </div>
-      <div className="absolute inset-x-5 top-5 flex items-center justify-between">
+      <div className="absolute inset-x-5 top-[calc(1.25rem+env(safe-area-inset-top))] flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2 font-display text-[15px] font-bold tracking-[-0.02em] text-white" aria-label="SanjeevniOS home">
           <BrandMark size={30} tone="light" />
           <Wordmark dotClassName="" dotColor={stage.light} />

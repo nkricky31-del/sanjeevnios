@@ -2,6 +2,7 @@ import { Printer, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { printPage, useStatusBarText } from '../../lib/native';
 import { supabase } from '../../lib/supabaseClient';
 import type { PrescriptionDrug } from '../../lib/types';
 import { useRxLanguage } from '../../lib/useRxLanguage';
@@ -47,6 +48,8 @@ export default function PrescriptionSheet({
   onClose,
 }: Props) {
   const [language, setLanguage] = useRxLanguage();
+  // A white sheet over the screen: dark status bar text while it's open (app).
+  useStatusBarText('dark');
   const [signer, setSigner] = useState<SignerRow | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -99,12 +102,12 @@ export default function PrescriptionSheet({
       className="fixed inset-0 z-[100] overflow-y-auto bg-slate-900/40 p-0 sm:p-6"
     >
       <div className="mx-auto max-w-2xl bg-white sm:rounded-2xl sm:shadow-2xl">
-        <div className="rx-no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-white px-4 py-3 sm:rounded-t-2xl">
+        <div className="rx-no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-white px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:rounded-t-2xl sm:pt-3">
           <RxLanguageToggle value={language} onChange={setLanguage} />
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() => void printPage('Prescription')}
               className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white outline-none hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
             >
               <Printer size={16} /> Print

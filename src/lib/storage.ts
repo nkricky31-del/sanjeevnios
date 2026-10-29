@@ -1,3 +1,4 @@
+import { isNativeApp, openExternal, saveFile } from './native';
 import { supabase } from './supabaseClient';
 
 export const APPOINTMENT_FILES_BUCKET = 'appointment-files';
@@ -14,7 +15,7 @@ export async function openAppointmentFile(fileId: string): Promise<{ url: string
   if (authError || !path) return { error: authError?.message ?? 'Could not open file.' };
   const { data, error } = await supabase.storage.from(APPOINTMENT_FILES_BUCKET).createSignedUrl(path as string, 60);
   if (error || !data) return { error: 'Could not open file.' };
-  window.open(data.signedUrl, '_blank', 'noopener');
+  openExternal(data.signedUrl);
   return { url: data.signedUrl };
 }
 
@@ -27,6 +28,18 @@ export async function downloadAppointmentFile(fileId: string): Promise<{ ok: tru
     .from(APPOINTMENT_FILES_BUCKET)
     .createSignedUrl(path as string, 60, { download: (path as string).split('/').pop() ?? true });
   if (error || !data) return { error: 'Could not download file.' };
+  if (isNativeApp) {
+    // No downloads folder in the app: fetch it and offer the share sheet.
+    try {
+      const res = await fetch(data.signedUrl);
+      if (!res.ok) return { error: 'Could not download file.' };
+      const blob = await res.blob();
+      await saveFile(blob, (path as string).split('/').pop() ?? 'file', blob.type || 'application/octet-stream');
+      return { ok: true };
+    } catch {
+      return { error: 'Could not download file.' };
+    }
+  }
   const a = document.createElement('a');
   a.href = data.signedUrl;
   a.rel = 'noopener';
@@ -41,7 +54,7 @@ export async function downloadAppointmentFile(fileId: string): Promise<{ ok: tru
 export async function openVerificationDoc(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage.from(VERIFICATION_DOCS_BUCKET).createSignedUrl(path, 60);
   if (error || !data) return null;
-  window.open(data.signedUrl, '_blank', 'noopener');
+  openExternal(data.signedUrl);
   return data.signedUrl;
 }
 
@@ -51,7 +64,7 @@ export async function openVerificationDoc(path: string): Promise<string | null> 
 export async function openIdDocument(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage.from(ID_DOCUMENTS_BUCKET).createSignedUrl(path, 60);
   if (error || !data) return null;
-  window.open(data.signedUrl, '_blank', 'noopener');
+  openExternal(data.signedUrl);
   return data.signedUrl;
 }
 

@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 
-// Is the app running as an installed app (home-screen icon) rather than in a browser tab?
+import { isNativeApp } from './native';
+
+// Is the app running as an installed app (home-screen icon, or the Android /
+// iPhone app) rather than in a browser tab?
 export function isStandalone(): boolean {
   if (typeof window === 'undefined') return false;
+  if (isNativeApp) return true;
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true
@@ -10,9 +14,10 @@ export function isStandalone(): boolean {
 }
 
 // Register the offline-capable service worker (production only, so local
-// development never serves stale files).
+// development never serves stale files; never in the Android / iPhone app,
+// which carries its files inside it).
 export function registerServiceWorker() {
-  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
+  if (!import.meta.env.PROD || isNativeApp || !('serviceWorker' in navigator)) return;
   // When a new version takes over an already-controlled page, reload once so
   // the person sees the new app rather than the one they opened with.
   const hadController = Boolean(navigator.serviceWorker.controller);

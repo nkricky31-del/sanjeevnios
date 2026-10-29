@@ -39,6 +39,7 @@ import {
   type BillFonts,
   type PatientBill,
 } from '../_shared/billPdf.ts';
+import { withCors } from '../_shared/cors.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -56,9 +57,8 @@ const LINK_SECONDS = 7 * 24 * 3600;
 // Two taps on "Send again" (or completion + a quick resend) send once.
 const RESEND_COOLDOWN_MS = 60_000;
 
-const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? 'https://www.sanjeevnios.in';
+// The allowed origin is added per request (website or app): _shared/cors.ts.
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   'Vary': 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
@@ -111,9 +111,7 @@ const toWhatsAppNumber = (phone: string) => {
   return digits.length === 10 ? `91${digits}` : digits;
 };
 
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
-
+Deno.serve(withCors(CORS_HEADERS, async (req) => {
   // 1. WHO
   const auth = await authenticate(req);
   if (!auth.ok) return json({ error: auth.error }, auth.status);
@@ -275,4 +273,4 @@ Deno.serve(async (req) => {
     await audit(db, caller, isClinic || caller.isAdmin ? 'patient_bill_sent' : 'patient_bill_sent_by_patient', bill.id);
   }
   return json({ whatsapp, email: mail });
-});
+}));

@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useStatusBarText } from '../lib/native';
 import { bookingReference } from '../lib/queue';
 import { supabase } from '../lib/supabaseClient';
 import { formatTimeLabel } from '../lib/time';
@@ -64,6 +65,8 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 // health-record access (PatientProfile).
 export default function PatientBoardDetail({ row, clinicId, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // A white panel over the screen: dark status bar text while it's open (app).
+  useStatusBarText('dark');
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const onCloseRef = useRef(onClose);
   const [earlier, setEarlier] = useState<EarlierVisit[] | null>(null);
@@ -145,7 +148,7 @@ export default function PatientBoardDetail({ row, clinicId, onClose }: Props) {
         animate={{ x: 0 }}
         transition={{ type: 'tween', duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="flex items-start gap-3 border-b border-slate-100 px-5 py-4">
+        <div className="flex items-start gap-3 border-b border-slate-100 px-5 pb-4 pt-[calc(1rem+env(safe-area-inset-top))]">
           {inNow ? (
             <CheckCircle2 size={26} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden />
           ) : (

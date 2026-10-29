@@ -1,3 +1,4 @@
+import { canGetPosition, getCurrentPosition } from './native';
 import { supabase } from './supabaseClient';
 import type { CheckInLookup, CheckInMethod, CheckInResult } from './types';
 
@@ -192,8 +193,8 @@ export async function selfCheckIn(
 // makes that call, not this.
 export function getCurrentCoords(timeoutMs = 8000): Promise<{ lat: number; lng: number } | null> {
   return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
+    if (!canGetPosition()) return resolve(null);
+    getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       () => resolve(null),
       { enableHighAccuracy: true, timeout: timeoutMs }

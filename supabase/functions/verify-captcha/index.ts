@@ -10,14 +10,14 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 import { authenticate } from '../_shared/authorize.ts';
+import { withCors } from '../_shared/cors.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const TURNSTILE_SECRET_KEY = Deno.env.get('TURNSTILE_SECRET_KEY');
-const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? 'https://www.sanjeevnios.in';
 
+// The allowed origin is added per request (website or app): _shared/cors.ts.
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   'Vary': 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
@@ -29,8 +29,7 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
+Deno.serve(withCors(CORS_HEADERS, async (req) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
 
   const auth = await authenticate(req);
@@ -66,4 +65,4 @@ Deno.serve(async (req) => {
     return json({ error: 'Could not record the bot check.' }, 500);
   }
   return json({ ok: true, expiresAt: data });
-});
+}));

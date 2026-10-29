@@ -1,3 +1,4 @@
+import { saveFile } from './native';
 import { itemTextLines } from './rx';
 import type { AppointmentFile, Prescription, PrescriptionDrug, Visit } from './types';
 
@@ -62,15 +63,7 @@ export function downloadEncounterSummary(
     lines.push('No files attached.');
   }
 
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `encounter-${encounter.encounter_no}.txt`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return saveFile(lines.join('\n'), `encounter-${encounter.encounter_no}.txt`, 'text/plain;charset=utf-8');
 }
 
 function adviceLines(p: { advice_en?: string | null; advice_hi?: string | null }): string[] {
@@ -108,13 +101,5 @@ export function downloadPrescriptionText(
     ...(p.items.length ? p.items.flatMap((item, i) => itemTextLines(item, i)) : ['None recorded.']),
     ...adviceLines(p),
   ];
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `prescription-${p.id.slice(0, 8)}.txt`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return saveFile(lines.join('\n'), `prescription-${p.id.slice(0, 8)}.txt`, 'text/plain;charset=utf-8');
 }

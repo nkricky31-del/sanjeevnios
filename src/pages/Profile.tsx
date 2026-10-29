@@ -603,6 +603,14 @@ export default function Profile() {
         >
           <LogOut size={17} /> Log Out
         </button>
+        {/* Required by Google Play and the App Store; also /delete-account. */}
+        <button
+          type="button"
+          onClick={() => navigate('/delete-account')}
+          className="mt-3 w-full cursor-pointer rounded-xl py-2.5 text-center text-sm font-semibold text-slate-500 outline-none hover:text-red-600 focus-visible:ring-2 focus-visible:ring-brand-500"
+        >
+          Delete account
+        </button>
       </div>
     </div>
   );

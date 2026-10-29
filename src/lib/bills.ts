@@ -1,4 +1,5 @@
 import type { BillFonts, PatientBill } from '../../supabase/functions/_shared/billPdf.ts';
+import { saveFile as saveToDevice } from './native';
 import { supabase } from './supabaseClient';
 
 // Patient bills (migration 89): issued by the clinic when a visit is completed.
@@ -80,16 +81,9 @@ async function fontsFor(texts: Array<string | null | undefined>): Promise<BillFo
   return { regular, bold, devanagari, devanagariBold };
 }
 
-function saveFile(bytes: Uint8Array, name: string, type = 'application/pdf'): void {
-  const blob = new Blob([bytes as BlobPart], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+// A download on the website; the share sheet (Files, Drive, WhatsApp...) in the app.
+function saveFile(bytes: Uint8Array, name: string, type = 'application/pdf'): Promise<void> {
+  return saveToDevice(bytes, name, type);
 }
 
 export function billFileName(bill: Pick<PatientBill, 'doc_type' | 'bill_no'>): string {
@@ -99,7 +93,7 @@ export function billFileName(bill: Pick<PatientBill, 'doc_type' | 'bill_no'>): s
 export async function downloadBillPdf(bill: PatientBill): Promise<void> {
   const pdf = await loadPdfModule();
   const bytes = await pdf.renderBillPdf(bill, await fontsFor(pdf.billTextFields(bill)));
-  saveFile(bytes, billFileName(bill));
+  await saveFile(bytes, billFileName(bill));
 }
 
 // A clinic's statement for one patient, or its register for a date range.
@@ -126,10 +120,10 @@ export async function downloadBillListPdf(opts: {
     },
     await fontsFor(texts)
   );
-  saveFile(bytes, opts.fileName);
+  await saveFile(bytes, opts.fileName);
 }
 
-export function downloadBillsCsv(bills: PatientBill[], fileName: string): void {
+export async function downloadBillsCsv(bills: PatientBill[], fileName: string): Promise<void> {
   const header = ['Bill no', 'Type', 'Bill date', 'Patient', 'MRN', 'Doctor', 'Visit date', 'Fee', 'Discount', 'Taxable value', 'CGST', 'SGST', 'Total', 'Payment', 'Paid amount', 'Payment ref'];
   const esc = (v: unknown) => {
     const s = v == null ? '' : String(v);
@@ -143,7 +137,7 @@ export function downloadBillsCsv(bills: PatientBill[], fileName: string): void {
       PAYMENT_LABEL[b.payment_status] ?? b.payment_status, b.paid_amount, b.payment_reference,
     ].map(esc).join(',')
   );
-  saveFile(new TextEncoder().encode([header.join(','), ...lines].join('\n')), fileName, 'text/csv;charset=utf-8');
+  await saveFile(new TextEncoder().encode([header.join(','), ...lines].join('\n')), fileName, 'text/csv;charset=utf-8');
 }
 
 export type SendResult = { whatsapp: string; email: string } | { error: string };

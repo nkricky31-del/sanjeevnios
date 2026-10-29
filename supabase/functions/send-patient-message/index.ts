@@ -20,6 +20,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 import { audit, authenticate } from '../_shared/authorize.ts';
+import { withCors } from '../_shared/cors.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -33,12 +34,8 @@ const MSG91_WHATSAPP_TEMPLATE_NAME = Deno.env.get('MSG91_WHATSAPP_TEMPLATE_NAME'
 // versions.
 const MSG91_ENDPOINT = 'https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/';
 
-// Only our own site may call this from a browser (set ALLOWED_ORIGIN as a function
-// secret to allow e.g. http://localhost:5173 in a dev project).
-const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? 'https://www.sanjeevnios.in';
-
+// The allowed origin is added per request (website or app): _shared/cors.ts.
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   'Vary': 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
@@ -50,9 +47,7 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
-
+Deno.serve(withCors(CORS_HEADERS, async (req) => {
   // 1. WHO - a real, unexpired user session (see _shared/authorize.ts).
   const auth = await authenticate(req);
   if (!auth.ok) return json({ sent: false, error: auth.error }, auth.status);
@@ -142,4 +137,4 @@ Deno.serve(async (req) => {
   } catch (err) {
     return json({ sent: false, error: String(err) }, 502);
   }
-});
+}));
